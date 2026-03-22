@@ -21,8 +21,11 @@ MIKBUG 全体の完全互換は狙いませんが、電大版 BASIC が利用す
 
 ## ドキュメント
 
-- [docs/requirements.md](/Users/kuninet/git/MC6800_monitor/docs/requirements.md): 要件定義
-- [docs/memory_map.md](/Users/kuninet/git/MC6800_monitor/docs/memory_map.md): 初版メモリマップ案
+- [docs/README.md](/Users/kuninet/git/MC6800_monitor/docs/README.md): docs 全体の目次
+- [docs/requirements/monitor_requirements.md](/Users/kuninet/git/MC6800_monitor/docs/requirements/monitor_requirements.md): 要件定義
+- [docs/design/memory_map.md](/Users/kuninet/git/MC6800_monitor/docs/design/memory_map.md): 初版メモリマップ案
+- [docs/plans/implementation_plan.md](/Users/kuninet/git/MC6800_monitor/docs/plans/implementation_plan.md): 実装計画
+- [docs/progress/2026-03-22.md](/Users/kuninet/git/MC6800_monitor/docs/progress/2026-03-22.md): 初期進捗ログ
 
 ## 初版スコープ
 
@@ -60,6 +63,9 @@ MIKBUG 全体の完全互換は狙いませんが、電大版 BASIC が利用す
 - `src/`: モニタ本体
 - `src/platform/`: ボード依存部
 - `include/`: 定義値やアドレス設定
-- `docs/`: 要件定義や設計メモ
+- `docs/requirements/`: 要件定義
+- `docs/design/`: 設計資料
+- `docs/plans/`: 実装計画
+- `docs/progress/`: 進捗ログ
 
 実装前段階のため、現時点ではドキュメント整備を優先しています。

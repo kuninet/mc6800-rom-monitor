@@ -50,6 +50,11 @@ ROM を最上位 2KB に配置し、その直下に I/O 領域を置く。こう
 - ACIA data address
 - 行末判定種別
 
+## 関連ドキュメント
+
+- 要件: [../requirements/monitor_requirements.md](/Users/kuninet/git/MC6800_monitor/docs/requirements/monitor_requirements.md)
+- 実装計画: [../plans/implementation_plan.md](/Users/kuninet/git/MC6800_monitor/docs/plans/implementation_plan.md)
+
 ## 将来拡張
 
 - ビデオ出力ビルドでは別の I/O マップ定義を使う

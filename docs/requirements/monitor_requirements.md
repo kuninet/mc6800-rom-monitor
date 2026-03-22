@@ -87,13 +87,10 @@ MC6800 向けに、少ない ROM / RAM で動作する ROM モニタを実装す
 - `L SREC`: S-Record ロード
 - `L IHEX`: Intel HEX ロード
 
-## 設計指針
+## 設計上の前提
 
-- 短いサブルーチンで構成し、再利用を優先する
-- バッファは固定長で扱う
-- 文字列処理は最小限に抑える
-- フォーマットパーサは 16 進デコード処理を共有する
-- エラーメッセージは短縮し ROM 消費を抑える
+- 初版メモリマップ案は [../design/memory_map.md](/Users/kuninet/git/MC6800_monitor/docs/design/memory_map.md) を参照する
+- 実装順序は [../plans/implementation_plan.md](/Users/kuninet/git/MC6800_monitor/docs/plans/implementation_plan.md) を参照する
 
 ## 未確定事項
 
