@@ -589,22 +589,22 @@
 		(uuid "0f8db4ed-0322-49a2-a0d1-fcf4fcf700a2")
 	)
 	(wire
-		(pts (xy 60.96 71.12) (xy 241.3 71.12) (xy 241.3 119.38))
+		(pts (xy 60.96 71.12) (xy 241.3 71.12))
 		(stroke (width 0) (type default))
 		(uuid "0f8db4ed-0322-49a2-a0d1-fcf4fcf700a3")
 	)
 	(wire
-		(pts (xy 60.96 73.66) (xy 241.3 73.66) (xy 241.3 114.3))
+		(pts (xy 241.3 71.12) (xy 241.3 119.38))
 		(stroke (width 0) (type default))
 		(uuid "0f8db4ed-0322-49a2-a0d1-fcf4fcf700a4")
 	)
 	(wire
-		(pts (xy 106.68 58.42) (xy 172.72 58.42) (xy 172.72 76.2))
+		(pts (xy 60.96 73.66) (xy 241.3 73.66))
 		(stroke (width 0) (type default))
 		(uuid "0f8db4ed-0322-49a2-a0d1-fcf4fcf700a5")
 	)
 	(wire
-		(pts (xy 149.86 60.96) (xy 172.72 60.96) (xy 172.72 71.12))
+		(pts (xy 241.3 73.66) (xy 241.3 114.3))
 		(stroke (width 0) (type default))
 		(uuid "0f8db4ed-0322-49a2-a0d1-fcf4fcf700a6")
 	)
@@ -614,7 +614,7 @@
 		(uuid "0f8db4ed-0322-49a2-a0d1-fcf4fcf700a7")
 	)
 	(wire
-		(pts (xy 213.36 68.58) (xy 241.3 68.58) (xy 241.3 109.22))
+		(pts (xy 106.68 58.42) (xy 172.72 58.42))
 		(stroke (width 0) (type default))
 		(uuid "0f8db4ed-0322-49a2-a0d1-fcf4fcf700a8")
 	)
@@ -624,7 +624,7 @@
 		(uuid "0f8db4ed-0322-49a2-a0d1-fcf4fcf700a9")
 	)
 	(wire
-		(pts (xy 60.96 73.66) (xy 241.3 73.66) (xy 241.3 76.2))
+		(pts (xy 172.72 58.42) (xy 172.72 76.2))
 		(stroke (width 0) (type default))
 		(uuid "0f8db4ed-0322-49a2-a0d1-fcf4fcf700aa")
 	)
@@ -634,9 +634,49 @@
 		(uuid "0f8db4ed-0322-49a2-a0d1-fcf4fcf700ab")
 	)
 	(wire
-		(pts (xy 60.96 73.66) (xy 226.06 73.66) (xy 226.06 124.46) (xy 241.3 124.46))
+		(pts (xy 149.86 60.96) (xy 172.72 60.96))
 		(stroke (width 0) (type default))
 		(uuid "0f8db4ed-0322-49a2-a0d1-fcf4fcf700ac")
+	)
+	(wire
+		(pts (xy 172.72 60.96) (xy 172.72 71.12))
+		(stroke (width 0) (type default))
+		(uuid "0f8db4ed-0322-49a2-a0d1-fcf4fcf700b1")
+	)
+	(wire
+		(pts (xy 213.36 68.58) (xy 241.3 68.58))
+		(stroke (width 0) (type default))
+		(uuid "0f8db4ed-0322-49a2-a0d1-fcf4fcf700b2")
+	)
+	(wire
+		(pts (xy 241.3 68.58) (xy 241.3 109.22))
+		(stroke (width 0) (type default))
+		(uuid "0f8db4ed-0322-49a2-a0d1-fcf4fcf700b3")
+	)
+	(wire
+		(pts (xy 60.96 73.66) (xy 241.3 73.66))
+		(stroke (width 0) (type default))
+		(uuid "0f8db4ed-0322-49a2-a0d1-fcf4fcf700b4")
+	)
+	(wire
+		(pts (xy 241.3 73.66) (xy 241.3 76.2))
+		(stroke (width 0) (type default))
+		(uuid "0f8db4ed-0322-49a2-a0d1-fcf4fcf700b5")
+	)
+	(wire
+		(pts (xy 60.96 73.66) (xy 226.06 73.66))
+		(stroke (width 0) (type default))
+		(uuid "0f8db4ed-0322-49a2-a0d1-fcf4fcf700b6")
+	)
+	(wire
+		(pts (xy 226.06 73.66) (xy 226.06 124.46))
+		(stroke (width 0) (type default))
+		(uuid "0f8db4ed-0322-49a2-a0d1-fcf4fcf700b7")
+	)
+	(wire
+		(pts (xy 226.06 124.46) (xy 241.3 124.46))
+		(stroke (width 0) (type default))
+		(uuid "0f8db4ed-0322-49a2-a0d1-fcf4fcf700b8")
 	)
 	(text "A15..A8 = $FC"
 		(exclude_from_sim no)
