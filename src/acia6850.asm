@@ -18,7 +18,9 @@ ACIA_WAIT_RX:
         rts
 
 ACIA_PUTC:
+        psha
         bsr     ACIA_WAIT_TX
+        pula
         staa    ACIA_DATA
         rts
 
