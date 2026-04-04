@@ -43,12 +43,12 @@ $(BIN): $(OBJ)
 srec: $(SREC)
 
 $(SREC): $(OBJ)
-	$(P2HEX) -q -F Moto -M 2 -o $(SREC) $(OBJ)
+	$(P2HEX) $(OBJ) $(SREC) -q -F Moto -M 2
 
 ihex: $(IHEX)
 
 $(IHEX): $(OBJ)
-	$(P2HEX) -q -F Intel -i 1 -o $(IHEX) $(OBJ)
+	$(P2HEX) $(OBJ) $(IHEX) -q -F Intel -i 1
 
 clean:
 	$(RM_RF)
