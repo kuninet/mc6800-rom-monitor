@@ -13,10 +13,12 @@ IHEX := $(OUTDIR)/$(TARGET).hex
 
 ifeq ($(OS),Windows_NT)
 ASL_PATHSEP := ;
+ASL_INCLUDE_ARG = $(ASL_INCLUDE)
 MKDIR_P := if not exist "$(OUTDIR)" mkdir "$(OUTDIR)"
 RM_RF := if exist "$(OUTDIR)" rmdir /s /q "$(OUTDIR)"
 else
 ASL_PATHSEP := :
+ASL_INCLUDE_ARG = "$(ASL_INCLUDE)"
 MKDIR_P := mkdir -p "$(OUTDIR)"
 RM_RF := rm -rf "$(OUTDIR)"
 endif
@@ -31,7 +33,7 @@ $(OUTDIR):
 	$(MKDIR_P)
 
 $(OBJ): $(TOPSRC) include/hardware.inc include/mikbug.inc src/acia6850.asm | $(OUTDIR)
-	$(ASL) -q -L -olist $(LST) -o $(OBJ) -i '$(ASL_INCLUDE)' $(TOPSRC)
+	$(ASL) -q -L -olist $(LST) -o $(OBJ) -i $(ASL_INCLUDE_ARG) $(TOPSRC)
 
 bin: $(BIN)
 
