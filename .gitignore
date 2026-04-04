@@ -2,7 +2,9 @@
 *.map
 *.obj
 *.o
+*.p
 *.bin
 *.srec
 *.hex
 *.tmp
+build/

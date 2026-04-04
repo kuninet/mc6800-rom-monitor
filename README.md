@@ -9,6 +9,7 @@ MIKBUG 全体の完全互換は狙いませんが、電大版 BASIC が利用す
 ## 現在の前提
 
 - CPU: MC6800
+- ターゲットボード: SBC6800
 - シリアル I/O: MC6850 ACIA
 - ACIA クロック: 153.6 kHz
 - ボーレート: 9600 bps
@@ -19,6 +20,8 @@ MIKBUG 全体の完全互換は狙いませんが、電大版 BASIC が利用す
 - 初版 ROM サイズ目標: 2KB
 - 初版 RAM 想定: 8KB 以上
 
+当面の動作確認ターゲットは SBC6800 とし、ROM 差し替えで起動確認できる状態を目標にします。MINIBUG 互換ボード向けの配置検討は別課題として保留します。
+
 ## ドキュメント
 
 - [docs/README.md](/Users/kuninet/git/MC6800_monitor/docs/README.md): docs 全体の目次
@@ -26,6 +29,7 @@ MIKBUG 全体の完全互換は狙いませんが、電大版 BASIC が利用す
 - [docs/design/memory_map.md](/Users/kuninet/git/MC6800_monitor/docs/design/memory_map.md): 初版メモリマップ案
 - [docs/plans/implementation_plan.md](/Users/kuninet/git/MC6800_monitor/docs/plans/implementation_plan.md): 実装計画
 - [docs/progress/2026-03-22.md](/Users/kuninet/git/MC6800_monitor/docs/progress/2026-03-22.md): 初期進捗ログ
+- [docs/testing/sbc6800_bringup.md](/Users/kuninet/git/MC6800_monitor/docs/testing/sbc6800_bringup.md): SBC6800 実機確認手順
 
 ## 初版スコープ
 
@@ -57,6 +61,28 @@ MIKBUG 全体の完全互換は狙いませんが、電大版 BASIC が利用す
 - メモリマップと I/O アドレスは定義切り替えで再ビルド可能にする
 - 2KB ROM 制約を優先し、初版では保存やデバッグ機能を削る
 - MIKBUG 互換は BASIC が使う I/O 入口に限定する
+
+## ビルド
+
+現在のフェーズ1では GNU make から次の生成物を作れるようにしています。
+
+- `make srec`: Motorola S-record を生成
+- `make ihex`: Intel HEX を生成
+- `make bin`: ROM イメージのバイナリを生成
+- `make`: S-record と Intel HEX をまとめて生成
+
+SBC6800 前提の現在値:
+
+- ROM: `$E000-$FFFF`
+- RAM: `$0000-$1FFF`
+- ACIA control/status: `$8018`
+- ACIA data: `$8019`
+
+前提ツール:
+
+- `asl`
+- `p2bin`
+- `p2hex`
 
 ## 想定ディレクトリ構成
 
