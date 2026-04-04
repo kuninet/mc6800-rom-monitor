@@ -1,7 +1,7 @@
         cpu     6800
 
-        include "hardware.inc"
-        include "mikbug.inc"
+        include "../include/hardware.inc"
+        include "../include/mikbug.inc"
 
         org     ROM_BASE
 
