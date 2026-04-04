@@ -8,6 +8,8 @@
 RESET:
         lds     #STACK_TOP
         jsr     ACIA_INIT
+        ldaa    #'*'
+        jsr     OUTEEE
 
 MAIN_LOOP:
         jsr     INEEE
