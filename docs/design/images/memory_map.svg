@@ -21,7 +21,8 @@
 
   <rect x="160" y="210" width="470" height="292" class="box" fill="#fde9b8"/>
   <text x="188" y="245" class="label">ROM 領域</text>
-  <text x="188" y="270" class="small">モニタ本体、起動コード、MIKBUG 互換 I/O 入口、将来の CLI を配置</text>
+  <text x="188" y="270" class="small">モニタ本体、起動コード、MIKBUG 互換 I/O 入口を配置</text>
+  <text x="188" y="292" class="mini">将来の CLI や補助ルーチンをここに追加していく</text>
   <text x="665" y="360" class="addr">$E000-$FFFF</text>
 
   <rect x="200" y="300" width="390" height="86" class="box" fill="#fff5d8"/>
@@ -36,7 +37,8 @@
 
   <rect x="160" y="520" width="470" height="170" class="box" fill="#eceff3"/>
   <text x="188" y="555" class="label">未使用 / 拡張領域</text>
-  <text x="188" y="580" class="small">将来の周辺、追加 RAM、ビデオ回路、別ボード向け I/O マップ候補</text>
+  <text x="188" y="580" class="small">将来の周辺、追加 RAM、ビデオ回路向けの空き領域</text>
+  <text x="188" y="602" class="mini">MINIBUG 互換ボードや別 I/O マップの候補もここで吸収する</text>
   <text x="665" y="606" class="addr">$8000-$DFFF</text>
 
   <rect x="210" y="610" width="370" height="50" class="box" fill="#dde8ff"/>
@@ -65,7 +67,7 @@
 
   <line x1="655" y1="120" x2="655" y2="1100" class="thin"/>
   <text x="673" y="136" class="mini">高位アドレス</text>
-  <text x="673" y="1096" class="mini">低位アドレス</text>
+  <text x="673" y="1080" class="mini">低位アドレス</text>
 
   <rect x="44" y="1116" width="796" height="36" rx="10" ry="10" fill="#f0f4f8" stroke="#cbd5e1" stroke-width="1.5"/>
   <text x="62" y="1140" class="mini">方針: SBC6800 既存資産との整合を優先し、ROM = $E000-$FFFF / ACIA = $8018-$8019 / RAM = $0000-$1FFF とする</text>

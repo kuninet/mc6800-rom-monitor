@@ -33,9 +33,10 @@
   <text x="360" y="186" class="small">アドレス定義 / ボード差分</text>
   <text x="360" y="210" class="small">ACIA 初期化 / 1文字入出力</text>
   <text x="360" y="234" class="small">起動確認マーカー</text>
-  <text x="360" y="264" class="mini">files: hardware.inc / acia6850.asm / main.asm</text>
-  <rect x="350" y="258" width="92" height="24" class="box" fill="#fff6de"/>
-  <text x="368" y="275" class="phase">Phase 1</text>
+  <text x="360" y="252" class="mini">files: hardware.inc / acia6850.asm</text>
+  <text x="360" y="270" class="mini">main.asm</text>
+  <rect x="350" y="272" width="92" height="24" class="box" fill="#fff6de"/>
+  <text x="368" y="289" class="phase">Phase 1</text>
 
   <rect x="640" y="120" width="260" height="180" class="box" fill="#e5f3dd"/>
   <text x="670" y="156" class="label">共通基盤層</text>
@@ -43,8 +44,8 @@
   <text x="670" y="210" class="small">CR-LF 正規化 / 16進変換</text>
   <text x="670" y="234" class="small">短いメッセージ出力</text>
   <text x="670" y="264" class="mini">CLI とローダの共通部品</text>
-  <rect x="660" y="258" width="92" height="24" class="box" fill="#eef8ea"/>
-  <text x="678" y="275" class="phase">Phase 2</text>
+  <rect x="660" y="272" width="92" height="24" class="box" fill="#eef8ea"/>
+  <text x="678" y="289" class="phase">Phase 2</text>
 
   <rect x="950" y="120" width="230" height="180" class="box" fill="#d8eff6"/>
   <text x="980" y="156" class="label">モニタコア</text>
@@ -52,8 +53,8 @@
   <text x="980" y="210" class="small">メモリダンプ / 変更</text>
   <text x="980" y="234" class="small">指定アドレス実行</text>
   <text x="980" y="264" class="mini">将来: レジスタ表示</text>
-  <rect x="970" y="258" width="92" height="24" class="box" fill="#e8f8fc"/>
-  <text x="988" y="275" class="phase">Phase 3</text>
+  <rect x="970" y="272" width="92" height="24" class="box" fill="#e8f8fc"/>
+  <text x="988" y="289" class="phase">Phase 3</text>
 
   <rect x="780" y="390" width="320" height="210" class="box" fill="#ecebfd"/>
   <text x="810" y="426" class="label">ローダ / 将来拡張層</text>
@@ -61,7 +62,7 @@
   <text x="810" y="480" class="small">Intel HEX ロード</text>
   <text x="810" y="504" class="small">保存機能 / ソフトウェアブレーク</text>
   <text x="810" y="528" class="small">ビデオ出力対応</text>
-  <text x="810" y="558" class="mini">現時点では別層として分離し、ROM 制約を見ながら追加</text>
+  <text x="810" y="558" class="mini">別層として分離し、ROM 制約を見ながら追加する</text>
   <rect x="800" y="552" width="92" height="24" class="box" fill="#f3f2ff"/>
   <text x="818" y="569" class="phase">Phase 4+</text>
 
