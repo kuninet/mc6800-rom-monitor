@@ -134,6 +134,21 @@ make rombin ROM_KIND=27C64
 make program ROM_KIND=27C64
 ```
 
+## macOS での実績
+
+確認できている実績は次の通り。
+
+- `minipro --version` で `TL866II+` を認識
+- `minipro -t` の自己診断は成功
+- `minipro -r` の読み出しは成功
+- `make program-w27c512` で `W27C512` の erase / write / read / verify が成功
+
+成功時の条件:
+
+- `TL866II Plus` を `セルフパワーUSBハブ` 経由で接続
+- `W27C512@DIP28`
+- `make program-w27c512`
+
 ## 省略形ターゲット
 
 よく使うものは専用ターゲットも用意してある。
@@ -205,12 +220,22 @@ macOS で `minipro` を使った書き込みでは、少なくとも一部の環
 - 消去も成功する
 - しかし書き込みだけ途中で `LIBUSB_TRANSFER_TIMED_OUT` になることがある
 
+一方で、同じ macOS 環境でも `セルフパワーUSBハブ` を経由させたところ、`W27C512` の書き込みは成功した。
+
+そのため、macOS で timeout が出る場合は次を優先して試す。
+
+- `TL866II Plus` をセルフパワーUSBハブ経由で接続する
+- USB ポートを変える
+- 直結とハブ経由を入れ替えて比較する
+- `minipro --version`、`minipro -t`、`minipro -r` の順で切り分ける
+
 この現象は `W27C512` だけでなく `28C256` 系でも確認した。少なくともこのリポジトリの確認環境では、`macOS + minipro + TL866II Plus` の組み合わせで書き込みが安定しない場合がある。
 
 そのため、現時点では次の運用が現実的である。
 
-- UNIX 系環境ではビルドと ROM イメージ生成まで行う
-- 実際の書き込みは Windows の純正ソフトを継続利用する
+- UNIX 系環境ではビルドと ROM イメージ生成を行う
+- macOS ではセルフパワーUSBハブ経由を優先して試す
+- それでも不安定なら Windows の純正ソフトを使う
 - もしくは WSL 2 側の Linux `minipro` を試す
 
 ## 実装メモ
