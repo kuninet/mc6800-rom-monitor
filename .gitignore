@@ -8,3 +8,5 @@
 *.hex
 *.tmp
 build/
+sample/
+blog_work/
