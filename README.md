@@ -30,6 +30,7 @@ MIKBUG 全体の完全互換は狙いませんが、電大版 BASIC が利用す
 - [docs/plans/implementation_plan.md](/Users/kuninet/git/MC6800_monitor/docs/plans/implementation_plan.md): 実装計画
 - [docs/progress/2026-03-22.md](/Users/kuninet/git/MC6800_monitor/docs/progress/2026-03-22.md): 初期進捗ログ
 - [docs/testing/sbc6800_bringup.md](/Users/kuninet/git/MC6800_monitor/docs/testing/sbc6800_bringup.md): SBC6800 実機確認手順
+- [docs/testing/macos_tl866ii_plus.md](/Users/kuninet/git/MC6800_monitor/docs/testing/macos_tl866ii_plus.md): UNIX 系環境で TL866II Plus を使う手順
 
 ## 初版スコープ
 
@@ -83,6 +84,7 @@ SBC6800 前提の現在値:
 - `asl`
 - `p2bin`
 - `p2hex`
+- `minipro`
 
 ## 想定ディレクトリ構成
 
