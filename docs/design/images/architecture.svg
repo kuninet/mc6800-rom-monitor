@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="820" viewBox="0 0 1240 820">
+  <style>
+    .title { font: 700 30px sans-serif; fill: #1f2937; }
+    .subtitle { font: 600 16px sans-serif; fill: #4b5563; }
+    .label { font: 700 20px sans-serif; fill: #1f2937; }
+    .small { font: 15px sans-serif; fill: #374151; }
+    .mini { font: 13px sans-serif; fill: #4b5563; }
+    .phase { font: 700 14px sans-serif; fill: #111827; }
+    .box { stroke: #374151; stroke-width: 2.5; rx: 16; ry: 16; }
+    .arrow { stroke: #475569; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+    .dashed { stroke-dasharray: 8 8; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+  </defs>
+
+  <rect width="100%" height="100%" fill="#fbfbfd"/>
+  <text x="44" y="58" class="title">MC6800 ROM モニタ アーキテクチャ</text>
+  <text x="44" y="88" class="subtitle">小さな ROM で段階的に拡張するため、依存部・共通部・機能層を分けて組み立てる</text>
+
+  <rect x="64" y="134" width="220" height="150" class="box" fill="#f8d9d7"/>
+  <text x="96" y="168" class="label">ハードウェア</text>
+  <text x="96" y="198" class="small">MC6800 CPU</text>
+  <text x="96" y="222" class="small">MC6850 ACIA</text>
+  <text x="96" y="246" class="small">RAM / ROM / ベクタ</text>
+  <rect x="84" y="252" width="92" height="24" class="box" fill="#fff4f4"/>
+  <text x="102" y="269" class="phase">実機基盤</text>
+
+  <rect x="330" y="120" width="260" height="180" class="box" fill="#fde8b7"/>
+  <text x="360" y="156" class="label">ハードウェア依存層</text>
+  <text x="360" y="186" class="small">アドレス定義 / ボード差分</text>
+  <text x="360" y="210" class="small">ACIA 初期化 / 1文字入出力</text>
+  <text x="360" y="234" class="small">起動確認マーカー</text>
+  <text x="360" y="264" class="mini">files: hardware.inc / acia6850.asm / main.asm</text>
+  <rect x="350" y="258" width="92" height="24" class="box" fill="#fff6de"/>
+  <text x="368" y="275" class="phase">Phase 1</text>
+
+  <rect x="640" y="120" width="260" height="180" class="box" fill="#e5f3dd"/>
+  <text x="670" y="156" class="label">共通基盤層</text>
+  <text x="670" y="186" class="small">1行入力 / バックスペース</text>
+  <text x="670" y="210" class="small">CR-LF 正規化 / 16進変換</text>
+  <text x="670" y="234" class="small">短いメッセージ出力</text>
+  <text x="670" y="264" class="mini">CLI とローダの共通部品</text>
+  <rect x="660" y="258" width="92" height="24" class="box" fill="#eef8ea"/>
+  <text x="678" y="275" class="phase">Phase 2</text>
+
+  <rect x="950" y="120" width="230" height="180" class="box" fill="#d8eff6"/>
+  <text x="980" y="156" class="label">モニタコア</text>
+  <text x="980" y="186" class="small">コマンド解釈</text>
+  <text x="980" y="210" class="small">メモリダンプ / 変更</text>
+  <text x="980" y="234" class="small">指定アドレス実行</text>
+  <text x="980" y="264" class="mini">将来: レジスタ表示</text>
+  <rect x="970" y="258" width="92" height="24" class="box" fill="#e8f8fc"/>
+  <text x="988" y="275" class="phase">Phase 3</text>
+
+  <rect x="780" y="390" width="320" height="210" class="box" fill="#ecebfd"/>
+  <text x="810" y="426" class="label">ローダ / 将来拡張層</text>
+  <text x="810" y="456" class="small">Motorola S-Record ロード</text>
+  <text x="810" y="480" class="small">Intel HEX ロード</text>
+  <text x="810" y="504" class="small">保存機能 / ソフトウェアブレーク</text>
+  <text x="810" y="528" class="small">ビデオ出力対応</text>
+  <text x="810" y="558" class="mini">現時点では別層として分離し、ROM 制約を見ながら追加</text>
+  <rect x="800" y="552" width="92" height="24" class="box" fill="#f3f2ff"/>
+  <text x="818" y="569" class="phase">Phase 4+</text>
+
+  <line x1="284" y1="208" x2="330" y2="208" class="arrow"/>
+  <line x1="590" y1="208" x2="640" y2="208" class="arrow"/>
+  <line x1="900" y1="208" x2="950" y2="208" class="arrow"/>
+  <line x1="1065" y1="300" x2="1065" y2="390" class="arrow"/>
+
+  <text x="420" y="96" class="mini">実装済み</text>
+  <text x="706" y="96" class="mini">次フェーズ</text>
+  <text x="1010" y="96" class="mini">機能追加</text>
+
+  <rect x="64" y="380" width="650" height="220" class="box" fill="#f8fafc"/>
+  <text x="94" y="416" class="label">データの流れ</text>
+
+  <rect x="94" y="450" width="250" height="56" class="box" fill="#fff7ed"/>
+  <text x="116" y="484" class="small">端末入力 → ACIA 受信</text>
+  <rect x="384" y="450" width="250" height="56" class="box" fill="#eefcf2"/>
+  <text x="406" y="484" class="small">1文字入力 → 行入力 / 16進変換</text>
+  <line x1="344" y1="478" x2="384" y2="478" class="arrow"/>
+
+  <rect x="94" y="526" width="250" height="56" class="box" fill="#edf5ff"/>
+  <text x="116" y="560" class="small">コマンド解釈 → メモリ操作</text>
+  <rect x="384" y="526" width="250" height="56" class="box" fill="#f5f3ff"/>
+  <text x="406" y="560" class="small">メッセージ生成 → 文字出力</text>
+  <line x1="509" y1="506" x2="509" y2="526" class="arrow dashed"/>
+  <line x1="634" y1="554" x2="704" y2="554" class="arrow"/>
+  <text x="468" y="516" class="mini">監視・制御</text>
+  <text x="590" y="544" class="mini">送信</text>
+
+  <rect x="64" y="650" width="1116" height="94" class="box" fill="#f4f5f7"/>
+  <text x="92" y="684" class="label">実装フェーズの並び</text>
+  <text x="92" y="715" class="small">Phase 1: ACIA 最小層 → Phase 2: 対話基盤 → Phase 3: モニタ基本機能 → Phase 4: Hex ローダ / 拡張</text>
+</svg>
