@@ -1,20 +1,73 @@
-# macOS で TL866II Plus を使って ROM を書き込む
+# UNIX 系環境で TL866II Plus を使って ROM を書き込む
 
 ## 目的
 
-`TL866II Plus` を macOS から使い、ビルド結果から ROM ライタ向けバイナリを生成して `minipro` で書き込む。
+`TL866II Plus` を UNIX 系環境から使い、ビルド結果から ROM ライタ向けバイナリを生成して `minipro` で書き込む。
 
 ## 前提
 
-- `Homebrew` が使える
+- `minipro` が動く UNIX 系環境がある
 - ライタは `TL866II Plus`
 - 書き込みツールは `minipro`
 
-## インストール
+## 想定する環境
+
+- macOS
+- Linux
+- Windows 上の WSL 2
+
+Makefile の `rombin` / `program` / `verify` / `readback` ターゲットは、`minipro` と `p2bin` が使える UNIX 系環境であれば基本的に同じ手順で使える。
+
+## macOS でのインストール
 
 ```bash
 brew install minipro
 ```
+
+## Linux でのインストール例
+
+ディストリビューションごとにパッケージ名は異なるが、少なくとも `minipro` と `libusb` 系が必要になる。
+
+例:
+
+```bash
+sudo apt install minipro
+```
+
+## WSL 2 での参考手順
+
+WSL 2 では USB デバイスをそのまま Linux 側から使えないため、`usbipd-win` を使って TL866II Plus を WSL へアタッチする必要がある。
+
+公式:
+- [Microsoft Learn: USB デバイスを接続する](https://learn.microsoft.com/ja-jp/windows/wsl/connect-usb)
+
+大まかな流れは次の通り。
+
+1. Windows 側で `usbipd-win` を入れる
+2. `wsl --update` で WSL を最新化する
+3. 管理者権限の PowerShell で `usbipd list` を実行する
+4. TL866II Plus の bus id を確認して `usbipd bind --busid <busid>` を実行する
+5. 通常権限の PowerShell で `usbipd attach --wsl --busid <busid>` を実行する
+6. WSL 側で `lsusb` や `minipro --version` で認識を確認する
+
+例:
+
+```powershell
+winget install --interactive --exact dorssel.usbipd-win
+wsl --update
+usbipd list
+usbipd bind --busid 4-4
+usbipd attach --wsl --busid 4-4
+```
+
+WSL 側:
+
+```bash
+lsusb
+minipro --version
+```
+
+WSL にアタッチしている間、その USB デバイスは Windows ネイティブ側からは使えない点に注意する。
 
 ## 方針
 
@@ -127,6 +180,38 @@ build/mc6800-monitor-W27C512-readback.bin
 ```bash
 make program ROM_KIND=W27C512 MINIPRO_DEVICE=W27C512@DIP28
 ```
+
+まず使えるデバイス名を確認するには次を使う。
+
+```bash
+minipro -l | rg '27C64|27C256|28C256|W27C512|UPD28C256'
+```
+
+プログラマの接続状況確認は次でよい。
+
+```bash
+minipro --version
+```
+
+接続されていれば `Found TL866II+` のように表示される。
+
+## 既知の制約
+
+macOS で `minipro` を使った書き込みでは、少なくとも一部の環境で次の現象を確認している。
+
+- `minipro --version` では TL866II Plus を認識する
+- `minipro -t` の自己診断は成功する
+- `minipro -r` の読み出しは成功する
+- 消去も成功する
+- しかし書き込みだけ途中で `LIBUSB_TRANSFER_TIMED_OUT` になることがある
+
+この現象は `W27C512` だけでなく `28C256` 系でも確認した。少なくともこのリポジトリの確認環境では、`macOS + minipro + TL866II Plus` の組み合わせで書き込みが安定しない場合がある。
+
+そのため、現時点では次の運用が現実的である。
+
+- UNIX 系環境ではビルドと ROM イメージ生成まで行う
+- 実際の書き込みは Windows の純正ソフトを継続利用する
+- もしくは WSL 2 側の Linux `minipro` を試す
 
 ## 実装メモ
 
