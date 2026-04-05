@@ -23,6 +23,7 @@
 
 - [requirements/monitor_requirements.md](/Users/kuninet/git/MC6800_monitor/docs/requirements/monitor_requirements.md)
 - [design/memory_map.md](/Users/kuninet/git/MC6800_monitor/docs/design/memory_map.md)
+- [design/architecture.md](/Users/kuninet/git/MC6800_monitor/docs/design/architecture.md)
 - [plans/implementation_plan.md](/Users/kuninet/git/MC6800_monitor/docs/plans/implementation_plan.md)
 - [testing/sbc6800_bringup.md](/Users/kuninet/git/MC6800_monitor/docs/testing/sbc6800_bringup.md)
 - [testing/macos_tl866ii_plus.md](/Users/kuninet/git/MC6800_monitor/docs/testing/macos_tl866ii_plus.md): UNIX 系環境で TL866II Plus を使う手順
