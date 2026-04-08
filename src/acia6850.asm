@@ -35,8 +35,10 @@ OUTEEE:
         pula
         cmpa    #CHR_CR
         bne     OUTEEE_DONE
+        psha
         ldaa    #CHR_LF
         jsr     ACIA_PUTC
+        pula
 OUTEEE_DONE:
         rts
 
