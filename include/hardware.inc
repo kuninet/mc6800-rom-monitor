@@ -12,6 +12,16 @@ ACIA_DATA        equ $8019
 
 CHR_CR           equ $0D
 CHR_LF           equ $0A
+CHR_BS           equ $08
+CHR_DEL          equ $7F
+CHR_SPACE        equ $20
+CHR_PROMPT       equ ']'
+CHR_ECHO         equ '='
+
+LINE_BUF_SIZE    equ 32
+LINE_BUF         equ RAM_START
+LINE_PTR         equ LINE_BUF+LINE_BUF_SIZE
+LINE_LEN         equ LINE_PTR+2
 
 ACIA_STAT_RDRF   equ $01
 ACIA_STAT_TDRE   equ $02
