@@ -148,7 +148,7 @@ sudo apt-get install -y build-essential pkg-config git libusb-1.0-0-dev usbutils
 
 ```bash
 cd ~
-git clone https://github.com/vdudouyt/minipro.git
+git clone https://gitlab.com/DavidGriffith/minipro.git
 cd ~/minipro
 make
 sudo make install
