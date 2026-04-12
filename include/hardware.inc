@@ -17,11 +17,15 @@ CHR_DEL          equ $7F
 CHR_SPACE        equ $20
 CHR_PROMPT       equ ']'
 CHR_ECHO         equ '='
+CHR_QUESTION     equ '?'
 
 LINE_BUF_SIZE    equ 32
 LINE_BUF         equ RAM_START
 LINE_PTR         equ LINE_BUF+LINE_BUF_SIZE
 LINE_LEN         equ LINE_PTR+2
+HEX_VALUE_HI     equ LINE_LEN+1
+HEX_VALUE_LO     equ HEX_VALUE_HI+1
+HEX_NIBBLE       equ HEX_VALUE_LO+1
 
 ACIA_STAT_RDRF   equ $01
 ACIA_STAT_TDRE   equ $02
