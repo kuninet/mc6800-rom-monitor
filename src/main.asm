@@ -16,7 +16,12 @@ RESET:
 MAIN_LOOP:
         jsr     PRINT_PROMPT
         jsr     READ_LINE
-        jsr     ECHO_LINE
+        jsr     PARSE_HEX_LINE
+        bcs     MAIN_LOOP_ERROR
+        bra     MAIN_LOOP
+
+MAIN_LOOP_ERROR:
+        jsr     SHOW_ERROR
         bra     MAIN_LOOP
 
 PRINT_PROMPT:
@@ -78,27 +83,86 @@ READ_LINE_DONE:
         jsr     OUTEEE
         rts
 
-ECHO_LINE:
-        ldaa    #CHR_ECHO
+SHOW_ERROR:
+        ldaa    #CHR_QUESTION
         jsr     OUTEEE
-        ldaa    #CHR_SPACE
-        jsr     OUTEEE
-
-        ldab    LINE_LEN
-        ldx     #LINE_BUF
-
-ECHO_LINE_LOOP:
-        cmpb    #0
-        beq     ECHO_LINE_DONE
-        ldaa    0,x
-        jsr     OUTEEE
-        inx
-        decb
-        bra     ECHO_LINE_LOOP
-
-ECHO_LINE_DONE:
         ldaa    #CHR_CR
         jsr     OUTEEE
+        rts
+
+PARSE_HEX_LINE:
+        ldab    LINE_LEN
+        beq     PARSE_HEX_FAIL
+        cmpb    #5
+        bhs     PARSE_HEX_FAIL
+
+        clr     HEX_VALUE_HI
+        clr     HEX_VALUE_LO
+        ldx     #LINE_BUF
+
+PARSE_HEX_LOOP:
+        ldaa    0,x
+        jsr     HEX_TO_NIBBLE
+        bcs     PARSE_HEX_FAIL
+        staa    HEX_NIBBLE
+
+        asl     HEX_VALUE_LO
+        rol     HEX_VALUE_HI
+        asl     HEX_VALUE_LO
+        rol     HEX_VALUE_HI
+        asl     HEX_VALUE_LO
+        rol     HEX_VALUE_HI
+        asl     HEX_VALUE_LO
+        rol     HEX_VALUE_HI
+
+        ldaa    HEX_VALUE_LO
+        adda    HEX_NIBBLE
+        staa    HEX_VALUE_LO
+        bcc     PARSE_HEX_NEXT
+        inc     HEX_VALUE_HI
+
+PARSE_HEX_NEXT:
+        inx
+        decb
+        bne     PARSE_HEX_LOOP
+        clc
+        rts
+
+PARSE_HEX_FAIL:
+        sec
+        rts
+
+HEX_TO_NIBBLE:
+        cmpa    #'0'
+        blo     HEX_TO_NIBBLE_FAIL
+        cmpa    #'9'
+        bls     HEX_TO_NIBBLE_DEC
+        cmpa    #'A'
+        blo     HEX_TO_NIBBLE_LOWER
+        cmpa    #'F'
+        bls     HEX_TO_NIBBLE_UPPER
+
+HEX_TO_NIBBLE_LOWER:
+        cmpa    #'a'
+        blo     HEX_TO_NIBBLE_FAIL
+        cmpa    #'f'
+        bhi     HEX_TO_NIBBLE_FAIL
+        suba    #'a'-10
+        clc
+        rts
+
+HEX_TO_NIBBLE_UPPER:
+        suba    #'A'-10
+        clc
+        rts
+
+HEX_TO_NIBBLE_DEC:
+        suba    #'0'
+        clc
+        rts
+
+HEX_TO_NIBBLE_FAIL:
+        sec
         rts
 
 SPURIOUS_IRQ:
