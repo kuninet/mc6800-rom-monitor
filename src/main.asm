@@ -7,6 +7,8 @@
 
 RESET:
         lds     #STACK_TOP
+        clr     DUMP_ADDR
+        clr     DUMP_ADDR+1
         jsr     ACIA_INIT
         ldaa    #'*'
         jsr     OUTEEE
@@ -346,7 +348,7 @@ SPURIOUS_IRQ:
         include "acia6850.asm"
 
         org     VEC_IRQ
-        fdb     SPURIOUS_IRQ
-        fdb     SPURIOUS_IRQ
-        fdb     SPURIOUS_IRQ
-        fdb     RESET
+        fdb     SPURIOUS_IRQ     ; VEC_IRQ
+        fdb     RESET            ; VEC_SWI (Return to monitor via SWI)
+        fdb     SPURIOUS_IRQ     ; VEC_NMI
+        fdb     RESET            ; VEC_RESET
