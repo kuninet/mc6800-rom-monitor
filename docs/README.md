@@ -31,3 +31,4 @@
 - [progress/2026-03-22.md](/Users/kuninet/git/MC6800_monitor/docs/progress/2026-03-22.md)
 - [progress/2026-04-05.md](/Users/kuninet/git/MC6800_monitor/docs/progress/2026-04-05.md)
 - [progress/2026-04-08.md](/Users/kuninet/git/MC6800_monitor/docs/progress/2026-04-08.md)
+- [progress/2026-04-14.md](/Users/kuninet/git/MC6800_monitor/docs/progress/2026-04-14.md)
