@@ -7,9 +7,16 @@ MC6800 の全命令ではなく、ROM モニタが使用する命令のみ実装
 
 import sys
 import os
-import select
-import tty
-import termios
+
+# プラットフォーム判定
+_IS_WINDOWS = (os.name == 'nt')
+
+if _IS_WINDOWS:
+    import msvcrt
+else:
+    import select
+    import tty
+    import termios
 
 # ---------------------------------------------------------------------------
 # メモリマップ定数（hardware.inc と一致させる）
@@ -41,7 +48,7 @@ class ACIA:
         self._input_pos = 0
         self._interactive = input_data is None
         self._old_termios = None
-        if self._interactive and sys.stdin.isatty():
+        if self._interactive and sys.stdin.isatty() and not _IS_WINDOWS:
             self._old_termios = termios.tcgetattr(sys.stdin)
             tty.setcbreak(sys.stdin.fileno())
 
@@ -70,11 +77,17 @@ class ACIA:
                 raise SystemExit(0)
         else:
             # 対話モード
-            ch = sys.stdin.read(1)
-            if ch == '':
-                raise SystemExit(0)
-            val = ord(ch)
-            # Mac/Linux の Enter (LF) をモニタが期待する CR に変換
+            if _IS_WINDOWS:
+                # Windows: msvcrt で1文字取得
+                ch = msvcrt.getch()
+                val = ch[0] if isinstance(ch, bytes) else ord(ch)
+            else:
+                # Unix: stdin から1文字取得
+                ch = sys.stdin.read(1)
+                if ch == '':
+                    raise SystemExit(0)
+                val = ord(ch)
+            # Enter キー (LF or CR) をモニタが期待する CR に変換
             if val == 0x0A:
                 val = 0x0D
             return val
@@ -93,6 +106,8 @@ class ACIA:
         """入力データが存在するか"""
         if self._input_data is not None:
             return self._input_pos < len(self._input_data)
+        if _IS_WINDOWS:
+            return msvcrt.kbhit()
         if sys.stdin.isatty():
             dr, _, _ = select.select([sys.stdin], [], [], 0)
             return len(dr) > 0
