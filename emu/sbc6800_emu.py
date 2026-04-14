@@ -73,7 +73,11 @@ class ACIA:
             ch = sys.stdin.read(1)
             if ch == '':
                 raise SystemExit(0)
-            return ord(ch)
+            val = ord(ch)
+            # Mac/Linux の Enter (LF) をモニタが期待する CR に変換
+            if val == 0x0A:
+                val = 0x0D
+            return val
 
     def write_data(self, value):
         """ACIA データレジスタへ書く（1文字送信）"""
