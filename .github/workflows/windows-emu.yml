@@ -28,10 +28,11 @@ jobs:
             throw "ASL zip not found under third_party/asl"
           }
           Expand-Archive -Path $zip.FullName -DestinationPath third_party/asl -Force
-          $root = Get-ChildItem third_party/asl -Directory | Where-Object { $_.Name -like 'asw-*' } | Sort-Object Name | Select-Object -First 1
-          if (-not $root) {
-            throw "Extracted ASL directory not found"
+          $asl = Get-ChildItem third_party/asl -Recurse -File -Filter asl.exe | Select-Object -First 1
+          if (-not $asl) {
+            throw "asl.exe not found after extracting ASL zip"
           }
+          $root = Split-Path -Parent (Split-Path -Parent $asl.FullName)
           "ASL_ROOT=$($root.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build ROM binary
