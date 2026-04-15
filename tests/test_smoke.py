@@ -19,6 +19,8 @@ FIXTURE_ROM_PATH = PROJECT_ROOT / "tests" / "fixtures" / "mc6800-monitor.bin"
 def rom_path() -> Path:
     if BUILD_ROM_PATH.exists():
         return BUILD_ROM_PATH
+    if os.environ.get("REQUIRE_BUILD_ROM") == "1":
+        return BUILD_ROM_PATH
     return FIXTURE_ROM_PATH
 
 
@@ -113,7 +115,10 @@ def main():
     rom = rom_path()
     if not rom.exists():
         print(f"[FAIL] ROM binary not found: {rom}")
-        print("       Run `make bin` first, or provide tests/fixtures/mc6800-monitor.bin.")
+        if os.environ.get("REQUIRE_BUILD_ROM") == "1":
+            print("       CI requires a freshly built build/mc6800-monitor.bin.")
+        else:
+            print("       Run `make bin` first, or provide tests/fixtures/mc6800-monitor.bin.")
         sys.exit(1)
 
     tests = [

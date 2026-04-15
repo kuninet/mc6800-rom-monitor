@@ -13,3 +13,4 @@ sample/
 blog_work/
 !tests/fixtures/
 !tests/fixtures/mc6800-monitor.bin
+third_party/asl/asw-*/

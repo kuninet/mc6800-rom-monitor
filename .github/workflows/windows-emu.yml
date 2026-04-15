@@ -20,5 +20,31 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Extract ASL toolchain
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem third_party/asl/*.zip | Select-Object -First 1
+          if (-not $zip) {
+            throw "ASL zip not found under third_party/asl"
+          }
+          Expand-Archive -Path $zip.FullName -DestinationPath third_party/asl -Force
+          $root = Get-ChildItem third_party/asl -Directory | Where-Object { $_.Name -like 'asw-*' } | Sort-Object Name | Select-Object -First 1
+          if (-not $root) {
+            throw "Extracted ASL directory not found"
+          }
+          "ASL_ROOT=$($root.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build ROM binary
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build | Out-Null
+          $include = "$pwd\include;$pwd\src"
+          & "$env:ASL_ROOT\bin\asl.exe" -q -L -olist build\mc6800-monitor.lst -o build\mc6800-monitor.p -i $include src\main.asm
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$env:ASL_ROOT\bin\p2bin.exe" build\mc6800-monitor.p build\mc6800-monitor.bin -q
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Run emulator smoke tests
+        env:
+          REQUIRE_BUILD_ROM: "1"
         run: python tests/test_smoke.py
