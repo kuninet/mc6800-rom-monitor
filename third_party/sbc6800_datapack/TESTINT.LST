@@ -1,0 +1,158 @@
+    1                   *       SBC6800 ECHOBACK
+    2                   *       BY INTERRUPT
+    3                   *
+    4                   *       ADDRESS
+    5 8018              ACIACS     EQU      $8018
+    6 8019              ACIADA     EQU      $8019
+    7 E000              ROM        EQU      $E000
+    8 0000              RAM        EQU      $0000
+    9 1FFF              STACK      EQU      $1FFF
+   10                   *
+   11                   *       RECIVE BUFFER
+   12 0010              BUFSIZ     EQU      $10
+   13 000F              BUFMSK     EQU      $0F
+   14                   *
+   15                   *       RAM AREA
+   16 0000                         ORG      RAM
+   17 0000              RECCNT     RMB      1
+   18 0001              RECROF     RMB      1
+   19 0002              RECWOF     RMB      1
+   20 0003              RECPTR     RMB      2
+   21 0005              RECADR     RMB      2
+   22 0007              RECBUF     RMB      BUFSIZ
+   23                   *
+   24                   *       ROM AREA
+   25 E000                         ORG      ROM
+   26                   *
+   27                   *       ACIA RECIVE INTERRUPT
+   28 E000 B68018       INTSCI     LDAA     ACIACS
+   29 E003 47                      ASRA
+   30 E004 2423                    BCC      INTSCI1
+   31 E006 F68019                  LDAB     ACIADA
+   32                   *
+   33                   *       COUNT UP
+   34 E009 9600                    LDAA     RECCNT
+   35 E00B 8110                    CMPA     #BUFSIZ
+   36 E00D 271A                    BEQ      INTSCI1
+   37 E00F 4C                      INCA
+   38 E010 9700                    STAA     RECCNT
+   39                   *
+   40                   *       SETUP INDEX
+   41 E012 9602                    LDAA     RECWOF
+   42 E014 9B06                    ADDA     RECADR+1
+   43 E016 9704                    STAA     RECPTR+1
+   44 E018 8600                    LDAA     #$00
+   45 E01A 9905                    ADCA     RECADR
+   46 E01C 9703                    STAA     RECPTR
+   47 E01E DE03                    LDX      RECPTR
+   48                   *
+   49                   *       TRANSFER
+   50 E020 E700                    STAB     X
+   51                   *
+   52                   *       UPDATE OFFSET
+   53 E022 9602                    LDAA     RECWOF
+   54 E024 4C                      INCA
+   55 E025 840F                    ANDA     #BUFMSK
+   56 E027 9702                    STAA     RECWOF
+   57 E029 3B           INTSCI1    RTI
+   58                   *
+   59                   *       INPUT CHAR
+   60 E02A B68018       INCH       LDAA     ACIACS
+   61 E02D 47                      ASRA
+   62 E02E 24FA                    BCC      INCH        RECEIVE NOT READY
+   63 E030 B68019                  LDAA     ACIADA      INPUT CHARACTER
+   64 E033 39                      RTS
+   65                   *
+   66                   *       INPUT CHAR FROM BUFFER
+   67 E034 9600         INCHB      LDAA     RECCNT
+   68 E036 8100                    CMPA     #$00
+   69 E038 27FA                    BEQ      INCHB
+   70 E03A 4A                      DECA
+   71 E03B 9700                    STAA     RECCNT
+   72                   *
+   73                   *       SETUP INDEX
+   74 E03D 0F                      SEI                  DISABLE INTERRUPT
+   75 E03E 9601                    LDAA     RECROF
+   76 E040 9B06                    ADDA     RECADR+1
+   77 E042 9704                    STAA     RECPTR+1
+   78 E044 8600                    LDAA     #$00
+   79 E046 9905                    ADCA     RECADR
+   80 E048 9703                    STAA     RECPTR
+   81 E04A DE03                    LDX      RECPTR
+   82                   *
+   83                   *       UPDATE OFFSET
+   84 E04C 9601                    LDAA     RECROF
+   85 E04E 4C                      INCA
+   86 E04F 840F                    ANDA     #BUFMSK
+   87 E051 9701                    STAA     RECROF
+   88                   *
+   89                   *       TRANSFER
+   90 E053 A600                    LDAA     X
+   91 E055 0E                      CLI
+   92 E056 39                      RTS
+   93                   *
+   94                   *       OUTPUT CHAR
+   95 E057 36           OUTCH      PSHA
+   96 E058 B68018       OUTCH1     LDAA     ACIACS
+   97 E05B 47                      ASRA
+   98 E05C 47                      ASRA
+   99 E05D 24F9                    BCC      OUTCH1
+  100 E05F 32                      PULA
+  101 E060 B78019                  STAA     ACIADA
+  102 E063 39                      RTS
+  103                   *
+  104                   *       OUTPUT STRING
+  105 E064 36           OUTS       PSHA
+  106 E065 A600         OUTS1      LDAA     X
+  107 E067 8100                    CMPA     #00
+  108 E069 2706                    BEQ      OUTS2
+  109 E06B BDE057                  JSR      OUTCH
+  110 E06E 08                      INX
+  111 E06F 20F4                    BRA      OUTS1
+  112 E071 32           OUTS2      PULA
+  113 E072 39                      RTS
+  114                   *
+  115                   *       MESSAGE
+  116 E073 0D           MESG       FCB      $0D
+  117 E074 0A                      FCB      $0A
+  118 E075 4B4559494E20            FCC      'KEYIN THEN ECHO'
+           5448454E2045 
+           43484F       
+  119 E084 0D                      FCB      $0D
+  120 E085 0A                      FCB      $0A
+  121 E086 00                      FCB      $00
+  122                   *
+  123                   *       POWER ON SEQUENCE
+  124 E087 8E1FFF       START      LDS      #STACK
+  125 E08A CE0007                  LDX      #RECBUF
+  126 E08D DF05                    STX      RECADR
+  127 E08F 7F0000                  CLR      RECCNT
+  128 E092 7F0001                  CLR      RECROF
+  129 E095 7F0002                  CLR      RECWOF
+  130                   *
+  131                   *       ACIA INITIALIZE
+  132 E098 8603                    LDAA     #$03        RESET CODE
+  133 E09A B78018                  STAA     ACIACS
+  134 E09D 8695                    LDAA     #%10010101  8N1 INTERRUPT
+  135 E09F B78018                  STAA     ACIACS
+  136 E0A2 0E                      CLI                  ENABLE INTERRUPT
+  137                   *
+  138                   *       OPENNING MESSAGE
+  139 E0A3 CEE073                  LDX      #MESG
+  140 E0A6 BDE064                  JSR      OUTS
+  141                   *
+  142                   *       KEYIN AND ECHO
+  143 E0A9 BDE034       LOOP       JSR      INCHB
+  144 E0AC BDE057                  JSR      OUTCH
+  145 E0AF 20F8                    BRA      LOOP
+  146                   *
+  147                   *       UNUSE INTERRUPT
+  148 E0B1 3B           UUINT      RTI
+  149                   *
+  150                   *       VECTOR
+  151 FFF8                         ORG      $FFF8
+  152 FFF8 E000         VIRQ       FDB      INTSCI
+  153 FFFA E0B1         VSWI       FDB      UUINT
+  154 FFFC E0B1         VNMI       FDB      UUINT
+  155 FFFE E087         VRES       FDB      START
+  156 0000                         END

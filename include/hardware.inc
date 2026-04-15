@@ -2,10 +2,14 @@
 
 ROM_BASE         equ $E000
 ROM_END          equ $FFFF
+MONITOR_BASE     equ $E200
 
 RAM_START        equ $0000
 RAM_END          equ $1FFF
-STACK_TOP        equ RAM_END
+MIKBUG_VAR_BASE  equ $1F00
+MIKBUG_STACK_TOP equ $1F42
+MONITOR_RAM_BASE equ $1F80
+STACK_TOP        equ MIKBUG_STACK_TOP
 
 ACIA_CTRL        equ $8018
 ACIA_DATA        equ $8019
@@ -20,7 +24,7 @@ CHR_ECHO         equ '='
 CHR_QUESTION     equ '?'
 
 LINE_BUF_SIZE    equ 96
-LINE_BUF         equ RAM_START
+LINE_BUF         equ MONITOR_RAM_BASE
 LINE_PTR         equ LINE_BUF+LINE_BUF_SIZE
 LINE_LEN         equ LINE_PTR+2
 HEX_VALUE_HI     equ LINE_LEN+1
@@ -50,3 +54,10 @@ VEC_IRQ          equ $FFF8
 VEC_SWI          equ $FFFA
 VEC_NMI          equ $FFFC
 VEC_RESET        equ $FFFE
+
+MIKBUG_OUTCH     equ $E075
+MIKBUG_INCH      equ $E078
+MIKBUG_PDATA1    equ $E07E
+MIKBUG_CONTRL    equ $E0E3
+MIKBUG_INEEE     equ $E1AC
+MIKBUG_OUTEEE    equ $E1D1

@@ -26,6 +26,7 @@
 - [design/architecture.md](/Users/kuninet/git/MC6800_monitor/docs/design/architecture.md)
 - [plans/implementation_plan.md](/Users/kuninet/git/MC6800_monitor/docs/plans/implementation_plan.md)
 - [testing/sbc6800_bringup.md](/Users/kuninet/git/MC6800_monitor/docs/testing/sbc6800_bringup.md)
+- [testing/sbc6800_datapack.md](/Users/kuninet/git/MC6800_monitor/docs/testing/sbc6800_datapack.md): SBC6800 データパックの扱いと互換確認
 - [testing/macos_tl866ii_plus.md](/Users/kuninet/git/MC6800_monitor/docs/testing/macos_tl866ii_plus.md): UNIX 系環境で TL866II Plus を使う手順
 - [testing/wsl2_tl866ii_plus.md](/Users/kuninet/git/MC6800_monitor/docs/testing/wsl2_tl866ii_plus.md): WSL2 で TL866II Plus と minipro を試す手順
 - [testing/windows_emulator_ci.md](/Users/kuninet/git/MC6800_monitor/docs/testing/windows_emulator_ci.md): Windows エミュレータと GitHub Actions の手順

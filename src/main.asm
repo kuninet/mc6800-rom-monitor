@@ -3,7 +3,47 @@
         include "../include/hardware.inc"
         include "../include/mikbug.inc"
 
-        org     ROM_BASE
+        org     MIKBUG_OUTCH
+
+OUTCH:
+        jmp     OUTEEE
+
+INCH:
+        jmp     INEEE
+
+        org     MIKBUG_PDATA1
+
+PDATA1:
+        ldaa    0,x
+        cmpa    #$04
+        beq     PDATA1_DONE
+        jsr     OUTCH
+        inx
+        bra     PDATA1
+PDATA1_DONE:
+        rts
+
+        org     MIKBUG_CONTRL
+
+CONTRL:
+        jmp     MONITOR_ENTRY
+
+        org     MIKBUG_INEEE
+
+INEEE:
+        jmp     MIKBUG_INEEE_IMPL
+
+        org     MIKBUG_OUTEEE
+
+OUTEEE:
+        jmp     MIKBUG_OUTEEE_IMPL
+
+        org     MONITOR_BASE
+
+MONITOR_ENTRY:
+        lds     #STACK_TOP
+        jsr     ACIA_INIT
+        jmp     MAIN_LOOP
 
 RESET:
         lds     #STACK_TOP
@@ -11,9 +51,9 @@ RESET:
         clr     DUMP_ADDR+1
         jsr     ACIA_INIT
         ldaa    #'*'
-        jsr     OUTEEE
+        jsr     MON_OUTEEE
         ldaa    #CHR_CR
-        jsr     OUTEEE
+        jsr     MON_OUTEEE
 
 MAIN_LOOP:
         jsr     PRINT_PROMPT
@@ -172,9 +212,9 @@ CMD_LOAD:
         bne     CMD_LOAD_BADARG
 
         ldaa    #'L'
-        jsr     OUTEEE
+        jsr     MON_OUTEEE
         ldaa    #CHR_CR
-        jsr     OUTEEE
+        jsr     MON_OUTEEE
 
         clr     LOADER_MODE
         clr     LOADER_STAGE
@@ -194,11 +234,11 @@ CMD_LOAD_LOOP:
 
 CMD_LOAD_OK:
         ldaa    #'O'
-        jsr     OUTEEE
+        jsr     MON_OUTEEE
         ldaa    #'K'
-        jsr     OUTEEE
+        jsr     MON_OUTEEE
         ldaa    #CHR_CR
-        jsr     OUTEEE
+        jsr     MON_OUTEEE
         jmp     MAIN_LOOP
 
 CMD_LOAD_ERROR:
@@ -210,9 +250,9 @@ CMD_LOAD_BADARG:
 
 PRINT_PROMPT:
         ldaa    #CHR_PROMPT
-        jsr     OUTEEE
+        jsr     MON_OUTEEE
         ldaa    #CHR_SPACE
-        jsr     OUTEEE
+        jsr     MON_OUTEEE
         rts
 
 READ_LINE:
@@ -242,7 +282,7 @@ READ_LINE_LOOP:
         inx
         stx     LINE_PTR
         inc     LINE_LEN
-        jsr     OUTEEE
+        jsr     MON_OUTEEE
         bra     READ_LINE_LOOP
 
 READ_LINE_BACKSPACE:
@@ -264,7 +304,7 @@ READ_LINE_BACKSPACE:
 
 READ_LINE_DONE:
         ldaa    #CHR_CR
-        jsr     OUTEEE
+        jsr     MON_OUTEEE
         rts
 
 READ_RECORD:
@@ -313,41 +353,41 @@ READ_RECORD_FAIL_DONE:
 
 SHOW_ERROR:
         ldaa    #CHR_QUESTION
-        jsr     OUTEEE
+        jsr     MON_OUTEEE
         ldaa    #CHR_CR
-        jsr     OUTEEE
+        jsr     MON_OUTEEE
         rts
 
 SHOW_LOADER_ERROR:
         ldaa    #CHR_QUESTION
-        jsr     OUTEEE
+        jsr     MON_OUTEEE
         ldaa    LOADER_MODE
         beq     SHOW_LOADER_ERROR_DONE
         cmpa    #LOAD_MODE_SREC
         bne     SHOW_LOADER_ERROR_IHEX
         ldaa    #'S'
-        jsr     OUTEEE
+        jsr     MON_OUTEEE
         bra     SHOW_LOADER_ERROR_STAGE
 SHOW_LOADER_ERROR_IHEX:
         ldaa    #'I'
-        jsr     OUTEEE
+        jsr     MON_OUTEEE
 SHOW_LOADER_ERROR_STAGE:
         ldaa    LOADER_STAGE
         adda    #'0'
-        jsr     OUTEEE
+        jsr     MON_OUTEEE
 SHOW_LOADER_ERROR_DONE:
         ldaa    #CHR_CR
-        jsr     OUTEEE
+        jsr     MON_OUTEEE
         rts
 
 PRINT_SPACE:
         ldaa    #CHR_SPACE
-        jsr     OUTEEE
+        jsr     MON_OUTEEE
         rts
 
 PRINT_CRLF:
         ldaa    #CHR_CR
-        jsr     OUTEEE
+        jsr     MON_OUTEEE
         rts
 
 ADD_TO_LOADER_SUM:
@@ -561,10 +601,10 @@ PARSE_SREC_ADDR24:
         staa    LOADER_STAGE
         ldaa    LOADER_COUNT
         cmpa    #4
-        blo     PARSE_SREC_RECORD_FAIL
+        blo     PARSE_SREC_RECORD_FAIL_MID
 
         jsr     PARSE_HEXBYTE_PTR
-        bcs     PARSE_SREC_RECORD_FAIL
+        bcs     PARSE_SREC_RECORD_FAIL_MID
         staa    HEX_NIBBLE
         jsr     ADD_TO_LOADER_SUM
         ldaa    HEX_NIBBLE
@@ -783,6 +823,6 @@ SPURIOUS_IRQ:
 
         org     VEC_IRQ
         fdb     SPURIOUS_IRQ     ; VEC_IRQ
-        fdb     RESET            ; VEC_SWI (Return to monitor via SWI)
+        fdb     MONITOR_ENTRY    ; VEC_SWI
         fdb     SPURIOUS_IRQ     ; VEC_NMI
         fdb     RESET            ; VEC_RESET
