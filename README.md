@@ -34,6 +34,7 @@ MIKBUG 全体の完全互換は狙いませんが、電大版 BASIC が利用す
 - [docs/progress/2026-04-08.md](/Users/kuninet/git/MC6800_monitor/docs/progress/2026-04-08.md): WSL2 minipro 書き込み成功ログ
 - [docs/progress/2026-04-14.md](/Users/kuninet/git/MC6800_monitor/docs/progress/2026-04-14.md): フェーズ4 ローダ実装と実機確認ログ
 - [docs/testing/sbc6800_bringup.md](/Users/kuninet/git/MC6800_monitor/docs/testing/sbc6800_bringup.md): SBC6800 実機確認手順
+- [docs/testing/sbc6800_datapack.md](/Users/kuninet/git/MC6800_monitor/docs/testing/sbc6800_datapack.md): SBC6800 データパックの扱いと互換確認
 - [docs/testing/macos_tl866ii_plus.md](/Users/kuninet/git/MC6800_monitor/docs/testing/macos_tl866ii_plus.md): UNIX 系環境で TL866II Plus を使う手順
 - [docs/testing/wsl2_tl866ii_plus.md](/Users/kuninet/git/MC6800_monitor/docs/testing/wsl2_tl866ii_plus.md): WSL2 で TL866II Plus と minipro を試す手順
 - [docs/testing/windows_emulator_ci.md](/Users/kuninet/git/MC6800_monitor/docs/testing/windows_emulator_ci.md): Windows エミュレータと GitHub Actions の手順
@@ -101,5 +102,6 @@ SBC6800 前提の現在値:
 - `docs/design/`: 設計資料
 - `docs/plans/`: 実装計画
 - `docs/progress/`: 進捗ログ
+- `third_party/sbc6800_datapack/`: SBC6800 データパック一式と互換確認用資産
 
 実装前段階のため、現時点ではドキュメント整備を優先しています。

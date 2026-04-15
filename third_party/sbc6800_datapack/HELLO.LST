@@ -1,0 +1,13 @@
+    1                   *       HELLO WORLD
+    2                   *
+    3 E07E              PDATA1     EQU      $E07E
+    4                   
+    5 0100                         ORG      $0100
+    6 0100 CE0107       START      LDX      #MESG
+    7 0103 BDE07E                  JSR      PDATA1
+    8 0106 3F                      SWI
+    9                   
+   10 0107 48454C4C4F2C MESG       FCC      'HELLO, WORLD'
+           20574F524C44 
+   11 0113 0D0A04                  FCB      13,10,4
+   12 0116                         END

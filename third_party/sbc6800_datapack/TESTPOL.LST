@@ -1,0 +1,64 @@
+    1                   *       ECHOBACK TEST
+    2                   *       BY POLLING
+    3                   *
+    4                   *       ADDRESS
+    5 8018              ACIACS     EQU      $8018
+    6 8019              ACIADA     EQU      $8019
+    7 1FFF              STACK      EQU      $1FFF
+    8 E000                         ORG      $E000
+    9                   *
+   10                   *       POWER ON SEQUENCE
+   11 E000 8E1FFF       START      LDS      #STACK
+   12                   *
+   13                   *       ACIA INITIALIZE
+   14 E003 8603                    LDAA     #$03
+   15 E005 B78018                  STAA     ACIACS
+   16 E008 8615                    LDAA     #$15
+   17 E00A B78018                  STAA     ACIACS
+   18                   *
+   19                   *       ECHOBACK TEST
+   20 E00D CEE03B                  LDX      #MESG
+   21 E010 BDE030                  JSR      PDATA
+   22 E013 BDE01B       LOOP       JSR      INCH
+   23 E016 BDE025                  JSR      OUTCH
+   24 E019 20F8                    BRA      LOOP
+   25                   *
+   26                   *       INPUT CHAR
+   27 E01B B68018       INCH       LDAA     ACIACS
+   28 E01E 47                      ASRA
+   29 E01F 24FA                    BCC      INCH
+   30 E021 B68019                  LDAA     ACIADA
+   31 E024 39                      RTS
+   32                   *
+   33                   *       OUTPUT CHAR
+   34 E025 F68018       OUTCH      LDAB     ACIACS
+   35 E028 57                      ASRB
+   36 E029 57                      ASRB
+   37 E02A 24F9                    BCC      OUTCH
+   38 E02C B78019                  STAA     ACIADA
+   39 E02F 39                      RTS
+   40                   *
+   41                   *       OUTPUT STRING
+   42 E030 A600         PDATA      LDAA     0,X
+   43 E032 2706                    BEQ      EXIT
+   44 E034 BDE025                  JSR      OUTCH
+   45 E037 08                      INX
+   46 E038 20F6                    BRA      PDATA
+   47 E03A 39           EXIT       RTS
+   48                   *
+   49                   *       MESSAGE
+   50 E03B 0D0A         MESG       FCB      $0D,$0A
+   51 E03D 4543484F4241            FCC      'ECHOBACK '
+           434B20       
+   52 E046 54455354                FCC      'TEST'
+   53 E04A 0D0A                    FCB      $0D,$0A
+   54 E04C 00                      FCB      $00
+   55                   *
+   56                   *       VECTOR
+   57 E04D 3B           UUINT      RTI
+   58 FFF8                         ORG      $FFF8
+   59 FFF8 E04D                    FDB      UUINT
+   60 FFFA E04D                    FDB      UUINT
+   61 FFFC E04D                    FDB      UUINT
+   62 FFFE E000                    FDB      START
+   63 0000                         END

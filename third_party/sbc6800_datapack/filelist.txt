@@ -1,0 +1,21 @@
+filelist.txt - このファイル。
+SBC6800eagle - SBC6800のEAGLEデータ。
+mc6800crgen.hex - PIC12F1822をクロックジェネレータとして使うファームウェア。
+mc6800crgen.X - mc6800crgen.hexのMPLAB XIDEプロジェクト。
+osc1536.hex - PIC12F1822をボーレートジェネレータとして使うファームウェア。
+osc1536.X - osc1536.hexのMPLAB XIDEプロジェクト。
+TESTPOL.* - 端末と文字のやり取りをするテストプログラム。
+TESTINT.* - 端末と文字のやり取りをするテストプログラムの受信割り込み版。
+MIKBUG.* - SBC6800用MIKBUG。
+MICBAS13.* - SBC6800用MIKBUGで動作するMicroBASIC Ver.1.3。
+RNDSORT.BAS - MicroBASIC Ver.1.3のサンプルプログラム。
+VTLSA.* - SBC6800用VTL単独動作可能版。
+VTLALPHA.VTL - VTLのサンプルプログラム。
+PROM680.* - SBC6800用680モニタ(MITS Altair680モニタ移植版)。
+VTL.* - 本家VTL。SBC6800用680モニタと同じROMに上書きするとJ FC00で起動。
+MA680BAS.s - SBC6800用MIKBUGで動作するMITS Altair680 BASIC VER1.1 REV3.2。
+ASCIIART.BAS - MITS Altair680 BASICで動くマンデルブロ集合プログラム。
+
+SBC6800eagleはCC BY-SA 3.0です。
+mc6800crgen.*、osc1536.*、TESTPOL.*、TESTINT.*、RNDSORT.BASはパブリックドメインです。
+そのほかのファイルは原作者の宣言にしたがってください。

@@ -14,6 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 EMU_PATH = PROJECT_ROOT / "emu" / "sbc6800_emu.py"
 BUILD_ROM_PATH = PROJECT_ROOT / "build" / "mc6800-monitor.bin"
 FIXTURE_ROM_PATH = PROJECT_ROOT / "tests" / "fixtures" / "mc6800-monitor.bin"
+DATAPACK_DIR = PROJECT_ROOT / "third_party" / "sbc6800_datapack"
 
 
 def rom_path() -> Path:
@@ -54,6 +55,14 @@ def run_emu(input_text: str, max_cycles: int = 5_000_000, timeout: int = 10):
         return exc.stdout or "", (exc.stderr or "") + "[TIMEOUT]", -1
     finally:
         os.unlink(input_file)
+
+
+def datapack_srec_script(filename: str, entry: str = "0100") -> str:
+    path = DATAPACK_DIR / filename
+    lines = [line.strip() for line in path.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()]
+    lines = [line for line in lines if not line.startswith("S9")]
+    lines.append(f"S903{entry}FB")
+    return "L\r" + "\r".join(lines) + f"\rG{entry}\r\r"
 
 
 def test_boot_prompt():
@@ -107,6 +116,20 @@ def test_error_display():
     print("[PASS] test_error_display")
 
 
+def test_datapack_hello():
+    stdout, stderr, rc = run_emu(datapack_srec_script("HELLO.S"), max_cycles=2_000_000)
+    assert "OK" in stdout, f"missing datapack HELLO load OK: {stdout!r}"
+    assert "HELLO, WORLD" in stdout, f"missing datapack HELLO output: {stdout!r}"
+    print("[PASS] test_datapack_hello")
+
+
+def test_datapack_micbas13_boot():
+    stdout, stderr, rc = run_emu(datapack_srec_script("MICBAS13.S"), max_cycles=20_000_000)
+    assert "OK" in stdout, f"missing MICBAS13 load OK: {stdout!r}"
+    assert "READY" in stdout, f"missing MICBAS13 READY output: {stdout!r}"
+    print("[PASS] test_datapack_micbas13_boot")
+
+
 def main():
     print("=" * 50)
     print("SBC6800 emulator smoke tests")
@@ -129,6 +152,8 @@ def main():
         test_srec_load,
         test_ihex_load,
         test_error_display,
+        test_datapack_hello,
+        test_datapack_micbas13_boot,
     ]
 
     passed = 0

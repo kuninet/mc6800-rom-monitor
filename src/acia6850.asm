@@ -29,22 +29,27 @@ ACIA_GETC:
         ldaa    ACIA_DATA
         rts
 
-OUTEEE:
+MIKBUG_OUTEEE_IMPL:
+        jsr     ACIA_PUTC
+        rts
+
+MON_OUTEEE:
         psha
         jsr     ACIA_PUTC
         pula
         cmpa    #CHR_CR
-        bne     OUTEEE_DONE
+        bne     MON_OUTEEE_DONE
         psha
         ldaa    #CHR_LF
         jsr     ACIA_PUTC
         pula
-OUTEEE_DONE:
+MON_OUTEEE_DONE:
         rts
 
-INEEE:
+MIKBUG_INEEE_IMPL:
+MIKBUG_INEEE_LOOP:
         jsr     ACIA_GETC
         cmpa    #CHR_LF
-        beq     INEEE
-        jsr     OUTEEE
+        beq     MIKBUG_INEEE_LOOP
+        jsr     MIKBUG_OUTEEE_IMPL
         rts
