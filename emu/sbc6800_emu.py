@@ -47,6 +47,7 @@ class ACIA:
         self._input_data = input_data  # スクリプト入力用
         self._input_pos = 0
         self._interactive = input_data is None
+        self._exit_on_eof = input_data is not None
         self._old_termios = None
         if self._interactive and sys.stdin.isatty() and not _IS_WINDOWS:
             self._old_termios = termios.tcgetattr(sys.stdin)
@@ -59,6 +60,8 @@ class ACIA:
 
     def read_status(self):
         """ACIA ステータスレジスタを読む"""
+        if self._exit_on_eof and self._input_data is not None and self._input_pos >= len(self._input_data):
+            raise SystemExit(0)
         status = ACIA_STAT_TDRE  # 送信は常にレディ
         if self._has_input():
             status |= ACIA_STAT_RDRF

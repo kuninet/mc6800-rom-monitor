@@ -7,6 +7,9 @@
 *.srec
 *.hex
 *.tmp
+__pycache__/
 build/
 sample/
 blog_work/
+!tests/fixtures/
+!tests/fixtures/mc6800-monitor.bin
