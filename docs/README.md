@@ -28,6 +28,7 @@
 - [testing/sbc6800_bringup.md](/Users/kuninet/git/MC6800_monitor/docs/testing/sbc6800_bringup.md)
 - [testing/macos_tl866ii_plus.md](/Users/kuninet/git/MC6800_monitor/docs/testing/macos_tl866ii_plus.md): UNIX 系環境で TL866II Plus を使う手順
 - [testing/wsl2_tl866ii_plus.md](/Users/kuninet/git/MC6800_monitor/docs/testing/wsl2_tl866ii_plus.md): WSL2 で TL866II Plus と minipro を試す手順
+- [testing/windows_emulator_ci.md](/Users/kuninet/git/MC6800_monitor/docs/testing/windows_emulator_ci.md): Windows エミュレータと GitHub Actions の手順
 - [progress/2026-03-22.md](/Users/kuninet/git/MC6800_monitor/docs/progress/2026-03-22.md)
 - [progress/2026-04-05.md](/Users/kuninet/git/MC6800_monitor/docs/progress/2026-04-05.md)
 - [progress/2026-04-08.md](/Users/kuninet/git/MC6800_monitor/docs/progress/2026-04-08.md)
