@@ -78,6 +78,15 @@ def test_dump_command():
     print("[PASS] test_dump_command")
 
 
+def test_dump_range_command():
+    stdout, stderr, rc = run_emu("D0100\rD0100-011F\rDFFF0\rDFFF0-FFFF\rD0110-0100\rD0100-\r\r")
+    assert "0100" in stdout and "0130" in stdout, f"missing 64-byte dump range: {stdout!r}"
+    assert "0110" in stdout, f"missing explicit range line: {stdout!r}"
+    assert "FFF0" in stdout, f"missing high-end range dump: {stdout!r}"
+    assert stdout.count("?") >= 2, f"missing invalid range errors: {stdout!r}"
+    print("[PASS] test_dump_range_command")
+
+
 def test_modify_and_dump():
     stdout, stderr, rc = run_emu("M0100\rAA\r.\rD0100\r\r")
     assert "0100 AA" in stdout or " AA " in stdout, f"missing modified value: {stdout!r}"
@@ -116,6 +125,38 @@ def test_error_display():
     print("[PASS] test_error_display")
 
 
+def test_breakpoint_resume_and_clear():
+    input_text = (
+        "M0100\r"
+        "86\r42\rB7\r01\r20\r86\r99\rB7\r01\r21\r3F\r.\r"
+        "B0105\r"
+        "G0100\r"
+        "D0120-0121\r"
+        "R\r"
+        "D0120-0121\r"
+        "M0140\r86\r55\r3F\r.\r"
+        "B0140\rC\rD0140-0140\r"
+        "BE200\r"
+        "\r"
+    )
+    stdout, stderr, rc = run_emu(input_text, max_cycles=20_000_000)
+    assert "BRK 0105" in stdout, f"missing breakpoint hit: {stdout!r}"
+    assert "0120 42 00" in stdout, f"breakpoint did not stop before second store: {stdout!r}"
+    assert "0120 42 99" in stdout, f"resume did not run restored instruction: {stdout!r}"
+    assert "0140 86" in stdout, f"clear did not restore original opcode: {stdout!r}"
+    assert "?" in stdout, f"missing ROM breakpoint error: {stdout!r}"
+    print("[PASS] test_breakpoint_resume_and_clear")
+
+
+def test_unassemble_command():
+    stdout, stderr, rc = run_emu("M0100\r86\r12\rB7\r01\r20\r3F\rFF\r.\rU0100\r\r")
+    assert "0100 86 LDAA #$12" in stdout, f"missing LDAA disassembly: {stdout!r}"
+    assert "0102 B7 STAA $0120" in stdout, f"missing STAA disassembly: {stdout!r}"
+    assert "0105 3F SWI" in stdout, f"missing SWI disassembly: {stdout!r}"
+    assert "0106 FF DB $FF" in stdout, f"missing DB fallback: {stdout!r}"
+    print("[PASS] test_unassemble_command")
+
+
 def test_datapack_hello():
     stdout, stderr, rc = run_emu(datapack_srec_script("HELLO.S"), max_cycles=2_000_000)
     assert "OK" in stdout, f"missing datapack HELLO load OK: {stdout!r}"
@@ -147,11 +188,14 @@ def main():
     tests = [
         test_boot_prompt,
         test_dump_command,
+        test_dump_range_command,
         test_modify_and_dump,
         test_go_swi_return,
         test_srec_load,
         test_ihex_load,
         test_error_display,
+        test_breakpoint_resume_and_clear,
+        test_unassemble_command,
         test_datapack_hello,
         test_datapack_micbas13_boot,
     ]
