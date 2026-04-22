@@ -49,6 +49,8 @@ RESET:
         lds     #STACK_TOP
         clr     DUMP_ADDR
         clr     DUMP_ADDR+1
+        clr     BP_ACTIVE
+        clr     BRK_ACTIVE
         jsr     ACIA_INIT
         ldaa    #'*'
         jsr     MON_OUTEEE
@@ -75,8 +77,24 @@ CHK_CMD_GO:
         jmp     CMD_GO
 CHK_CMD_LOAD:
         cmpa    #'L'
-        bne     MAIN_LOOP_ERROR
+        bne     CHK_CMD_BREAK
         jmp     CMD_LOAD
+CHK_CMD_BREAK:
+        cmpa    #'B'
+        bne     CHK_CMD_RESUME
+        jmp     CMD_BREAK_SET
+CHK_CMD_RESUME:
+        cmpa    #'R'
+        bne     CHK_CMD_CLEAR
+        jmp     CMD_RESUME
+CHK_CMD_CLEAR:
+        cmpa    #'C'
+        bne     CHK_CMD_UNASM
+        jmp     CMD_BREAK_CLEAR
+CHK_CMD_UNASM:
+        cmpa    #'U'
+        bne     MAIN_LOOP_ERROR
+        jmp     CMD_UNASM
 
 MAIN_LOOP_ERROR:
         jsr     SHOW_ERROR
@@ -86,33 +104,64 @@ CMD_DUMP:
         ldab    LINE_LEN
         cmpb    #1
         beq     CMD_DUMP_NOARG
-        ldx     #LINE_BUF+1
-        decb
-        jsr     PARSE_HEX
-        bcc     CMD_DUMP_ADDR_OK
+        jsr     PARSE_DUMP_ARGS
+        bcc     CMD_DUMP_SHOW
         jmp     MAIN_LOOP_ERROR
-CMD_DUMP_ADDR_OK:
-        ldx     HEX_VALUE_HI
-        stx     DUMP_ADDR
 CMD_DUMP_NOARG:
         ldx     DUMP_ADDR
+        stx     DUMP_END
+        jsr     SET_DUMP_END_64
+CMD_DUMP_SHOW:
+        jsr     DUMP_RANGE
+        jmp     MAIN_LOOP
+
+DUMP_RANGE:
+        ldx     DUMP_ADDR
+        jsr     CMP_X_DUMP_END
+        bhi     DUMP_RANGE_DONE
+DUMP_RANGE_LINE:
+        ldx     DUMP_ADDR
+        stx     LINE_PTR
+        clr     DUMP_COUNT
+DUMP_COUNT_LOOP:
+        ldx     DUMP_ADDR
+        jsr     CMP_X_DUMP_END
+        bhi     DUMP_COUNT_DONE
+        ldab    DUMP_COUNT
+        cmpb    #16
+        bhs     DUMP_COUNT_DONE
+        inc     DUMP_COUNT
+        ldx     DUMP_ADDR
+        inx
+        stx     DUMP_ADDR
+        ldaa    DUMP_ADDR
+        oraa    DUMP_ADDR+1
+        beq     DUMP_COUNT_DONE
+        bra     DUMP_COUNT_LOOP
+DUMP_COUNT_DONE:
+        ldx     LINE_PTR
         jsr     PRINT_HEX16
         jsr     PRINT_SPACE
-        
-        ldab    #16
+
+        ldab    DUMP_COUNT
 CMD_DUMP_HEX_LOOP:
+        tstb
+        beq     CMD_DUMP_HEX_DONE
         ldaa    0,x
         jsr     PRINT_HEX8
         jsr     PRINT_SPACE
         inx
         decb
-        bne     CMD_DUMP_HEX_LOOP
-        
+        bra     CMD_DUMP_HEX_LOOP
+CMD_DUMP_HEX_DONE:
+
         jsr     PRINT_SPACE
-        
-        ldx     DUMP_ADDR
-        ldab    #16
+
+        ldx     LINE_PTR
+        ldab    DUMP_COUNT
 CMD_DUMP_ASCII_LOOP:
+        tstb
+        beq     CMD_DUMP_ASCII_DONE
         ldaa    0,x
         cmpa    #$20
         blo     CMD_DUMP_ASCII_DOT
@@ -125,11 +174,108 @@ CMD_DUMP_ASCII_PUTC:
         jsr     ACIA_PUTC
         inx
         decb
-        bne     CMD_DUMP_ASCII_LOOP
-        
-        stx     DUMP_ADDR
+        bra     CMD_DUMP_ASCII_LOOP
+CMD_DUMP_ASCII_DONE:
+
         jsr     PRINT_CRLF
-        jmp     MAIN_LOOP
+        ldaa    DUMP_ADDR
+        oraa    DUMP_ADDR+1
+        beq     DUMP_RANGE_DONE
+        ldx     DUMP_ADDR
+        jsr     CMP_X_DUMP_END
+        bls     DUMP_RANGE_LINE
+DUMP_RANGE_DONE:
+        rts
+
+PARSE_DUMP_ARGS:
+        ldx     #LINE_BUF+1
+        stx     ARG_PTR
+        ldab    LINE_LEN
+        decb
+        stab    ARG_LEN
+        clr     ARG2_LEN
+PARSE_DUMP_SCAN:
+        tstb
+        beq     PARSE_DUMP_NO_RANGE
+        ldaa    0,x
+        cmpa    #'-'
+        beq     PARSE_DUMP_RANGE
+        inx
+        inc     ARG2_LEN
+        decb
+        bra     PARSE_DUMP_SCAN
+
+PARSE_DUMP_NO_RANGE:
+        ldx     ARG_PTR
+        ldab    ARG_LEN
+        jsr     PARSE_HEX
+        bcs     PARSE_DUMP_FAIL
+        ldx     HEX_VALUE_HI
+        stx     DUMP_ADDR
+        stx     DUMP_END
+        jsr     SET_DUMP_END_64
+        clc
+        rts
+
+SET_DUMP_END_64:
+        ldab    #63
+SET_DUMP_END_64_LOOP:
+        ldx     DUMP_END
+        inx
+        beq     SET_DUMP_END_64_WRAP
+        stx     DUMP_END
+        decb
+        bne     SET_DUMP_END_64_LOOP
+        rts
+SET_DUMP_END_64_WRAP:
+        ldx     #$FFFF
+        stx     DUMP_END
+        rts
+
+PARSE_DUMP_RANGE:
+        tst     ARG2_LEN
+        beq     PARSE_DUMP_FAIL
+        dex
+        inx
+        inx
+        stx     ARG2_PTR
+        decb
+        beq     PARSE_DUMP_FAIL
+        stab    ARG_LEN
+
+        ldx     ARG_PTR
+        ldab    ARG2_LEN
+        jsr     PARSE_HEX
+        bcs     PARSE_DUMP_FAIL
+        ldx     HEX_VALUE_HI
+        stx     DUMP_ADDR
+
+        ldx     ARG2_PTR
+        ldab    ARG_LEN
+        jsr     PARSE_HEX
+        bcs     PARSE_DUMP_FAIL
+        ldx     HEX_VALUE_HI
+        stx     DUMP_END
+
+        ldx     DUMP_ADDR
+        jsr     CMP_X_DUMP_END
+        bhi     PARSE_DUMP_FAIL
+        clc
+        rts
+
+PARSE_DUMP_FAIL:
+        sec
+        rts
+
+CMP_X_DUMP_END:
+        stx     HEX_VALUE_HI
+        ldaa    HEX_VALUE_HI
+        cmpa    DUMP_END
+        bne     CMP_X_DUMP_END_DONE
+        ldaa    HEX_VALUE_LO
+        cmpa    DUMP_END+1
+CMP_X_DUMP_END_DONE:
+        rts
 
 CMD_MOD:
         ldab    LINE_LEN
@@ -151,7 +297,7 @@ CMD_MOD_LOOP:
         ldaa    #':'
         jsr     ACIA_PUTC
         jsr     PRINT_SPACE
-        
+
         ldx     MOD_ADDR
         ldaa    0,x
         jsr     PRINT_HEX8
@@ -159,18 +305,18 @@ CMD_MOD_LOOP:
         ldaa    #'-'
         jsr     ACIA_PUTC
         jsr     PRINT_SPACE
-        
+
         jsr     READ_LINE
-        
+
         ldab    LINE_LEN
         beq     CMD_MOD_NEXT
         cmpb    #3
         bhs     CMD_MOD_ERROR
-        
+
         ldaa    LINE_BUF
         cmpa    #'.'
         beq     CMD_MOD_END
-        
+
         ldx     #LINE_BUF
         jsr     PARSE_HEX
         bcs     CMD_MOD_ERROR
@@ -202,9 +348,121 @@ CMD_GO:
 CMD_GO_ERR:
         jmp     MAIN_LOOP_ERROR
 CMD_GO_ADDR_OK:
-        
+
         ldx     HEX_VALUE_HI
         jmp     0,x
+
+CMD_BREAK_SET:
+        ldab    LINE_LEN
+        cmpb    #1
+        beq     CMD_BREAK_SET_ERR
+        ldx     #LINE_BUF+1
+        decb
+        jsr     PARSE_HEX
+        bcs     CMD_BREAK_SET_ERR
+        ldx     HEX_VALUE_HI
+        stx     BP_ADDR
+        ldaa    BP_ADDR
+        cmpa    #$20
+        bhs     CMD_BREAK_SET_ERR
+        tst     BP_ACTIVE
+        beq     CMD_BREAK_SET_WRITE
+        jsr     RESTORE_BREAKPOINT
+CMD_BREAK_SET_WRITE:
+        ldx     BP_ADDR
+        ldaa    0,x
+        staa    BP_ORIG
+        ldaa    #$3F
+        staa    0,x
+        ldaa    #1
+        staa    BP_ACTIVE
+        jmp     MAIN_LOOP
+CMD_BREAK_SET_ERR:
+        jmp     MAIN_LOOP_ERROR
+
+CMD_BREAK_CLEAR:
+        ldab    LINE_LEN
+        cmpb    #1
+        beq     CMD_BREAK_CLEAR_ANY
+        ldx     #LINE_BUF+1
+        decb
+        jsr     PARSE_HEX
+        bcs     CMD_BREAK_CLEAR_ERR
+        tst     BP_ACTIVE
+        beq     CMD_BREAK_CLEAR_ERR
+        ldaa    HEX_VALUE_HI
+        cmpa    BP_ADDR
+        bne     CMD_BREAK_CLEAR_ERR
+        ldaa    HEX_VALUE_LO
+        cmpa    BP_ADDR+1
+        bne     CMD_BREAK_CLEAR_ERR
+        jsr     RESTORE_BREAKPOINT
+        jmp     MAIN_LOOP
+CMD_BREAK_CLEAR_ANY:
+        tst     BP_ACTIVE
+        beq     CMD_BREAK_CLEAR_DONE
+        jsr     RESTORE_BREAKPOINT
+CMD_BREAK_CLEAR_DONE:
+        jmp     MAIN_LOOP
+CMD_BREAK_CLEAR_ERR:
+        jmp     MAIN_LOOP_ERROR
+
+CMD_RESUME:
+        ldab    LINE_LEN
+        cmpb    #1
+        bne     CMD_RESUME_ERR
+        tst     BRK_ACTIVE
+        beq     CMD_RESUME_ERR
+        clr     BRK_ACTIVE
+        ldx     BRK_FRAME
+        ldaa    BRK_SAVE_CC
+        staa    0,x
+        ldaa    BRK_SAVE_B
+        staa    1,x
+        ldaa    BRK_SAVE_A
+        staa    2,x
+        ldaa    BRK_SAVE_X
+        staa    3,x
+        ldaa    BRK_SAVE_X+1
+        staa    4,x
+        ldaa    BRK_SAVE_PC
+        staa    5,x
+        ldaa    BRK_SAVE_PC+1
+        staa    6,x
+        txs
+        rti
+CMD_RESUME_ERR:
+        jmp     MAIN_LOOP_ERROR
+
+RESTORE_BREAKPOINT:
+        ldx     BP_ADDR
+        ldaa    BP_ORIG
+        staa    0,x
+        clr     BP_ACTIVE
+        rts
+
+CMD_UNASM:
+        ldab    LINE_LEN
+        cmpb    #1
+        beq     CMD_UNASM_ERR
+        ldx     #LINE_BUF+1
+        decb
+        jsr     PARSE_HEX
+        bcs     CMD_UNASM_ERR
+        ldx     HEX_VALUE_HI
+        stx     DISASM_ADDR
+        ldaa    #8
+        staa    DISASM_COUNT
+CMD_UNASM_LOOP:
+        tst     DISASM_COUNT
+        beq     CMD_UNASM_DONE
+        jsr     DISASM_ONE
+        dec     DISASM_COUNT
+        bra     CMD_UNASM_LOOP
+CMD_UNASM_DONE:
+        jmp     MAIN_LOOP
+CMD_UNASM_ERR:
+        jmp     MAIN_LOOP_ERROR
 
 CMD_LOAD:
         ldab    LINE_LEN
@@ -783,6 +1041,274 @@ PARSE_LOADER_RECORD_FAIL:
         sec
         rts
 
+SWI_HANDLER:
+        tsx
+        stx     BRK_FRAME
+        ldaa    0,x
+        staa    BRK_SAVE_CC
+        ldaa    1,x
+        staa    BRK_SAVE_B
+        ldaa    2,x
+        staa    BRK_SAVE_A
+        ldaa    3,x
+        staa    BRK_SAVE_X
+        ldaa    4,x
+        staa    BRK_SAVE_X+1
+        ldaa    5,x
+        staa    BRK_SAVE_PC
+        ldaa    6,x
+        staa    BRK_SAVE_PC+1
+        lds     #STACK_TOP
+
+        ldaa    BRK_SAVE_PC
+        staa    BRK_ADDR
+        ldaa    BRK_SAVE_PC+1
+        staa    BRK_ADDR+1
+        ldx     BRK_ADDR
+        dex
+        stx     BRK_ADDR
+
+        ldaa    BRK_ADDR
+        staa    BRK_SAVE_PC
+        ldaa    BRK_ADDR+1
+        staa    BRK_SAVE_PC+1
+
+        ldx     BRK_FRAME
+        inx
+        inx
+        inx
+        inx
+        inx
+        inx
+        stx     BRK_USER_SP
+
+        tst     BP_ACTIVE
+        beq     SWI_HANDLER_PRINT
+        ldaa    BRK_ADDR
+        cmpa    BP_ADDR
+        bne     SWI_HANDLER_PRINT
+        ldaa    BRK_ADDR+1
+        cmpa    BP_ADDR+1
+        bne     SWI_HANDLER_PRINT
+        jsr     RESTORE_BREAKPOINT
+
+SWI_HANDLER_PRINT:
+        ldaa    #1
+        staa    BRK_ACTIVE
+        jsr     PRINT_CRLF
+        ldx     #TXT_BRK
+        jsr     PDATA1
+        ldx     BRK_ADDR
+        jsr     PRINT_HEX16
+        jsr     PRINT_SPACE
+        ldx     #TXT_A
+        jsr     PDATA1
+        ldaa    BRK_SAVE_A
+        jsr     PRINT_HEX8
+        jsr     PRINT_SPACE
+        ldx     #TXT_B
+        jsr     PDATA1
+        ldaa    BRK_SAVE_B
+        jsr     PRINT_HEX8
+        jsr     PRINT_SPACE
+        ldx     #TXT_X
+        jsr     PDATA1
+        ldaa    BRK_SAVE_X
+        staa    HEX_VALUE_HI
+        ldaa    BRK_SAVE_X+1
+        staa    HEX_VALUE_LO
+        ldx     HEX_VALUE_HI
+        jsr     PRINT_HEX16
+        jsr     PRINT_SPACE
+        ldx     #TXT_SP
+        jsr     PDATA1
+        ldx     BRK_USER_SP
+        jsr     PRINT_HEX16
+        jsr     PRINT_SPACE
+        ldx     #TXT_CC
+        jsr     PDATA1
+        ldaa    BRK_SAVE_CC
+        jsr     PRINT_HEX8
+        jsr     PRINT_CRLF
+        jmp     MAIN_LOOP
+
+DISASM_ONE:
+        ldx     DISASM_ADDR
+        jsr     PRINT_HEX16
+        jsr     PRINT_SPACE
+        ldaa    0,x
+        staa    HEX_NIBBLE
+        jsr     PRINT_HEX8
+        jsr     PRINT_SPACE
+        ldaa    HEX_NIBBLE
+        cmpa    #$86
+        beq     DISASM_LDAA_IMM
+        cmpa    #$C6
+        beq     DISASM_LDAB_IMM
+        cmpa    #$CE
+        beq     DISASM_LDX_IMM
+        cmpa    #$8E
+        beq     DISASM_LDS_IMM
+        cmpa    #$B7
+        beq     DISASM_STAA_EXT
+        cmpa    #$F7
+        beq     DISASM_STAB_EXT
+        cmpa    #$BD
+        beq     DISASM_JSR_EXT
+        cmpa    #$7E
+        beq     DISASM_JMP_EXT
+        cmpa    #$20
+        beq     DISASM_BRA_REL
+        cmpa    #$26
+        beq     DISASM_BNE_REL
+        cmpa    #$27
+        beq     DISASM_BEQ_REL
+        cmpa    #$39
+        beq     DISASM_RTS
+        cmpa    #$3F
+        beq     DISASM_SWI
+        cmpa    #$01
+        beq     DISASM_NOP
+        ldx     #TXT_DB
+        jsr     PDATA1
+        ldaa    HEX_NIBBLE
+        jsr     PRINT_HEX8
+        ldab    #1
+        jmp     DISASM_ADVANCE
+
+DISASM_LDAA_IMM:
+        ldx     #TXT_LDAA_IMM
+        bra     DISASM_IMM8
+DISASM_LDAB_IMM:
+        ldx     #TXT_LDAB_IMM
+        bra     DISASM_IMM8
+DISASM_LDX_IMM:
+        ldx     #TXT_LDX_IMM
+        bra     DISASM_IMM16
+DISASM_LDS_IMM:
+        ldx     #TXT_LDS_IMM
+        bra     DISASM_IMM16
+DISASM_STAA_EXT:
+        ldx     #TXT_STAA_EXT
+        bra     DISASM_EXT16
+DISASM_STAB_EXT:
+        ldx     #TXT_STAB_EXT
+        bra     DISASM_EXT16
+DISASM_JSR_EXT:
+        ldx     #TXT_JSR_EXT
+        bra     DISASM_EXT16
+DISASM_JMP_EXT:
+        ldx     #TXT_JMP_EXT
+        bra     DISASM_EXT16
+DISASM_BRA_REL:
+        ldx     #TXT_BRA_REL
+        bra     DISASM_IMM8
+DISASM_BNE_REL:
+        ldx     #TXT_BNE_REL
+        bra     DISASM_IMM8
+DISASM_BEQ_REL:
+        ldx     #TXT_BEQ_REL
+        bra     DISASM_IMM8
+DISASM_RTS:
+        ldx     #TXT_RTS
+        jsr     PDATA1
+        ldab    #1
+        jmp     DISASM_ADVANCE
+DISASM_SWI:
+        ldx     #TXT_SWI
+        jsr     PDATA1
+        ldab    #1
+        jmp     DISASM_ADVANCE
+DISASM_NOP:
+        ldx     #TXT_NOP
+        jsr     PDATA1
+        ldab    #1
+        jmp     DISASM_ADVANCE
+
+DISASM_IMM8:
+        jsr     PDATA1
+        ldx     DISASM_ADDR
+        ldaa    1,x
+        jsr     PRINT_HEX8
+        ldab    #2
+        jmp     DISASM_ADVANCE
+
+DISASM_IMM16:
+        jsr     PDATA1
+        ldx     DISASM_ADDR
+        ldaa    1,x
+        staa    HEX_VALUE_HI
+        ldaa    2,x
+        staa    HEX_VALUE_LO
+        ldx     HEX_VALUE_HI
+        jsr     PRINT_HEX16
+        ldab    #3
+        jmp     DISASM_ADVANCE
+
+DISASM_EXT16:
+        jsr     PDATA1
+        ldx     DISASM_ADDR
+        ldaa    1,x
+        staa    HEX_VALUE_HI
+        ldaa    2,x
+        staa    HEX_VALUE_LO
+        ldx     HEX_VALUE_HI
+        jsr     PRINT_HEX16
+        ldab    #3
+
+DISASM_ADVANCE:
+        jsr     PRINT_CRLF
+        ldx     DISASM_ADDR
+DISASM_ADVANCE_LOOP:
+        inx
+        decb
+        bne     DISASM_ADVANCE_LOOP
+        stx     DISASM_ADDR
+        rts
+
+TXT_BRK:        fcc     "BRK "
+                fcb     $04
+TXT_A:          fcc     "A="
+                fcb     $04
+TXT_B:          fcc     "B="
+                fcb     $04
+TXT_X:          fcc     "X="
+                fcb     $04
+TXT_SP:         fcc     "SP="
+                fcb     $04
+TXT_CC:         fcc     "CC="
+                fcb     $04
+TXT_DB:         fcc     "DB $"
+                fcb     $04
+TXT_LDAA_IMM:   fcc     "LDAA #$"
+                fcb     $04
+TXT_LDAB_IMM:   fcc     "LDAB #$"
+                fcb     $04
+TXT_LDX_IMM:    fcc     "LDX #$"
+                fcb     $04
+TXT_LDS_IMM:    fcc     "LDS #$"
+                fcb     $04
+TXT_STAA_EXT:   fcc     "STAA $"
+                fcb     $04
+TXT_STAB_EXT:   fcc     "STAB $"
+                fcb     $04
+TXT_JSR_EXT:    fcc     "JSR $"
+                fcb     $04
+TXT_JMP_EXT:    fcc     "JMP $"
+                fcb     $04
+TXT_BRA_REL:    fcc     "BRA $"
+                fcb     $04
+TXT_BNE_REL:    fcc     "BNE $"
+                fcb     $04
+TXT_BEQ_REL:    fcc     "BEQ $"
+                fcb     $04
+TXT_RTS:        fcc     "RTS"
+                fcb     $04
+TXT_SWI:        fcc     "SWI"
+                fcb     $04
+TXT_NOP:        fcc     "NOP"
+                fcb     $04
+
 HEX_TO_NIBBLE:
         cmpa    #'0'
         blo     HEX_TO_NIBBLE_FAIL
@@ -823,6 +1349,6 @@ SPURIOUS_IRQ:
 
         org     VEC_IRQ
         fdb     SPURIOUS_IRQ     ; VEC_IRQ
-        fdb     MONITOR_ENTRY    ; VEC_SWI
+        fdb     SWI_HANDLER      ; VEC_SWI
         fdb     SPURIOUS_IRQ     ; VEC_NMI
         fdb     RESET            ; VEC_RESET

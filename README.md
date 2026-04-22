@@ -25,6 +25,7 @@ MIKBUG 全体の完全互換は狙いませんが、電大版 BASIC が利用す
 ## ドキュメント
 
 - [docs/README.md](/Users/kuninet/git/MC6800_monitor/docs/README.md): docs 全体の目次
+- [docs/usage/monitor_commands.md](/Users/kuninet/git/MC6800_monitor/docs/usage/monitor_commands.md): ROM モニタのコマンドリファレンス
 - [docs/requirements/monitor_requirements.md](/Users/kuninet/git/MC6800_monitor/docs/requirements/monitor_requirements.md): 要件定義
 - [docs/design/memory_map.md](/Users/kuninet/git/MC6800_monitor/docs/design/memory_map.md): 初版メモリマップ案
 - [docs/design/architecture.md](/Users/kuninet/git/MC6800_monitor/docs/design/architecture.md): モニタ全体のアーキテクチャ
