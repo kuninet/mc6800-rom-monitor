@@ -5,6 +5,7 @@
 ## ディレクトリ構成
 
 - [requirements/](/Users/kuninet/git/MC6800_monitor/docs/requirements): 何を作るか、どの制約があるかをまとめる
+- [usage/](/Users/kuninet/git/MC6800_monitor/docs/usage): 実機やエミュレータでの使い方をまとめる
 - [design/](/Users/kuninet/git/MC6800_monitor/docs/design): どう作るかをまとめる
 - [plans/](/Users/kuninet/git/MC6800_monitor/docs/plans): 実装順序やフェーズ分割をまとめる
 - [testing/](/Users/kuninet/git/MC6800_monitor/docs/testing): 実機確認や検証手順をまとめる
@@ -22,6 +23,7 @@
 ## 現在の主要ドキュメント
 
 - [requirements/monitor_requirements.md](/Users/kuninet/git/MC6800_monitor/docs/requirements/monitor_requirements.md)
+- [usage/monitor_commands.md](/Users/kuninet/git/MC6800_monitor/docs/usage/monitor_commands.md): ROM モニタのコマンドリファレンス
 - [design/memory_map.md](/Users/kuninet/git/MC6800_monitor/docs/design/memory_map.md)
 - [design/architecture.md](/Users/kuninet/git/MC6800_monitor/docs/design/architecture.md)
 - [plans/implementation_plan.md](/Users/kuninet/git/MC6800_monitor/docs/plans/implementation_plan.md)

@@ -97,6 +97,8 @@ MC6800 向けに、少ない ROM / RAM で動作する ROM モニタを実装す
 
 簡易アセンブラは初回実装では見送る。短いパッチは `M` コマンド、まとまったコードは PC 側でアセンブルして `L` コマンドでロードする運用を優先する。
 
+利用者向けの具体的な入力例と表示例は [../usage/monitor_commands.md](/Users/kuninet/git/MC6800_monitor/docs/usage/monitor_commands.md) を参照する。
+
 ### ローダ仕様メモ
 
 - ローダ中は通常コマンド入力とは別の無エコー受信を使う
