@@ -59,6 +59,7 @@ BRK_SAVE_B       equ BRK_SAVE_CC+1
 BRK_SAVE_A       equ BRK_SAVE_B+1
 BRK_SAVE_X       equ BRK_SAVE_A+1
 BRK_SAVE_PC      equ BRK_SAVE_X+2
+FILL_VALUE       equ BRK_SAVE_PC+2
 
 LOAD_MODE_NONE   equ 0
 LOAD_MODE_SREC   equ 1

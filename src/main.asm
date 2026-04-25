@@ -52,8 +52,8 @@ RESET:
         clr     BP_ACTIVE
         clr     BRK_ACTIVE
         jsr     ACIA_INIT
-        ldaa    #'*'
-        jsr     MON_OUTEEE
+        ldx     #TXT_WELCOME
+        jsr     PDATA1
         ldaa    #CHR_CR
         jsr     MON_OUTEEE
 
@@ -93,8 +93,16 @@ CHK_CMD_CLEAR:
         jmp     CMD_BREAK_CLEAR
 CHK_CMD_UNASM:
         cmpa    #'U'
-        bne     MAIN_LOOP_ERROR
+        bne     CHK_CMD_HELP
         jmp     CMD_UNASM
+CHK_CMD_HELP:
+        cmpa    #'H'
+        bne     CHK_CMD_FILL
+        jmp     CMD_HELP
+CHK_CMD_FILL:
+        cmpa    #'F'
+        bne     MAIN_LOOP_ERROR
+        jmp     CMD_FILL
 
 MAIN_LOOP_ERROR:
         jsr     SHOW_ERROR
@@ -267,6 +275,103 @@ PARSE_DUMP_FAIL:
         sec
         rts
 
+PARSE_FILL_ARGS:
+        stx     ARG_PTR
+        clr     ARG_LEN
+PARSE_FILL_START_SCAN:
+        tstb
+        bne     PARSE_FILL_START_HAS_CHAR
+        jmp     PARSE_FILL_FAIL
+PARSE_FILL_START_HAS_CHAR:
+        ldaa    0,x
+        cmpa    #'-'
+        beq     PARSE_FILL_START_DONE
+        cmpa    #CHR_SPACE
+        bne     PARSE_FILL_START_CHAR_OK
+        jmp     PARSE_FILL_FAIL
+PARSE_FILL_START_CHAR_OK:
+        inc     ARG_LEN
+        inx
+        decb
+        bra     PARSE_FILL_START_SCAN
+PARSE_FILL_START_DONE:
+        tst     ARG_LEN
+        bne     PARSE_FILL_START_LEN_OK
+        jmp     PARSE_FILL_FAIL
+PARSE_FILL_START_LEN_OK:
+        inx
+        decb
+        bne     PARSE_FILL_HAS_END
+        jmp     PARSE_FILL_FAIL
+PARSE_FILL_HAS_END:
+        stx     ARG2_PTR
+        clr     ARG2_LEN
+PARSE_FILL_END_SCAN:
+        tstb
+        bne     PARSE_FILL_END_HAS_CHAR
+        jmp     PARSE_FILL_FAIL
+PARSE_FILL_END_HAS_CHAR:
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        beq     PARSE_FILL_END_DONE
+        inc     ARG2_LEN
+        inx
+        decb
+        bra     PARSE_FILL_END_SCAN
+PARSE_FILL_END_DONE:
+        tst     ARG2_LEN
+        bne     PARSE_FILL_END_LEN_OK
+        jmp     PARSE_FILL_FAIL
+PARSE_FILL_END_LEN_OK:
+PARSE_FILL_VALUE_SKIP:
+        tstb
+        bne     PARSE_FILL_VALUE_HAS_CHAR
+        jmp     PARSE_FILL_FAIL
+PARSE_FILL_VALUE_HAS_CHAR:
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        bne     PARSE_FILL_VALUE_FOUND
+        inx
+        decb
+        bra     PARSE_FILL_VALUE_SKIP
+PARSE_FILL_VALUE_FOUND:
+        stx     LOADER_PARSE_PTR
+        stab    LOADER_COUNT
+        cmpb    #3
+        bhs     PARSE_FILL_FAIL
+
+        ldx     ARG_PTR
+        ldab    ARG_LEN
+        jsr     PARSE_HEX
+        bcs     PARSE_FILL_FAIL
+        ldx     HEX_VALUE_HI
+        stx     MOD_ADDR
+
+        ldx     ARG2_PTR
+        ldab    ARG2_LEN
+        jsr     PARSE_HEX
+        bcs     PARSE_FILL_FAIL
+        ldx     HEX_VALUE_HI
+        stx     DUMP_END
+
+        ldx     MOD_ADDR
+        jsr     CMP_X_DUMP_END
+        bhi     PARSE_FILL_FAIL
+
+        ldx     LOADER_PARSE_PTR
+        ldab    LOADER_COUNT
+        jsr     PARSE_HEX
+        bcs     PARSE_FILL_FAIL
+        ldaa    HEX_VALUE_HI
+        bne     PARSE_FILL_FAIL
+        ldaa    HEX_VALUE_LO
+        staa    FILL_VALUE
+        clc
+        rts
+PARSE_FILL_FAIL:
+        sec
+        rts
+
 CMP_X_DUMP_END:
         stx     HEX_VALUE_HI
         ldaa    HEX_VALUE_HI
@@ -355,7 +460,7 @@ CMD_GO_ADDR_OK:
 CMD_BREAK_SET:
         ldab    LINE_LEN
         cmpb    #1
-        beq     CMD_BREAK_SET_ERR
+        beq     CMD_BREAK_QUERY
         ldx     #LINE_BUF+1
         decb
         jsr     PARSE_HEX
@@ -379,6 +484,21 @@ CMD_BREAK_SET_WRITE:
         jmp     MAIN_LOOP
 CMD_BREAK_SET_ERR:
         jmp     MAIN_LOOP_ERROR
+
+CMD_BREAK_QUERY:
+        ldx     #TXT_BP
+        jsr     PDATA1
+        tst     BP_ACTIVE
+        bne     CMD_BREAK_QUERY_ACTIVE
+        ldx     #TXT_NONE
+        jsr     PDATA1
+        jsr     PRINT_CRLF
+        jmp     MAIN_LOOP
+CMD_BREAK_QUERY_ACTIVE:
+        ldx     BP_ADDR
+        jsr     PRINT_HEX16
+        jsr     PRINT_CRLF
+        jmp     MAIN_LOOP
 
 CMD_BREAK_CLEAR:
         ldab    LINE_LEN
@@ -464,6 +584,40 @@ CMD_UNASM_DONE:
 CMD_UNASM_ERR:
         jmp     MAIN_LOOP_ERROR
 
+CMD_HELP:
+        ldab    LINE_LEN
+        cmpb    #1
+        bne     CMD_HELP_ERR
+        ldx     #TXT_HELP
+        jsr     PDATA1
+        ldaa    #CHR_CR
+        jsr     MON_OUTEEE
+        jmp     MAIN_LOOP
+CMD_HELP_ERR:
+        jmp     MAIN_LOOP_ERROR
+
+CMD_FILL:
+        ldab    LINE_LEN
+        cmpb    #1
+        beq     CMD_FILL_ERR
+        ldx     #LINE_BUF+1
+        decb
+        jsr     PARSE_FILL_ARGS
+        bcs     CMD_FILL_ERR
+CMD_FILL_LOOP:
+        ldx     MOD_ADDR
+        ldaa    FILL_VALUE
+        staa    0,x
+        jsr     CMP_X_DUMP_END
+        beq     CMD_FILL_DONE
+        inx
+        stx     MOD_ADDR
+        bra     CMD_FILL_LOOP
+CMD_FILL_DONE:
+        jmp     MAIN_LOOP
+CMD_FILL_ERR:
+        jmp     MAIN_LOOP_ERROR
+
 CMD_LOAD:
         ldab    LINE_LEN
         cmpb    #1
@@ -478,13 +632,7 @@ CMD_LOAD:
         clr     LOADER_STAGE
 
 CMD_LOAD_LOOP:
-        jsr     READ_RECORD
-        bcs     CMD_LOAD_ERROR
-
-        ldab    LINE_LEN
-        beq     CMD_LOAD_LOOP
-
-        jsr     PARSE_LOADER_RECORD
+        jsr     READ_LOADER_RECORD
         bcs     CMD_LOAD_ERROR
         cmpa    #1
         beq     CMD_LOAD_OK
@@ -606,6 +754,297 @@ READ_RECORD_FAIL:
         cmpa    #CHR_CR
         bne     READ_RECORD_FAIL
 READ_RECORD_FAIL_DONE:
+        sec
+        rts
+
+READ_LOADER_RECORD:
+        jsr     READ_RECORD_HEAD
+        bcs     READ_LOADER_RECORD_FAIL
+        ldaa    LOADER_MODE
+        bne     READ_LOADER_RECORD_MODE_SET
+        ldaa    HEX_NIBBLE
+        cmpa    #'S'
+        beq     READ_LOADER_RECORD_SET_SREC
+        cmpa    #':'
+        beq     READ_LOADER_RECORD_SET_IHEX
+        sec
+        rts
+READ_LOADER_RECORD_SET_SREC:
+        ldaa    #LOAD_MODE_SREC
+        staa    LOADER_MODE
+        bra     READ_LOADER_RECORD_MODE_SET
+READ_LOADER_RECORD_SET_IHEX:
+        ldaa    #LOAD_MODE_IHEX
+        staa    LOADER_MODE
+READ_LOADER_RECORD_MODE_SET:
+        ldaa    LOADER_MODE
+        cmpa    #LOAD_MODE_SREC
+        beq     READ_SREC_RECORD
+        cmpa    #LOAD_MODE_IHEX
+        bne     READ_LOADER_RECORD_FAIL
+        jmp     READ_IHEX_RECORD
+READ_LOADER_RECORD_FAIL:
+        sec
+        rts
+
+READ_RECORD_HEAD:
+        jsr     ACIA_GETC
+        cmpa    #CHR_LF
+        beq     READ_RECORD_HEAD
+        cmpa    #CHR_CR
+        beq     READ_RECORD_HEAD
+        cmpa    #CHR_SPACE
+        blo     READ_RECORD_HEAD
+        staa    HEX_NIBBLE
+        clc
+        rts
+
+READ_RECORD_TRAILER:
+        jsr     ACIA_GETC
+        cmpa    #CHR_LF
+        beq     READ_RECORD_TRAILER_OK
+        cmpa    #CHR_CR
+        beq     READ_RECORD_TRAILER_OK
+        sec
+        rts
+READ_RECORD_TRAILER_OK:
+        clc
+        rts
+
+READ_HEXBYTE_INPUT:
+        pshb
+        jsr     ACIA_GETC
+        jsr     HEX_TO_NIBBLE
+        bcs     READ_HEXBYTE_INPUT_FAIL
+        lsla
+        lsla
+        lsla
+        lsla
+        tab
+        jsr     ACIA_GETC
+        jsr     HEX_TO_NIBBLE
+        bcs     READ_HEXBYTE_INPUT_FAIL
+        aba
+        pulb
+        clc
+        rts
+READ_HEXBYTE_INPUT_FAIL:
+        pulb
+        sec
+        rts
+
+READ_SREC_RECORD:
+        ldaa    HEX_NIBBLE
+        cmpa    #'S'
+        beq     READ_SREC_HEAD_OK
+        jmp     READ_SREC_FAIL
+READ_SREC_HEAD_OK:
+        ldaa    #1
+        staa    LOADER_STAGE
+        jsr     ACIA_GETC
+        staa    LOADER_TYPE
+        cmpa    #'0'
+        beq     READ_SREC_TYPE_OK
+        cmpa    #'1'
+        beq     READ_SREC_TYPE_OK
+        cmpa    #'2'
+        beq     READ_SREC_TYPE_OK
+        cmpa    #'5'
+        beq     READ_SREC_TYPE_OK
+        cmpa    #'8'
+        beq     READ_SREC_TYPE_OK
+        cmpa    #'9'
+        beq     READ_SREC_TYPE_OK
+        jmp     READ_SREC_FAIL
+READ_SREC_TYPE_OK:
+        ldaa    #2
+        staa    LOADER_STAGE
+        jsr     READ_HEXBYTE_INPUT
+        bcs     READ_SREC_FAIL_NEAR1
+        staa    LOADER_COUNT
+        staa    LOADER_SUM
+        ldaa    LOADER_TYPE
+        cmpa    #'2'
+        beq     READ_SREC_ADDR24
+        cmpa    #'8'
+        beq     READ_SREC_ADDR24
+        ldaa    LOADER_COUNT
+        cmpa    #3
+        blo     READ_SREC_FAIL_NEAR1
+        ldaa    #3
+        staa    LOADER_STAGE
+        jsr     READ_HEXBYTE_INPUT
+        bcs     READ_SREC_FAIL_NEAR1
+        staa    LOADER_ADDR
+        jsr     ADD_TO_LOADER_SUM
+        jsr     READ_HEXBYTE_INPUT
+        bcs     READ_SREC_FAIL_NEAR1
+        staa    LOADER_ADDR+1
+        jsr     ADD_TO_LOADER_SUM
+        ldab    LOADER_COUNT
+        subb    #3
+        bra     READ_SREC_DATA_LOOP
+READ_SREC_FAIL_NEAR1:
+        jmp     READ_SREC_FAIL
+READ_SREC_ADDR24:
+        ldaa    LOADER_COUNT
+        cmpa    #4
+        blo     READ_SREC_FAIL_NEAR2
+        ldaa    #3
+        staa    LOADER_STAGE
+        jsr     READ_HEXBYTE_INPUT
+        bcs     READ_SREC_FAIL_NEAR2
+        staa    HEX_NIBBLE
+        jsr     ADD_TO_LOADER_SUM
+        ldaa    HEX_NIBBLE
+        bne     READ_SREC_FAIL_NEAR2
+        jsr     READ_HEXBYTE_INPUT
+        bcs     READ_SREC_FAIL_NEAR2
+        staa    LOADER_ADDR
+        jsr     ADD_TO_LOADER_SUM
+        jsr     READ_HEXBYTE_INPUT
+        bcs     READ_SREC_FAIL_NEAR2
+        staa    LOADER_ADDR+1
+        jsr     ADD_TO_LOADER_SUM
+        ldab    LOADER_COUNT
+        subb    #4
+        bra     READ_SREC_DATA_LOOP
+READ_SREC_FAIL_NEAR2:
+        jmp     READ_SREC_FAIL
+READ_SREC_DATA_LOOP:
+        ldaa    #4
+        staa    LOADER_STAGE
+        tstb
+        beq     READ_SREC_CHECKSUM
+        jsr     READ_HEXBYTE_INPUT
+        bcs     READ_SREC_FAIL
+        staa    HEX_NIBBLE
+        jsr     ADD_TO_LOADER_SUM
+        ldaa    LOADER_TYPE
+        cmpa    #'1'
+        beq     READ_SREC_STORE
+        cmpa    #'2'
+        bne     READ_SREC_SKIP_STORE
+READ_SREC_STORE:
+        ldaa    HEX_NIBBLE
+        pshb
+        ldx     LOADER_ADDR
+        staa    0,x
+        inx
+        stx     LOADER_ADDR
+        pulb
+READ_SREC_SKIP_STORE:
+        decb
+        bra     READ_SREC_DATA_LOOP
+READ_SREC_CHECKSUM:
+        ldaa    #5
+        staa    LOADER_STAGE
+        jsr     READ_HEXBYTE_INPUT
+        bcs     READ_SREC_FAIL
+        jsr     ADD_TO_LOADER_SUM
+        cmpa    #$FF
+        bne     READ_SREC_FAIL
+        jsr     READ_RECORD_TRAILER
+        bcs     READ_SREC_FAIL
+        ldaa    LOADER_TYPE
+        cmpa    #'8'
+        beq     READ_SREC_EOF
+        cmpa    #'9'
+        beq     READ_SREC_EOF
+        ldaa    #0
+        clc
+        rts
+READ_SREC_EOF:
+        ldaa    #1
+        clc
+        rts
+READ_SREC_FAIL:
+        sec
+        rts
+
+READ_IHEX_RECORD:
+        ldaa    HEX_NIBBLE
+        cmpa    #':'
+        beq     READ_IHEX_HEAD_OK
+        jmp     READ_IHEX_FAIL
+READ_IHEX_HEAD_OK:
+        ldaa    #1
+        staa    LOADER_STAGE
+        ldaa    #2
+        staa    LOADER_STAGE
+        jsr     READ_HEXBYTE_INPUT
+        bcs     READ_IHEX_FAIL_NEAR1
+        staa    LOADER_COUNT
+        staa    LOADER_SUM
+        ldaa    #3
+        staa    LOADER_STAGE
+        jsr     READ_HEXBYTE_INPUT
+        bcs     READ_IHEX_FAIL_NEAR1
+        staa    LOADER_ADDR
+        jsr     ADD_TO_LOADER_SUM
+        jsr     READ_HEXBYTE_INPUT
+        bcs     READ_IHEX_FAIL_NEAR1
+        staa    LOADER_ADDR+1
+        jsr     ADD_TO_LOADER_SUM
+        jsr     READ_HEXBYTE_INPUT
+        bcs     READ_IHEX_FAIL_NEAR1
+        staa    LOADER_TYPE
+        jsr     ADD_TO_LOADER_SUM
+        ldaa    LOADER_TYPE
+        cmpa    #$00
+        beq     READ_IHEX_DATA
+        cmpa    #$01
+        bne     READ_IHEX_FAIL
+        ldaa    LOADER_COUNT
+        bne     READ_IHEX_FAIL
+        bra     READ_IHEX_DATA
+READ_IHEX_FAIL_NEAR1:
+        jmp     READ_IHEX_FAIL
+READ_IHEX_DATA:
+        ldaa    #4
+        staa    LOADER_STAGE
+        ldab    LOADER_COUNT
+READ_IHEX_DATA_LOOP:
+        tstb
+        beq     READ_IHEX_CHECKSUM
+        jsr     READ_HEXBYTE_INPUT
+        bcs     READ_IHEX_FAIL
+        staa    HEX_NIBBLE
+        jsr     ADD_TO_LOADER_SUM
+        ldaa    LOADER_TYPE
+        cmpa    #$00
+        bne     READ_IHEX_SKIP_STORE
+        ldaa    HEX_NIBBLE
+        pshb
+        ldx     LOADER_ADDR
+        staa    0,x
+        inx
+        stx     LOADER_ADDR
+        pulb
+READ_IHEX_SKIP_STORE:
+        decb
+        bra     READ_IHEX_DATA_LOOP
+READ_IHEX_CHECKSUM:
+        ldaa    #5
+        staa    LOADER_STAGE
+        jsr     READ_HEXBYTE_INPUT
+        bcs     READ_IHEX_FAIL
+        jsr     ADD_TO_LOADER_SUM
+        cmpa    #$00
+        bne     READ_IHEX_FAIL
+        jsr     READ_RECORD_TRAILER
+        bcs     READ_IHEX_FAIL
+        ldaa    LOADER_TYPE
+        cmpa    #$01
+        beq     READ_IHEX_EOF
+        ldaa    #0
+        clc
+        rts
+READ_IHEX_EOF:
+        ldaa    #1
+        clc
+        rts
+READ_IHEX_FAIL:
         sec
         rts
 
@@ -1267,6 +1706,14 @@ DISASM_ADVANCE_LOOP:
         rts
 
 TXT_BRK:        fcc     "BRK "
+                fcb     $04
+TXT_WELCOME:    fcc     "MC6800 MONITOR"
+                fcb     $04
+TXT_HELP:       fcc     "D M G L B C R U H F"
+                fcb     $04
+TXT_BP:         fcc     "BP "
+                fcb     $04
+TXT_NONE:       fcc     "NONE"
                 fcb     $04
 TXT_A:          fcc     "A="
                 fcb     $04

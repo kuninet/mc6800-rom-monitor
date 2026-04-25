@@ -67,7 +67,7 @@ def datapack_srec_script(filename: str, entry: str = "0100") -> str:
 
 def test_boot_prompt():
     stdout, stderr, rc = run_emu("\r\r")
-    assert "*" in stdout, f"missing boot marker: {stdout!r}"
+    assert "MC6800 MONITOR" in stdout, f"missing welcome message: {stdout!r}"
     assert "]" in stdout, f"missing prompt: {stdout!r}"
     print("[PASS] test_boot_prompt")
 
@@ -125,6 +125,29 @@ def test_error_display():
     print("[PASS] test_error_display")
 
 
+def test_help_command():
+    stdout, stderr, rc = run_emu("H\r\r")
+    assert "D M G L B C R U H F" in stdout, f"missing help command list: {stdout!r}"
+    print("[PASS] test_help_command")
+
+
+def test_breakpoint_query():
+    input_text = (
+        "B\r"
+        "M0100\r86\r42\r3F\r.\r"
+        "B0100\r"
+        "B\r"
+        "G0100\r"
+        "B\r"
+        "\r"
+    )
+    stdout, stderr, rc = run_emu(input_text, max_cycles=20_000_000)
+    assert "BP NONE" in stdout, f"missing empty breakpoint query: {stdout!r}"
+    assert "BP 0100" in stdout, f"missing active breakpoint query: {stdout!r}"
+    assert stdout.count("BP NONE") >= 2, f"break hit did not clear breakpoint query: {stdout!r}"
+    print("[PASS] test_breakpoint_query")
+
+
 def test_breakpoint_resume_and_clear():
     input_text = (
         "M0100\r"
@@ -146,6 +169,26 @@ def test_breakpoint_resume_and_clear():
     assert "0140 86" in stdout, f"clear did not restore original opcode: {stdout!r}"
     assert "?" in stdout, f"missing ROM breakpoint error: {stdout!r}"
     print("[PASS] test_breakpoint_resume_and_clear")
+
+
+def test_fill_command():
+    input_text = (
+        "F0100-0103 AA\r"
+        "D0100-0103\r"
+        "F0100-01FF 00\r"
+        "D0100-010F\r"
+        "F0103-0100 00\r"
+        "F0100-0103\r"
+        "F0100-0103 100\r"
+        "\r"
+    )
+    stdout, stderr, rc = run_emu(input_text, max_cycles=20_000_000)
+    assert "0100 AA AA AA AA" in stdout, f"fill AA range missing: {stdout!r}"
+    assert "0100 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00" in stdout, (
+        f"fill 00 range missing: {stdout!r}"
+    )
+    assert stdout.count("?") >= 3, f"missing fill argument errors: {stdout!r}"
+    print("[PASS] test_fill_command")
 
 
 def test_unassemble_command():
@@ -194,7 +237,10 @@ def main():
         test_srec_load,
         test_ihex_load,
         test_error_display,
+        test_help_command,
+        test_breakpoint_query,
         test_breakpoint_resume_and_clear,
+        test_fill_command,
         test_unassemble_command,
         test_datapack_hello,
         test_datapack_micbas13_boot,
