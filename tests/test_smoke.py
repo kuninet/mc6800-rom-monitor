@@ -171,6 +171,49 @@ def test_breakpoint_resume_and_clear():
     print("[PASS] test_breakpoint_resume_and_clear")
 
 
+def test_resume_requires_active_breakpoint():
+    stdout, stderr, rc = run_emu("R\r\r", max_cycles=2_000_000)
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert "?" in stdout, f"resume without breakpoint did not report error: {stdout!r}"
+    assert "BRK" not in stdout, f"resume without breakpoint should not enter break state: {stdout!r}"
+    print("[PASS] test_resume_requires_active_breakpoint")
+
+
+def test_breakpoint_resume_restores_registers():
+    input_text = (
+        "M0100\r"
+        "86\r12\rC6\r34\rCE\r1A\r2B\r"
+        "B7\r01\r20\rF7\r01\r21\rFF\r01\r22\r3F\r.\r"
+        "B0107\r"
+        "G0100\r"
+        "R\r"
+        "D0120-0123\r"
+        "\r"
+    )
+    stdout, stderr, rc = run_emu(input_text, max_cycles=20_000_000)
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert "BRK 0107" in stdout, f"missing breakpoint hit: {stdout!r}"
+    assert "0120 12 34 1A 2B" in stdout, f"resume did not preserve A/B/X: {stdout!r}"
+    print("[PASS] test_breakpoint_resume_restores_registers")
+
+
+def test_breakpoint_resume_restores_user_sp():
+    input_text = (
+        "M0100\r"
+        "8E\r1D\r00\rBF\r01\r30\r3F\r.\r"
+        "B0103\r"
+        "G0100\r"
+        "R\r"
+        "D0130-0131\r"
+        "\r"
+    )
+    stdout, stderr, rc = run_emu(input_text, max_cycles=20_000_000)
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert "BRK 0103" in stdout, f"missing breakpoint hit: {stdout!r}"
+    assert "0130 1D 00" in stdout, f"resume did not restore user SP: {stdout!r}"
+    print("[PASS] test_breakpoint_resume_restores_user_sp")
+
+
 def test_fill_command():
     input_text = (
         "F0100-0103 AA\r"
@@ -240,6 +283,9 @@ def main():
         test_help_command,
         test_breakpoint_query,
         test_breakpoint_resume_and_clear,
+        test_resume_requires_active_breakpoint,
+        test_breakpoint_resume_restores_registers,
+        test_breakpoint_resume_restores_user_sp,
         test_fill_command,
         test_unassemble_command,
         test_datapack_hello,
