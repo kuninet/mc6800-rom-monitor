@@ -14,6 +14,12 @@
 - 修正後は Pull Request を作成する
 - マージは人間が行うため、Codex は絶対にマージしない
 
+## 作業開始時の確認
+
+- 作業前に `docs/development/workflow.md` を読み、このプロジェクトの Issue/PR、テスト、レビュー運用を確認する
+- 新しいコンテキストで作業する場合は `docs/development/project_context.md` も読み、現在の制約、主要ドキュメント、SD/FAT 再実装の経緯を確認する
+- Blog や過去会話だけにある判断は、必要に応じて Git 管理下の docs / Issue / PR に要点を残す
+
 ## チーム運用
 
 - 作業は基本的にエージェントチームで進める
