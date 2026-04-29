@@ -28,6 +28,18 @@ RAM_END = 0x1FFF
 ACIA_CTRL = 0x8018
 ACIA_DATA = 0x8019
 
+# PIA (MC6821) レジスタ
+PIA_PRA = 0x8050
+PIA_CRA = 0x8051
+PIA_PRB = 0x8052
+PIA_CRB = 0x8053
+
+# SPI 信号 (PIA Port B)
+SPI_SCLK = 0x01
+SPI_MOSI = 0x02
+SPI_MISO = 0x04
+SPI_CS   = 0x08
+
 # ACIA ステータスビット
 ACIA_STAT_RDRF = 0x01  # 受信データレディ
 ACIA_STAT_TDRE = 0x02  # 送信データレジスタ空
@@ -117,10 +129,159 @@ class ACIA:
         return True
 
 
+class SDCard:
+    """SPI モードの擬似 SD カード (CMD0 に 0x01 を返すだけの最小実装)"""
+    def __init__(self, image_path=None):
+        self.selected = False
+        self.bit_count = 0
+        self.shift_in = 0
+        self.shift_out = 0xFF
+        self.miso = 1
+        self.command = []
+        self.response = []
+        self.app_cmd = False # CMD55 flag
+        self.image = None
+        if image_path:
+            try:
+                with open(image_path, "rb") as f:
+                    self.image = f.read()
+                # print(f"[SD] Loaded disk image: {image_path} ({len(self.image)} bytes)")
+            except Exception as e:
+                print(f"[SD] Error loading image: {e}")
+
+    def handle_bit(self, sclk, mosi, cs):
+        """SPI ビット処理 (Mode 0: Rising edge sample, Falling edge shift)"""
+        self.selected = (cs == 0)
+
+        if not self.selected:
+            self.bit_count = 0
+            self.miso = 1
+            return 1
+
+        if sclk == 1: # Rising Edge (Sample)
+            if self.bit_count == 0:
+                if self.response:
+                    self.shift_out = self.response.pop(0)
+                    # print(f"[SD] Sending response byte: ${self.shift_out:02X}")
+                else:
+                    self.shift_out = 0xFF
+
+            self.shift_in = ((self.shift_in << 1) | (mosi & 1)) & 0xFF
+            self.miso = (self.shift_out >> 7) & 1
+            self.bit_count += 1
+            if self.bit_count >= 8:
+                self.bit_count = 0
+                self._process_byte(self.shift_in)
+        
+        return self.miso
+
+    def shift_next(self):
+        """Falling Edge 相当の処理 (次のビットへ)"""
+        if self.selected:
+            self.shift_out = ((self.shift_out << 1) | 1) & 0xFF
+
+    def _process_byte(self, byte):
+        if not self.response:
+            if self.command:
+                self.command.append(byte)
+                if len(self.command) >= 6:
+                    cmd = self.command[0] & 0x3F
+                    
+                    if self.app_cmd:
+                        self.app_cmd = False
+                        if cmd == 41: # ACMD41
+                            self.response = [0x00] # Ready
+                        else:
+                            self.response = [0x04] # Illegal Command
+                    else:
+                        if cmd == 0: # CMD0
+                            self.response = [0x01]
+                        elif cmd == 8: # CMD8
+                            # R7 response: R1 + 4 bytes
+                            self.response = [0x01, 0x00, 0x00, 0x01, 0xAA]
+                        elif cmd == 17: # CMD17: READ_SINGLE_BLOCK
+                            lba = (self.command[1] << 24) | (self.command[2] << 16) | \
+                                  (self.command[3] << 8) | self.command[4]
+                            self.response = [0x00] # R1: Success
+                            # Data token ($FE) + 512 bytes + 2 bytes CRC
+                            data_block = [0xFE]
+                            if self.image and (lba * 512 < len(self.image)):
+                                offset = lba * 512
+                                data_block.extend(self.image[offset:offset+512])
+                            else:
+                                data_block.extend([0] * 512)
+                            data_block.extend([0xFF, 0xFF]) # Dummy CRC
+                            self.response.extend(data_block)
+                        elif cmd == 55: # CMD55
+                            self.app_cmd = True
+                            self.response = [0x01]
+                        else:
+                            self.response = [0x00]
+                    self.command = []
+            elif (byte & 0xC0) == 0x40: # Command Start
+                self.command = [byte]
+            elif byte == 0xFF: # Idle
+                pass
+
+class PIA:
+    """MC6821 PIA の擬似実装"""
+    def __init__(self, sdcard):
+        self.pra = 0x00
+        self.ddra = 0x00
+        self.cra = 0x00
+        self.prb = 0x00
+        self.ddrb = 0x00
+        self.crb = 0x00
+        self.sdcard = sdcard
+        self._last_sclk = 0
+
+    def read(self, addr, pc=0):
+        val = 0
+        if addr == PIA_PRA:
+            val = self.pra if (self.cra & 0x04) else self.ddra
+        elif addr == PIA_CRA:
+            val = self.cra
+        elif addr == PIA_PRB:
+            # Port B 読み込み時、MISO ビットを SD カードから取得
+            val = self.prb & ~SPI_MISO
+            if self.sdcard.miso:
+                val |= SPI_MISO
+            val = val if (self.crb & 0x04) else self.ddrb
+        elif addr == PIA_CRB:
+            val = self.crb
+        return val
+
+    def write(self, addr, val, pc=0):
+        if addr == 0x00A0:
+            print(f"[TRACE] Write to SD_LOAD_ACTIVE ($00A0) at PC=${pc:04X}: val=${val:02X}")
+        if addr == PIA_PRA:
+            if self.cra & 0x04: self.pra = val
+            else: self.ddra = val
+        elif addr == PIA_CRA:
+            self.cra = val
+        elif addr == PIA_PRB:
+            if self.crb & 0x04:
+                # SPI 信号の変化を SD カードに伝える
+                sclk = (val & SPI_SCLK)
+                mosi = (val & SPI_MOSI) >> 1
+                cs = (val & SPI_CS) >> 3
+                
+                if sclk == 1 and self._last_sclk == 0:
+                    self.sdcard.handle_bit(1, mosi, cs)
+                elif sclk == 0 and self._last_sclk == 1:
+                    self.sdcard.shift_next()
+                self._last_sclk = sclk
+                self.prb = val
+            else:
+                self.ddrb = val
+        elif addr == PIA_CRB:
+            self.crb = val
+
+
 class MC6800:
     """MC6800 CPU エミュレータコア"""
 
-    def __init__(self, acia):
+    def __init__(self, acia, pia=None):
         # レジスタ
         self.a = 0x00       # アキュムレータ A
         self.b = 0x00       # アキュムレータ B
@@ -138,12 +299,14 @@ class MC6800:
         # メモリ（64KB）
         self.mem = bytearray(0x10000)
 
-        # ACIA
+        # ACIA / PIA
         self.acia = acia
+        self.pia = pia
 
         # 実行カウンタ（暴走検知用）
         self.cycles = 0
         self.max_cycles = 100_000_000  # 安全弁
+        self.pc_trace = []
 
     # ----- メモリアクセス -----
     def read(self, addr):
@@ -153,6 +316,8 @@ class MC6800:
             return self.acia.read_status()
         elif addr == ACIA_DATA:
             return self.acia.read_data()
+        elif self.pia and PIA_PRA <= addr <= PIA_CRB:
+            return self.pia.read(addr, pc=self.pc)
         return self.mem[addr]
 
     def write(self, addr, val):
@@ -164,6 +329,9 @@ class MC6800:
             return
         elif addr == ACIA_DATA:
             self.acia.write_data(val)
+            return
+        elif self.pia and PIA_PRA <= addr <= PIA_CRB:
+            self.pia.write(addr, val, pc=self.pc)
             return
         # ROM 領域への書き込みは無視
         if ROM_BASE <= addr <= ROM_END:
@@ -298,6 +466,10 @@ class MC6800:
     # ----- 命令実行 -----
     def step(self):
         """1命令実行"""
+        self.pc_trace.append(self.pc)
+        if len(self.pc_trace) > 20:
+            self.pc_trace.pop(0)
+
         opcode = self.fetch()
         self.cycles += 1
 
@@ -856,6 +1028,25 @@ class MC6800:
         # --- PULA ---
         elif opcode == 0x32:
             self.a = self.pull8()
+            self.update_nz(self.a)
+
+        # --- TST ext ---
+        elif opcode == 0x7D:
+            addr = self.addr_extended()
+            val = self.read(addr)
+            self.update_nz(val)
+            self.cc_v = False
+            self.cc_c = False
+
+        # --- CLR ext ---
+        elif opcode == 0x7F:
+            addr = self.addr_extended()
+            self.write(addr, 0)
+            self.update_nz(0)
+            self.cc_v = False
+            self.cc_c = False
+            if (self.pc - 3) == 0xF0B8:
+                print("[SD] SD_GETC EOF reached!")
 
         # --- PSHB ---
         elif opcode == 0x37:
@@ -872,7 +1063,16 @@ class MC6800:
             self.update_nz(self.a)
             self.cc_v = False
 
-        elif opcode == 0x81:  # CMPA #imm
+        elif opcode == 0x82:  # SBCA #imm
+            val = self.addr_imm8()
+            c = 1 if self.cc_c else 0
+            result = self.a - val - c
+            self.cc_c = result < 0
+            self.cc_v = bool(((self.a ^ val) & (self.a ^ result)) & 0x80)
+            self.a = result & 0xFF
+            self.update_nz(self.a)
+
+        elif opcode == 0x81:  # CMPA imm
             val = self.addr_imm8()
             result = self.a - val
             self.cc_c = result < 0
@@ -883,6 +1083,35 @@ class MC6800:
         elif opcode == 0x8B:  # ADDA #imm
             val = self.addr_imm8()
             result = self.a + val
+            self.cc_c = result > 0xFF
+            self.cc_v = bool((~(self.a ^ val) & (self.a ^ result)) & 0x80)
+            self.a = result & 0xFF
+            self.update_nz(self.a)
+
+        elif opcode == 0x89:  # ADCA #imm
+            val = self.addr_imm8()
+            c = 1 if self.cc_c else 0
+            result = self.a + val + c
+            self.cc_c = result > 0xFF
+            self.cc_v = bool((~(self.a ^ val) & (self.a ^ result)) & 0x80)
+            self.a = result & 0xFF
+            self.update_nz(self.a)
+
+        elif opcode == 0x99:  # ADCA direct
+            addr = self.addr_direct()
+            val = self.read(addr)
+            c = 1 if self.cc_c else 0
+            result = self.a + val + c
+            self.cc_c = result > 0xFF
+            self.cc_v = bool((~(self.a ^ val) & (self.a ^ result)) & 0x80)
+            self.a = result & 0xFF
+            self.update_nz(self.a)
+
+        elif opcode == 0xB9:  # ADCA extended
+            addr = self.addr_extended()
+            val = self.read(addr)
+            c = 1 if self.cc_c else 0
+            result = self.a + val + c
             self.cc_c = result > 0xFF
             self.cc_v = bool((~(self.a ^ val) & (self.a ^ result)) & 0x80)
             self.a = result & 0xFF
@@ -1415,8 +1644,9 @@ class MC6800:
             self.update_nz(self.b)
 
         else:
-            print(f"\n[EMU] 未実装オペコード: ${opcode:02X} at PC=${self.pc - 1:04X}",
+            print(f"\n[EMU] 未実装オペコード: ${opcode:02X} at PC=${self.pc - 1:04X} SP=${self.sp:04X}",
                   file=sys.stderr)
+            print(f"[EMU] PC Trace: {[f'${p:04X}' for p in self.pc_trace]}", file=sys.stderr)
             raise SystemExit(1)
 
     def run(self):
@@ -1444,6 +1674,7 @@ def main():
                         help="入力スクリプトファイル（省略時は対話モード）")
     parser.add_argument("--max-cycles", type=int, default=100_000_000,
                         help="最大実行サイクル数（デフォルト: 100000000）")
+    parser.add_argument("--sd", help="SDカードイメージファイル (.img)")
     args = parser.parse_args()
 
     # ROM ロード
@@ -1457,7 +1688,9 @@ def main():
             input_data = list(f.read())
 
     acia = ACIA(input_data=input_data)
-    cpu = MC6800(acia)
+    sdcard = SDCard(image_path=args.sd)
+    pia = PIA(sdcard)
+    cpu = MC6800(acia, pia=pia)
     cpu.max_cycles = args.max_cycles
 
     # ROM のサイズに応じて配置を決定

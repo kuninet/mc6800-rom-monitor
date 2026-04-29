@@ -71,7 +71,7 @@ all: srec ihex
 $(OUTDIR):
 	$(MKDIR_P)
 
-$(OBJ): $(TOPSRC) include/hardware.inc include/mikbug.inc src/acia6850.asm | $(OUTDIR)
+$(OBJ): $(TOPSRC) include/hardware.inc include/mikbug.inc src/acia6850.asm src/sdcard.asm | $(OUTDIR)
 	$(ASL) -q -L -olist $(LST) -o $(OBJ) -i $(ASL_INCLUDE_ARG) $(TOPSRC)
 
 bin: $(BIN)

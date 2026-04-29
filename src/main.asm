@@ -4,15 +4,11 @@
         include "../include/mikbug.inc"
 
         org     MIKBUG_OUTCH
+OUTCH:  jmp     OUTEEE
 
-OUTCH:
-        jmp     OUTEEE
-
-INCH:
-        jmp     INEEE
+INCH:   jmp     INEEE
 
         org     MIKBUG_PDATA1
-
 PDATA1:
         ldaa    0,x
         cmpa    #$04
@@ -24,19 +20,13 @@ PDATA1_DONE:
         rts
 
         org     MIKBUG_CONTRL
-
-CONTRL:
-        jmp     MONITOR_ENTRY
+CONTRL: jmp     MONITOR_ENTRY
 
         org     MIKBUG_INEEE
-
-INEEE:
-        jmp     MIKBUG_INEEE_IMPL
+INEEE:  jmp     MIKBUG_INEEE_IMPL
 
         org     MIKBUG_OUTEEE
-
-OUTEEE:
-        jmp     MIKBUG_OUTEEE_IMPL
+OUTEEE: jmp     MIKBUG_OUTEEE_IMPL
 
         org     MONITOR_BASE
 
@@ -65,44 +55,57 @@ MAIN_LOOP:
 
         ldaa    LINE_BUF
         cmpa    #'D'
-        bne     CHK_CMD_MOD
-        jmp     CMD_DUMP
-CHK_CMD_MOD:
+        beq     MAIN_LOOP_JMP_DUMP
         cmpa    #'M'
-        bne     CHK_CMD_GO
-        jmp     CMD_MOD
-CHK_CMD_GO:
+        beq     MAIN_LOOP_JMP_MOD
         cmpa    #'G'
-        bne     CHK_CMD_LOAD
-        jmp     CMD_GO
-CHK_CMD_LOAD:
+        beq     MAIN_LOOP_JMP_GO
         cmpa    #'L'
-        bne     CHK_CMD_BREAK
-        jmp     CMD_LOAD
-CHK_CMD_BREAK:
+        beq     MAIN_LOOP_JMP_LOAD
         cmpa    #'B'
-        bne     CHK_CMD_RESUME
-        jmp     CMD_BREAK_SET
-CHK_CMD_RESUME:
+        beq     MAIN_LOOP_JMP_BRK
         cmpa    #'R'
-        bne     CHK_CMD_CLEAR
-        jmp     CMD_RESUME
-CHK_CMD_CLEAR:
+        beq     MAIN_LOOP_JMP_RESUME
         cmpa    #'C'
-        bne     CHK_CMD_UNASM
-        jmp     CMD_BREAK_CLEAR
-CHK_CMD_UNASM:
+        beq     MAIN_LOOP_JMP_CLEAR
         cmpa    #'U'
-        bne     CHK_CMD_HELP
-        jmp     CMD_UNASM
-CHK_CMD_HELP:
+        beq     MAIN_LOOP_JMP_UNASM
+        cmpa    #'I'
+        beq     MAIN_LOOP_JMP_SDINIT
+        cmpa    #'S'
+        beq     MAIN_LOOP_JMP_SDREAD
+        cmpa    #'V'
+        beq     MAIN_LOOP_JMP_SDDIR
         cmpa    #'H'
-        bne     CHK_CMD_FILL
-        jmp     CMD_HELP
-CHK_CMD_FILL:
+        beq     MAIN_LOOP_JMP_HELP
         cmpa    #'F'
-        bne     MAIN_LOOP_ERROR
-        jmp     CMD_FILL
+        beq     MAIN_LOOP_JMP_FILL
+        jmp     MAIN_LOOP_ERROR
+
+MAIN_LOOP_JMP_DUMP:     jmp     CMD_DUMP
+MAIN_LOOP_JMP_MOD:      jmp     CMD_MOD
+MAIN_LOOP_JMP_GO:       jmp     CMD_GO
+MAIN_LOOP_JMP_BRK:      jmp     CMD_BREAK_SET
+MAIN_LOOP_JMP_RESUME:   jmp     CMD_RESUME
+MAIN_LOOP_JMP_CLEAR:    jmp     CMD_BREAK_CLEAR
+MAIN_LOOP_JMP_UNASM:    jmp     CMD_UNASM
+MAIN_LOOP_JMP_SDINIT:   jmp     CMD_SDINIT
+MAIN_LOOP_JMP_SDREAD:   jmp     CMD_SDREAD
+MAIN_LOOP_JMP_SDDIR:    jmp     CMD_SDDIR
+MAIN_LOOP_JMP_HELP:     jmp     CMD_HELP
+MAIN_LOOP_JMP_FILL:     jmp     CMD_FILL
+
+MAIN_LOOP_JMP_LOAD:
+        ldab    LINE_LEN
+        cmpb    #1
+        beq     CMD_LOAD_SERIAL_JMP
+        ldaa    LINE_BUF+1
+        cmpa    #'F'
+        beq     CMD_LOAD_FILE_JMP
+CMD_LOAD_SERIAL_JMP:
+        jmp     CMD_LOAD
+CMD_LOAD_FILE_JMP:
+        jmp     CMD_LOAD_FILE
 
 MAIN_LOOP_ERROR:
         jsr     SHOW_ERROR
@@ -150,7 +153,6 @@ DUMP_COUNT_DONE:
         ldx     LINE_PTR
         jsr     PRINT_HEX16
         jsr     PRINT_SPACE
-
         ldab    DUMP_COUNT
 CMD_DUMP_HEX_LOOP:
         tstb
@@ -162,9 +164,7 @@ CMD_DUMP_HEX_LOOP:
         decb
         bra     CMD_DUMP_HEX_LOOP
 CMD_DUMP_HEX_DONE:
-
         jsr     PRINT_SPACE
-
         ldx     LINE_PTR
         ldab    DUMP_COUNT
 CMD_DUMP_ASCII_LOOP:
@@ -184,7 +184,6 @@ CMD_DUMP_ASCII_PUTC:
         decb
         bra     CMD_DUMP_ASCII_LOOP
 CMD_DUMP_ASCII_DONE:
-
         jsr     PRINT_CRLF
         ldaa    DUMP_ADDR
         oraa    DUMP_ADDR+1
@@ -212,7 +211,6 @@ PARSE_DUMP_SCAN:
         inc     ARG2_LEN
         decb
         bra     PARSE_DUMP_SCAN
-
 PARSE_DUMP_NO_RANGE:
         ldx     ARG_PTR
         ldab    ARG_LEN
@@ -224,7 +222,6 @@ PARSE_DUMP_NO_RANGE:
         jsr     SET_DUMP_END_64
         clc
         rts
-
 SET_DUMP_END_64:
         ldab    #63
 SET_DUMP_END_64_LOOP:
@@ -239,7 +236,6 @@ SET_DUMP_END_64_WRAP:
         ldx     #$FFFF
         stx     DUMP_END
         rts
-
 PARSE_DUMP_RANGE:
         tst     ARG2_LEN
         beq     PARSE_DUMP_FAIL
@@ -250,27 +246,23 @@ PARSE_DUMP_RANGE:
         decb
         beq     PARSE_DUMP_FAIL
         stab    ARG_LEN
-
         ldx     ARG_PTR
         ldab    ARG2_LEN
         jsr     PARSE_HEX
         bcs     PARSE_DUMP_FAIL
         ldx     HEX_VALUE_HI
         stx     DUMP_ADDR
-
         ldx     ARG2_PTR
         ldab    ARG_LEN
         jsr     PARSE_HEX
         bcs     PARSE_DUMP_FAIL
         ldx     HEX_VALUE_HI
         stx     DUMP_END
-
         ldx     DUMP_ADDR
         jsr     CMP_X_DUMP_END
         bhi     PARSE_DUMP_FAIL
         clc
         rts
-
 PARSE_DUMP_FAIL:
         sec
         rts
@@ -339,25 +331,21 @@ PARSE_FILL_VALUE_FOUND:
         stab    LOADER_COUNT
         cmpb    #3
         bhs     PARSE_FILL_FAIL
-
         ldx     ARG_PTR
         ldab    ARG_LEN
         jsr     PARSE_HEX
         bcs     PARSE_FILL_FAIL
         ldx     HEX_VALUE_HI
         stx     MOD_ADDR
-
         ldx     ARG2_PTR
         ldab    ARG2_LEN
         jsr     PARSE_HEX
         bcs     PARSE_FILL_FAIL
         ldx     HEX_VALUE_HI
         stx     DUMP_END
-
         ldx     MOD_ADDR
         jsr     CMP_X_DUMP_END
         bhi     PARSE_FILL_FAIL
-
         ldx     LOADER_PARSE_PTR
         ldab    LOADER_COUNT
         jsr     PARSE_HEX
@@ -395,14 +383,12 @@ CMD_MOD_START_ERR:
 CMD_MOD_ADDR_OK:
         ldx     HEX_VALUE_HI
         stx     MOD_ADDR
-
 CMD_MOD_LOOP:
         ldx     MOD_ADDR
         jsr     PRINT_HEX16
         ldaa    #':'
         jsr     ACIA_PUTC
         jsr     PRINT_SPACE
-
         ldx     MOD_ADDR
         ldaa    0,x
         jsr     PRINT_HEX8
@@ -410,34 +396,27 @@ CMD_MOD_LOOP:
         ldaa    #'-'
         jsr     ACIA_PUTC
         jsr     PRINT_SPACE
-
         jsr     READ_LINE
-
         ldab    LINE_LEN
         beq     CMD_MOD_NEXT
         cmpb    #3
         bhs     CMD_MOD_ERROR
-
         ldaa    LINE_BUF
         cmpa    #'.'
         beq     CMD_MOD_END
-
         ldx     #LINE_BUF
         jsr     PARSE_HEX
         bcs     CMD_MOD_ERROR
         ldaa    HEX_VALUE_LO
         ldx     MOD_ADDR
         staa    0,x
-
 CMD_MOD_NEXT:
         ldx     MOD_ADDR
         inx
         stx     MOD_ADDR
         bra     CMD_MOD_LOOP
-
 CMD_MOD_END:
         jmp     MAIN_LOOP
-
 CMD_MOD_ERROR:
         jsr     SHOW_ERROR
         bra     CMD_MOD_LOOP
@@ -453,7 +432,6 @@ CMD_GO:
 CMD_GO_ERR:
         jmp     MAIN_LOOP_ERROR
 CMD_GO_ADDR_OK:
-
         ldx     HEX_VALUE_HI
         jmp     0,x
 
@@ -535,20 +513,20 @@ CMD_RESUME:
         beq     CMD_RESUME_ERR
         clr     BRK_ACTIVE
         ldx     BRK_FRAME
-        ldaa    BRK_SAVE_CC
-        staa    0,x
-        ldaa    BRK_SAVE_B
-        staa    1,x
-        ldaa    BRK_SAVE_A
-        staa    2,x
-        ldaa    BRK_SAVE_X
-        staa    3,x
-        ldaa    BRK_SAVE_X+1
-        staa    4,x
-        ldaa    BRK_SAVE_PC
-        staa    5,x
-        ldaa    BRK_SAVE_PC+1
-        staa    6,x
+        ldaa    0,x
+        staa    BRK_SAVE_CC
+        ldaa    1,x
+        staa    BRK_SAVE_B
+        ldaa    2,x
+        staa    BRK_SAVE_A
+        ldaa    3,x
+        staa    BRK_SAVE_X
+        ldaa    4,x
+        staa    BRK_SAVE_X+1
+        ldaa    5,x
+        staa    BRK_SAVE_PC
+        ldaa    6,x
+        staa    BRK_SAVE_PC+1
         txs
         rti
 CMD_RESUME_ERR:
@@ -583,6 +561,168 @@ CMD_UNASM_DONE:
         jmp     MAIN_LOOP
 CMD_UNASM_ERR:
         jmp     MAIN_LOOP_ERROR
+
+CMD_SDINIT:
+        jsr     SD_INIT
+        tsta
+        beq     CMD_SDINIT_OK
+        jmp     MAIN_LOOP_ERROR
+CMD_SDINIT_OK:
+        ldaa    #'O'
+        jsr     MON_OUTEEE
+        ldaa    #'K'
+        jsr     MON_OUTEEE
+        jsr     PRINT_CRLF
+        jmp     MAIN_LOOP
+
+CMD_SDREAD:
+        ldab    LINE_LEN
+        cmpb    #1
+        beq     CMD_SDREAD_LBA0
+        ldx     #LINE_BUF+1
+        decb
+        jsr     PARSE_HEX
+        bcs     CMD_SDREAD_ERR
+        ldaa    HEX_VALUE_HI
+        staa    SD_LBA+2
+        ldaa    HEX_VALUE_LO
+        staa    SD_LBA+3
+        clr     SD_LBA
+        clr     SD_LBA+1
+        bra     CMD_SDREAD_EXEC
+CMD_SDREAD_LBA0:
+        clr     SD_LBA
+        clr     SD_LBA+1
+        clr     SD_LBA+2
+        clr     SD_LBA+3
+CMD_SDREAD_EXEC:
+        ldx     #SECTOR_BUF
+        stx     SD_BUF_PTR
+        jsr     SD_READ_SECTOR
+        tsta
+        beq     CMD_SDREAD_OK
+CMD_SDREAD_ERR:
+        jmp     MAIN_LOOP_ERROR
+CMD_SDREAD_OK:
+        ldx     #SECTOR_BUF
+        stx     DUMP_ADDR
+        ldaa    #$1B
+        staa    DUMP_END
+        ldaa    #$FF
+        staa    DUMP_END+1
+        jsr     DUMP_RANGE
+        jmp     MAIN_LOOP
+
+CMD_SDDIR:
+        jsr     SD_DIR
+        jmp     MAIN_LOOP
+
+CMD_LOAD_FILE:
+        ldab    LINE_LEN
+        cmpb    #2
+        bls     CMD_LOAD_FILE_ERR_NEAR
+        subb    #2
+        stab    ARG_LEN
+        ldx     #LINE_BUF+2
+        stx     ARG_PTR
+        ldx     #LINE_BUF + LINE_BUF_SIZE - 12
+        stx     SD_NAME_PTR
+        ldab    #11
+CMD_LOAD_FILE_CLR_NAME:
+        ldaa    #' '
+        staa    0,x
+        inx
+        decb
+        bne     CMD_LOAD_FILE_CLR_NAME
+        ldx     ARG_PTR
+        ldab    #0
+CMD_LOAD_FILE_COPY_NAME:
+        ldaa    0,x
+        cmpa    #'.'
+        beq     CMD_LOAD_FILE_FIND_EXT
+        stx     ARG_PTR
+        pshb
+        ldab    #0
+        jsr     SD_GET_NAME_X
+        pula
+        staa    0,x
+        ldx     ARG_PTR
+        incb
+        cmpb    #8
+        bhs     CMD_LOAD_FILE_SKIP_TO_DOT
+        inx
+        dec     ARG_LEN
+        bne     CMD_LOAD_FILE_COPY_NAME
+        bra     CMD_LOAD_FILE_OPEN
+CMD_LOAD_FILE_ERR_NEAR:
+        jmp     CMD_LOAD_FILE_ERR
+CMD_LOAD_FILE_SKIP_TO_DOT:
+        tst     ARG_LEN
+        beq     CMD_LOAD_FILE_OPEN
+        ldaa    0,x
+        cmpa    #'.'
+        beq     CMD_LOAD_FILE_FIND_EXT
+        inx
+        dec     ARG_LEN
+        bne     CMD_LOAD_FILE_SKIP_TO_DOT
+        bra     CMD_LOAD_FILE_OPEN
+CMD_LOAD_FILE_FIND_EXT:
+        inx
+        dec     ARG_LEN
+        beq     CMD_LOAD_FILE_OPEN
+        ldab    #8
+CMD_LOAD_FILE_COPY_EXT:
+        ldaa    0,x
+        stx     ARG_PTR
+        pshb
+        jsr     SD_GET_NAME_X
+        pula
+        staa    0,x
+        ldx     ARG_PTR
+        incb
+        cmpb    #11
+        bhs     CMD_LOAD_FILE_OPEN
+        inx
+        dec     ARG_LEN
+        bne     CMD_LOAD_FILE_COPY_EXT
+CMD_LOAD_FILE_OPEN:
+        ldx     SD_NAME_PTR
+        jsr     SD_OPEN_FILE
+        tsta
+        bne     CMD_LOAD_FILE_ERR
+        ldaa    #'L'
+        jsr     MON_OUTEEE
+        ldaa    #'F'
+        jsr     MON_OUTEEE
+        jsr     PRINT_CRLF
+        clr     LOADER_MODE
+        clr     LOADER_STAGE
+        jmp     CMD_LOAD_LOOP
+CMD_LOAD_FILE_ERR:
+        jmp     MAIN_LOOP_ERROR
+
+SD_GET_NAME_X:
+        ldx     SD_NAME_PTR
+        stx     SD_X_SAVE
+        ldaa    SD_X_SAVE+1
+        aba
+        staa    SD_X_SAVE+1
+        ldaa    SD_X_SAVE
+        adca    #0
+        staa    SD_X_SAVE
+        ldx     SD_X_SAVE
+        rts
+
+MON_GETC:
+        tst     SD_LOAD_ACTIVE
+        beq     MON_GETC_ACIA
+        jsr     SD_GETC
+        bcc     MON_GETC_DONE
+        clr     SD_LOAD_ACTIVE
+MON_GETC_ACIA:
+        jsr     ACIA_GETC
+MON_GETC_DONE:
+        rts
 
 CMD_HELP:
         ldab    LINE_LEN
@@ -622,22 +762,18 @@ CMD_LOAD:
         ldab    LINE_LEN
         cmpb    #1
         bne     CMD_LOAD_BADARG
-
         ldaa    #'L'
         jsr     MON_OUTEEE
         ldaa    #CHR_CR
         jsr     MON_OUTEEE
-
         clr     LOADER_MODE
         clr     LOADER_STAGE
-
 CMD_LOAD_LOOP:
         jsr     READ_LOADER_RECORD
         bcs     CMD_LOAD_ERROR
         cmpa    #1
         beq     CMD_LOAD_OK
         bra     CMD_LOAD_LOOP
-
 CMD_LOAD_OK:
         ldaa    #'O'
         jsr     MON_OUTEEE
@@ -646,11 +782,9 @@ CMD_LOAD_OK:
         ldaa    #CHR_CR
         jsr     MON_OUTEEE
         jmp     MAIN_LOOP
-
 CMD_LOAD_ERROR:
         jsr     SHOW_LOADER_ERROR
         jmp     MAIN_LOOP
-
 CMD_LOAD_BADARG:
         jmp     MAIN_LOOP_ERROR
 
@@ -665,9 +799,8 @@ READ_LINE:
         ldx     #LINE_BUF
         stx     LINE_PTR
         clr     LINE_LEN
-
 READ_LINE_LOOP:
-        jsr     ACIA_GETC
+        jsr     MON_GETC
         cmpa    #CHR_LF
         beq     READ_LINE_LOOP
         cmpa    #CHR_CR
@@ -678,11 +811,9 @@ READ_LINE_LOOP:
         beq     READ_LINE_BACKSPACE
         cmpa    #CHR_SPACE
         blo     READ_LINE_LOOP
-
         ldab    LINE_LEN
         cmpb    #LINE_BUF_SIZE
         bhs     READ_LINE_LOOP
-
         ldx     LINE_PTR
         staa    0,x
         inx
@@ -690,16 +821,13 @@ READ_LINE_LOOP:
         inc     LINE_LEN
         jsr     MON_OUTEEE
         bra     READ_LINE_LOOP
-
 READ_LINE_BACKSPACE:
         tst     LINE_LEN
         beq     READ_LINE_LOOP
-
         ldx     LINE_PTR
         dex
         stx     LINE_PTR
         dec     LINE_LEN
-
         ldaa    #CHR_BS
         jsr     ACIA_PUTC
         ldaa    #CHR_SPACE
@@ -707,7 +835,6 @@ READ_LINE_BACKSPACE:
         ldaa    #CHR_BS
         jsr     ACIA_PUTC
         bra     READ_LINE_LOOP
-
 READ_LINE_DONE:
         ldaa    #CHR_CR
         jsr     MON_OUTEEE
@@ -744,7 +871,8 @@ READ_LOADER_RECORD_FAIL:
         rts
 
 READ_RECORD_HEAD:
-        jsr     ACIA_GETC
+        jsr     MON_GETC
+        bcs     READ_RECORD_HEAD_FAIL
         cmpa    #CHR_LF
         beq     READ_RECORD_HEAD
         cmpa    #CHR_CR
@@ -754,9 +882,12 @@ READ_RECORD_HEAD:
         staa    HEX_NIBBLE
         clc
         rts
+READ_RECORD_HEAD_FAIL:
+        sec
+        rts
 
 READ_RECORD_TRAILER:
-        jsr     ACIA_GETC
+        jsr     MON_GETC
         cmpa    #CHR_LF
         beq     READ_RECORD_TRAILER_OK
         cmpa    #CHR_CR
@@ -769,7 +900,7 @@ READ_RECORD_TRAILER_OK:
 
 READ_HEXBYTE_INPUT:
         pshb
-        jsr     ACIA_GETC
+        jsr     MON_GETC
         jsr     HEX_TO_NIBBLE
         bcs     READ_HEXBYTE_INPUT_FAIL
         lsla
@@ -777,7 +908,7 @@ READ_HEXBYTE_INPUT:
         lsla
         lsla
         tab
-        jsr     ACIA_GETC
+        jsr     MON_GETC
         jsr     HEX_TO_NIBBLE
         bcs     READ_HEXBYTE_INPUT_FAIL
         aba
@@ -797,7 +928,7 @@ READ_SREC_RECORD:
 READ_SREC_HEAD_OK:
         ldaa    #1
         staa    LOADER_STAGE
-        jsr     ACIA_GETC
+        jsr     MON_GETC
         staa    LOADER_TYPE
         cmpa    #'0'
         beq     READ_SREC_TYPE_OK
@@ -1085,16 +1216,13 @@ PARSE_HEX:
         beq     PARSE_HEX_FAIL
         cmpb    #5
         bhs     PARSE_HEX_FAIL
-
         clr     HEX_VALUE_HI
         clr     HEX_VALUE_LO
-
 PARSE_HEX_LOOP:
         ldaa    0,x
         jsr     HEX_TO_NIBBLE
         bcs     PARSE_HEX_FAIL
         staa    HEX_NIBBLE
-
         asl     HEX_VALUE_LO
         rol     HEX_VALUE_HI
         asl     HEX_VALUE_LO
@@ -1103,20 +1231,17 @@ PARSE_HEX_LOOP:
         rol     HEX_VALUE_HI
         asl     HEX_VALUE_LO
         rol     HEX_VALUE_HI
-
         ldaa    HEX_VALUE_LO
         adda    HEX_NIBBLE
         staa    HEX_VALUE_LO
         bcc     PARSE_HEX_NEXT
         inc     HEX_VALUE_HI
-
 PARSE_HEX_NEXT:
         inx
         decb
         bne     PARSE_HEX_LOOP
         clc
         rts
-
 PARSE_HEX_FAIL:
         sec
         rts
@@ -1139,7 +1264,6 @@ SWI_HANDLER:
         ldaa    6,x
         staa    BRK_SAVE_PC+1
         lds     #STACK_TOP
-
         ldaa    BRK_SAVE_PC
         staa    BRK_ADDR
         ldaa    BRK_SAVE_PC+1
@@ -1147,12 +1271,10 @@ SWI_HANDLER:
         ldx     BRK_ADDR
         dex
         stx     BRK_ADDR
-
         ldaa    BRK_ADDR
         staa    BRK_SAVE_PC
         ldaa    BRK_ADDR+1
         staa    BRK_SAVE_PC+1
-
         ldx     BRK_FRAME
         inx
         inx
@@ -1161,7 +1283,6 @@ SWI_HANDLER:
         inx
         inx
         stx     BRK_USER_SP
-
         tst     BP_ACTIVE
         beq     SWI_HANDLER_PRINT
         ldaa    BRK_ADDR
@@ -1171,7 +1292,6 @@ SWI_HANDLER:
         cmpa    BP_ADDR+1
         bne     SWI_HANDLER_PRINT
         jsr     RESTORE_BREAKPOINT
-
 SWI_HANDLER_PRINT:
         ldaa    #1
         staa    BRK_ACTIVE
@@ -1255,7 +1375,6 @@ DISASM_ONE:
         jsr     PRINT_HEX8
         ldab    #1
         jmp     DISASM_ADVANCE
-
 DISASM_LDAA_IMM:
         ldx     #TXT_LDAA_IMM
         bra     DISASM_IMM8
@@ -1304,7 +1423,6 @@ DISASM_NOP:
         jsr     PDATA1
         ldab    #1
         jmp     DISASM_ADVANCE
-
 DISASM_IMM8:
         jsr     PDATA1
         ldx     DISASM_ADDR
@@ -1312,7 +1430,6 @@ DISASM_IMM8:
         jsr     PRINT_HEX8
         ldab    #2
         jmp     DISASM_ADVANCE
-
 DISASM_IMM16:
         jsr     PDATA1
         ldx     DISASM_ADDR
@@ -1324,7 +1441,6 @@ DISASM_IMM16:
         jsr     PRINT_HEX16
         ldab    #3
         jmp     DISASM_ADVANCE
-
 DISASM_EXT16:
         jsr     PDATA1
         ldx     DISASM_ADDR
@@ -1335,7 +1451,6 @@ DISASM_EXT16:
         ldx     HEX_VALUE_HI
         jsr     PRINT_HEX16
         ldab    #3
-
 DISASM_ADVANCE:
         jsr     PRINT_CRLF
         ldx     DISASM_ADDR
@@ -1406,7 +1521,6 @@ HEX_TO_NIBBLE:
         blo     HEX_TO_NIBBLE_LOWER
         cmpa    #'F'
         bls     HEX_TO_NIBBLE_UPPER
-
 HEX_TO_NIBBLE_LOWER:
         cmpa    #'a'
         blo     HEX_TO_NIBBLE_FAIL
@@ -1415,17 +1529,14 @@ HEX_TO_NIBBLE_LOWER:
         suba    #'a'-10
         clc
         rts
-
 HEX_TO_NIBBLE_UPPER:
         suba    #'A'-10
         clc
         rts
-
 HEX_TO_NIBBLE_DEC:
         suba    #'0'
         clc
         rts
-
 HEX_TO_NIBBLE_FAIL:
         sec
         rts
@@ -1434,6 +1545,7 @@ SPURIOUS_IRQ:
         rti
 
         include "acia6850.asm"
+        include "sdcard.asm"
 
         org     VEC_IRQ
         fdb     SPURIOUS_IRQ     ; VEC_IRQ
