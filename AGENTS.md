@@ -11,6 +11,11 @@
 - このプロジェクトで `git switch`、`git add`、`git commit`、`git push` などのGit操作を行う場合は、必ず権限昇格して実行する。
 - Git操作がsandbox権限で失敗してから昇格するのではなく、最初から権限昇格を指定する。
 
+## Issue close文言
+
+- 対応IssueがそのPRで完了する場合、PR本文の対応Issue欄には `Closes #番号` を記載する。
+- 参照だけで完了しないIssueには `Refs #番号` を使う。
+
 このリポジトリで Codex が作業する際のローカル運用ルールを定義する。
 
 ## 言語
