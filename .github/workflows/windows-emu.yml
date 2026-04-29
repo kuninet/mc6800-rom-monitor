@@ -48,4 +48,6 @@ jobs:
       - name: Run emulator smoke tests
         env:
           REQUIRE_BUILD_ROM: "1"
-        run: python tests/test_smoke.py
+        run: |
+          python tests/test_smoke.py
+          python tests/test_sd_fixture.py

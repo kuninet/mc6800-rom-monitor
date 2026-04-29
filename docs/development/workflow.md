@@ -1,5 +1,16 @@
 # 開発運用ルール
 
+## 文書言語
+
+- ユーザーへの応答、GitHub Issue、Pull Request、コミットコメント、リポジトリ内ドキュメントは日本語で記載する。
+- `docs/requirements/`、`docs/design/`、`docs/plans/`、`docs/testing/`、`docs/progress/`、`docs/development/` の本文は日本語で記載する。
+- 英語の識別子、コマンド名、ファイル名、CPU命令名、外部仕様名は必要に応じてそのまま使ってよいが、説明本文は日本語にする。
+
+## Git操作の権限
+
+- このプロジェクトで `git switch`、`git add`、`git commit`、`git push` などのGit操作を行う場合は、必ず権限昇格して実行する。
+- Git操作がsandbox権限で失敗してから昇格するのではなく、最初から権限昇格を指定する。
+
 この文書は、このリポジトリで開発作業を進めるときの標準手順をまとめる。Codex や別の生成 AI が新しいコンテキストで作業する場合も、まずこの文書と [project_context.md](project_context.md) を読む。
 
 ## 基本方針
