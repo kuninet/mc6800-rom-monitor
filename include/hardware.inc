@@ -9,6 +9,7 @@ RAM_END          equ $1FFF
 MIKBUG_VAR_BASE  equ $1F00
 MIKBUG_STACK_TOP equ $1F42
 STACK_TOP        equ MIKBUG_STACK_TOP
+MONITOR_RAM_BASE equ $1E00
 
 ; --- Peripherals ---
 ACIA_CTRL        equ $8018
@@ -34,70 +35,66 @@ CHR_SPACE        equ $20
 CHR_QUESTION     equ '?'
 CHR_PROMPT       equ ']'
 
-; --- Variables (RAM Zero Page) ---
-LINE_BUF         equ RAM_START
+; --- Variables (RAM starting from MONITOR_RAM_BASE) ---
 LINE_BUF_SIZE    equ 80
+LINE_BUF         equ MONITOR_RAM_BASE
+LINE_PTR         equ LINE_BUF+LINE_BUF_SIZE
+LINE_LEN         equ LINE_PTR+2
+HEX_VALUE_HI     equ LINE_LEN+1
+HEX_VALUE_LO     equ HEX_VALUE_HI+1
+HEX_NIBBLE       equ HEX_VALUE_LO+1
 
-; Monitor state vars
-LINE_PTR         equ $0052
-LINE_LEN         equ $0054
-HEX_VALUE_HI     equ $0055
-HEX_VALUE_LO     equ $0056
-HEX_NIBBLE       equ $0057
+DUMP_ADDR        equ HEX_NIBBLE+1
+MOD_ADDR         equ DUMP_ADDR+2
+DUMP_END         equ MOD_ADDR+2
+DUMP_COUNT       equ DUMP_END+2
+DISASM_ADDR      equ DUMP_COUNT+1
+DISASM_COUNT     equ DISASM_ADDR+2
 
-DUMP_ADDR        equ $0058
-MOD_ADDR         equ $005A
-DUMP_END         equ $005C
-DUMP_COUNT       equ $005E
-DISASM_ADDR      equ $005F
-DISASM_COUNT     equ $0061
+LOADER_MODE      equ DISASM_COUNT+1
+LOADER_STAGE     equ LOADER_MODE+1
+LOADER_TYPE      equ LOADER_STAGE+1
+LOADER_COUNT     equ LOADER_TYPE+1
+LOADER_ADDR      equ LOADER_COUNT+1
+LOADER_SUM       equ LOADER_ADDR+2
+LOADER_PARSE_PTR equ LOADER_SUM+1
 
-; Loader state vars
-LOADER_MODE      equ $0062
-LOADER_STAGE     equ $0063
-LOADER_TYPE      equ $0064
-LOADER_COUNT     equ $0065
-LOADER_ADDR      equ $0066
-LOADER_SUM       equ $0068
-LOADER_PARSE_PTR equ $0069
+BP_ADDR          equ LOADER_PARSE_PTR+2
+BP_ORIG          equ BP_ADDR+2
+BP_ACTIVE        equ BP_ORIG+1
+BRK_ACTIVE       equ BP_ACTIVE+1
+BRK_ADDR         equ BRK_ACTIVE+1
+BRK_FRAME        equ BRK_ADDR+2
+BRK_USER_SP      equ BRK_FRAME+2
+BRK_SAVE_CC      equ BRK_USER_SP+2
+BRK_SAVE_B       equ BRK_SAVE_CC+1
+BRK_SAVE_A       equ BRK_SAVE_B+1
+BRK_SAVE_X       equ BRK_SAVE_A+1
+BRK_SAVE_PC      equ BRK_SAVE_X+2
+FILL_VALUE       equ BRK_SAVE_PC+2
 
-; Breakpoint / Register save area
-BP_ADDR          equ $006B
-BP_ORIG          equ $006D
-BP_ACTIVE        equ $006E
-BRK_ACTIVE       equ $006F
-BRK_ADDR         equ $0070
-BRK_FRAME        equ $0072
-BRK_USER_SP      equ $0074
-BRK_SAVE_CC      equ $0076
-BRK_SAVE_B       equ $0077
-BRK_SAVE_A       equ $0078
-BRK_SAVE_X       equ $0079
-BRK_SAVE_PC      equ $007B
-FILL_VALUE       equ $007D
-
-; Parser / Command variables
-ARG_PTR          equ $0080
-ARG_LEN          equ $0082
-ARG2_PTR         equ $0083
-ARG2_LEN         equ $0085
+; Common parser variables
+ARG_PTR          equ FILL_VALUE+1
+ARG_LEN          equ ARG_PTR+2
+ARG2_PTR         equ ARG_LEN+1
+ARG2_LEN         equ ARG2_PTR+2
 
 ; SD / FAT state vars
-SD_NAME_PTR      equ $0087
-SD_ARG           equ $0089
-SD_LBA           equ $008D
-SD_BUF_PTR       equ $0091
-FAT_SEC_PER_CLUS equ $0093
-FAT_RSVD_SEC     equ $0094
-FAT_NUM_FATS     equ $0096
-FAT_SIZE         equ $0097
-FAT_ROOT_CLUS    equ $009B
-FAT_DATA_SEC     equ $009F
-SD_X_SAVE        equ $00A3
-SD_LOAD_ACTIVE   equ $00A5
-SD_FILE_CLUS     equ $00A6
-SD_SEC_IN_CLUS   equ $00AA
-SD_BYTE_PTR      equ $00AB
+SD_NAME_PTR      equ ARG2_LEN+1
+SD_ARG           equ SD_NAME_PTR+2
+SD_LBA           equ SD_ARG+4
+SD_BUF_PTR       equ SD_LBA+4
+FAT_SEC_PER_CLUS equ SD_BUF_PTR+2
+FAT_RSVD_SEC     equ FAT_SEC_PER_CLUS+1
+FAT_NUM_FATS     equ FAT_RSVD_SEC+2
+FAT_SIZE         equ FAT_NUM_FATS+1
+FAT_ROOT_CLUS    equ FAT_SIZE+4
+FAT_DATA_SEC     equ FAT_ROOT_CLUS+4
+SD_X_SAVE        equ FAT_DATA_SEC+4
+SD_LOAD_ACTIVE   equ SD_X_SAVE+2
+SD_FILE_CLUS     equ SD_LOAD_ACTIVE+1
+SD_SEC_IN_CLUS   equ SD_FILE_CLUS+4
+SD_BYTE_PTR      equ SD_SEC_IN_CLUS+1
 
 SECTOR_BUF       equ $1A00
 

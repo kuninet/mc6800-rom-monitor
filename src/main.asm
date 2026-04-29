@@ -109,7 +109,7 @@ CMD_LOAD_FILE_JMP:
 
 MAIN_LOOP_ERROR:
         jsr     SHOW_ERROR
-        bra     MAIN_LOOP
+        jmp     MAIN_LOOP
 
 CMD_DUMP:
         ldab    LINE_LEN
@@ -513,20 +513,20 @@ CMD_RESUME:
         beq     CMD_RESUME_ERR
         clr     BRK_ACTIVE
         ldx     BRK_FRAME
-        ldaa    0,x
-        staa    BRK_SAVE_CC
-        ldaa    1,x
-        staa    BRK_SAVE_B
-        ldaa    2,x
-        staa    BRK_SAVE_A
-        ldaa    3,x
-        staa    BRK_SAVE_X
-        ldaa    4,x
-        staa    BRK_SAVE_X+1
-        ldaa    5,x
-        staa    BRK_SAVE_PC
-        ldaa    6,x
-        staa    BRK_SAVE_PC+1
+        ldaa    BRK_SAVE_CC
+        staa    0,x
+        ldaa    BRK_SAVE_B
+        staa    1,x
+        ldaa    BRK_SAVE_A
+        staa    2,x
+        ldaa    BRK_SAVE_X
+        staa    3,x
+        ldaa    BRK_SAVE_X+1
+        staa    4,x
+        ldaa    BRK_SAVE_PC
+        staa    5,x
+        ldaa    BRK_SAVE_PC+1
+        staa    6,x
         txs
         rti
 CMD_RESUME_ERR:
