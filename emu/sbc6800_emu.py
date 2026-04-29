@@ -27,6 +27,15 @@ RAM_START = 0x0000
 RAM_END = 0x1FFF
 ACIA_CTRL = 0x8018
 ACIA_DATA = 0x8019
+PIA_PRA = 0x8050
+PIA_CRA = 0x8051
+PIA_PRB = 0x8052
+PIA_CRB = 0x8053
+
+SPI_SCLK = 0x01
+SPI_MOSI = 0x02
+SPI_MISO = 0x04
+SPI_CS = 0x08
 
 # ACIA ステータスビット
 ACIA_STAT_RDRF = 0x01  # 受信データレディ
@@ -117,10 +126,174 @@ class ACIA:
         return True
 
 
+class SDCard:
+    """Minimal SDHC SPI card model for deterministic emulator tests."""
+
+    SECTOR_SIZE = 512
+
+    def __init__(self, image):
+        self.image = bytes(image)
+        self.response = []
+        self.command = []
+        self.app_cmd = False
+        self.idle = True
+
+    @classmethod
+    def from_file(cls, path):
+        with open(path, "rb") as f:
+            return cls(f.read())
+
+    def transfer_byte(self, value, selected=True):
+        value &= 0xFF
+        if not selected:
+            self.command = []
+            self.response = []
+            return 0xFF
+
+        if self.response:
+            return self.response.pop(0)
+
+        if self.command:
+            self.command.append(value)
+        elif value & 0xC0 == 0x40:
+            self.command = [value]
+
+        if len(self.command) == 6:
+            frame = self.command
+            self.command = []
+            self.response.extend(self._handle_command(frame))
+
+        return 0xFF
+
+    def _handle_command(self, frame):
+        cmd = frame[0] & 0x3F
+        arg = (frame[1] << 24) | (frame[2] << 16) | (frame[3] << 8) | frame[4]
+
+        if cmd == 0:
+            self.idle = True
+            self.app_cmd = False
+            return [0x01]
+        if cmd == 8:
+            self.app_cmd = False
+            return [0x01, 0x00, 0x00, 0x01, 0xAA]
+        if cmd == 55:
+            self.app_cmd = True
+            return [0x01 if self.idle else 0x00]
+        if cmd == 41 and self.app_cmd:
+            self.idle = False
+            self.app_cmd = False
+            return [0x00]
+        if cmd == 58:
+            self.app_cmd = False
+            return [0x00, 0x40, 0x00, 0x00, 0x00]
+        if cmd == 17:
+            self.app_cmd = False
+            offset = arg * self.SECTOR_SIZE
+            sector = self.image[offset:offset + self.SECTOR_SIZE]
+            if len(sector) != self.SECTOR_SIZE:
+                return [0x04]
+            return [0x00, 0xFE] + list(sector) + [0xFF, 0xFF]
+
+        self.app_cmd = False
+        return [0x04]
+
+
+class PIA:
+    """Minimal MC6821 PIA model with Port B bit-bang SPI support."""
+
+    DDR_SELECT = 0x04
+
+    def __init__(self, sdcard=None):
+        self.sdcard = sdcard
+        self.pra = 0x00
+        self.prb = SPI_CS
+        self.ddra = 0x00
+        self.ddrb = 0x00
+        self.cra = 0x00
+        self.crb = 0x00
+        self._last_sclk = 0
+        self._rx_byte = 0xFF
+        self._tx_byte = 0x00
+        self._bit_index = 0
+
+    def read(self, addr):
+        if addr == PIA_PRA:
+            return self.pra if self.cra & self.DDR_SELECT else self.ddra
+        if addr == PIA_CRA:
+            return self.cra
+        if addr == PIA_PRB:
+            if not (self.crb & self.DDR_SELECT):
+                return self.ddrb
+            value = self.prb & ~SPI_MISO
+            if self._miso_bit():
+                value |= SPI_MISO
+            return value
+        if addr == PIA_CRB:
+            return self.crb
+        return 0xFF
+
+    def write(self, addr, value):
+        value &= 0xFF
+        if addr == PIA_PRA:
+            if self.cra & self.DDR_SELECT:
+                self.pra = value
+            else:
+                self.ddra = value
+        elif addr == PIA_CRA:
+            self.cra = value
+        elif addr == PIA_PRB:
+            if self.crb & self.DDR_SELECT:
+                self._write_port_b(value)
+            else:
+                self.ddrb = value
+        elif addr == PIA_CRB:
+            self.crb = value
+
+    def _write_port_b(self, value):
+        old_cs = self.prb & SPI_CS
+        old_sclk = self._last_sclk
+        self.prb = value
+        new_cs = self.prb & SPI_CS
+        new_sclk = self.prb & SPI_SCLK
+
+        if new_cs:
+            self._reset_spi(selected=False)
+        elif old_cs and not new_cs:
+            self._reset_spi(selected=True)
+        elif not old_sclk and new_sclk:
+            self._clock_rising_edge()
+
+        self._last_sclk = 1 if new_sclk else 0
+
+    def _reset_spi(self, selected):
+        self._rx_byte = 0xFF
+        self._tx_byte = 0x00
+        self._bit_index = 0
+        self._last_sclk = 1 if (self.prb & SPI_SCLK) else 0
+        if self.sdcard is not None:
+            self.sdcard.transfer_byte(0xFF, selected=selected)
+
+    def _clock_rising_edge(self):
+        if self.sdcard is None or (self.prb & SPI_CS):
+            return
+
+        if self.prb & SPI_MOSI:
+            self._tx_byte |= 1 << (7 - self._bit_index)
+        self._bit_index += 1
+
+        if self._bit_index == 8:
+            self._rx_byte = self.sdcard.transfer_byte(self._tx_byte, selected=True)
+            self._tx_byte = 0x00
+            self._bit_index = 0
+
+    def _miso_bit(self):
+        return (self._rx_byte >> (7 - self._bit_index)) & 0x01
+
+
 class MC6800:
     """MC6800 CPU エミュレータコア"""
 
-    def __init__(self, acia):
+    def __init__(self, acia, pia=None):
         # レジスタ
         self.a = 0x00       # アキュムレータ A
         self.b = 0x00       # アキュムレータ B
@@ -140,6 +313,7 @@ class MC6800:
 
         # ACIA
         self.acia = acia
+        self.pia = pia
 
         # 実行カウンタ（暴走検知用）
         self.cycles = 0
@@ -153,6 +327,8 @@ class MC6800:
             return self.acia.read_status()
         elif addr == ACIA_DATA:
             return self.acia.read_data()
+        elif self.pia is not None and PIA_PRA <= addr <= PIA_CRB:
+            return self.pia.read(addr)
         return self.mem[addr]
 
     def write(self, addr, val):
@@ -164,6 +340,9 @@ class MC6800:
             return
         elif addr == ACIA_DATA:
             self.acia.write_data(val)
+            return
+        elif self.pia is not None and PIA_PRA <= addr <= PIA_CRB:
+            self.pia.write(addr, val)
             return
         # ROM 領域への書き込みは無視
         if ROM_BASE <= addr <= ROM_END:
@@ -1444,6 +1623,7 @@ def main():
                         help="入力スクリプトファイル（省略時は対話モード）")
     parser.add_argument("--max-cycles", type=int, default=100_000_000,
                         help="最大実行サイクル数（デフォルト: 100000000）")
+    parser.add_argument("--sd", help="SD card image file attached to the temporary PIA SPI port")
     args = parser.parse_args()
 
     # ROM ロード
@@ -1457,7 +1637,9 @@ def main():
             input_data = list(f.read())
 
     acia = ACIA(input_data=input_data)
-    cpu = MC6800(acia)
+    sdcard = SDCard.from_file(args.sd) if args.sd else None
+    pia = PIA(sdcard) if sdcard is not None else None
+    cpu = MC6800(acia, pia=pia)
     cpu.max_cycles = args.max_cycles
 
     # ROM のサイズに応じて配置を決定
