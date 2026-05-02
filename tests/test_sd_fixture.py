@@ -19,12 +19,15 @@ BUILD_LST_PATH = PROJECT_ROOT / "build" / "mc6800-monitor.lst"
 from sbc6800_emu import PIA, PIA_CRB, PIA_PRB, SDCard, SPI_CS, SPI_MISO, SPI_MOSI, SPI_SCLK
 from sd_fixtures import (
     EOC,
+    LATE_BIN_CLUSTER,
+    LATE_BIN_CONTENT,
     MULTI_CLUSTER_1,
     MULTI_CLUSTER_1_PREFIX,
     MULTI_CLUSTER_2,
     MULTI_CLUSTER_2_PREFIX,
     PARTITION_START_LBA,
     ROOT_CLUSTER,
+    ROOT_EXTRA_CLUSTER,
     SECTOR_SIZE,
     TEST_HEX_CLUSTER,
     TEST_HEX_CONTENT,
@@ -87,6 +90,20 @@ def assert_root_directory(image: bytes, with_mbr: bool) -> None:
     assert sector(image, layout.cluster_lba(TEST_HEX_CLUSTER)).startswith(TEST_HEX_CONTENT)
     assert sector(image, layout.cluster_lba(MULTI_CLUSTER_1)).startswith(MULTI_CLUSTER_1_PREFIX)
     assert sector(image, layout.cluster_lba(MULTI_CLUSTER_2)).startswith(MULTI_CLUSTER_2_PREFIX)
+
+
+def assert_chained_root_directory(image: bytes, with_mbr: bool) -> None:
+    layout = layout_for_image(with_mbr)
+    root = sector(image, layout.root_dir_lba)
+    assert root[96] != 0x00, "first root cluster should not terminate when chained"
+    extra_root = sector(image, layout.cluster_lba(ROOT_EXTRA_CLUSTER))
+    assert extra_root[0:11] == b"LATE    BIN", "LATE.BIN entry missing in chained root"
+    assert entry_cluster(extra_root[0:32]) == LATE_BIN_CLUSTER
+    assert u32(extra_root, 28) == len(LATE_BIN_CONTENT)
+    fat = sector(image, layout.fat_lba)
+    assert fat_entry(fat, ROOT_CLUSTER) == ROOT_EXTRA_CLUSTER
+    assert fat_entry(fat, ROOT_EXTRA_CLUSTER) == EOC
+    assert fat_entry(fat, LATE_BIN_CLUSTER) == EOC
 
 
 def sd_command(card: SDCard, cmd: int, arg: int = 0, crc: int = 0xFF, extra: int = 0) -> list[int]:
@@ -192,7 +209,8 @@ def _load_symbol_addresses(*names: str) -> dict[str, int]:
     symbol_patterns = {
         name: [
             re.compile(rf"\b{re.escape(name)}\s*:\s*([0-9A-Fa-f]{{1,4}})\b"),
-            re.compile(rf":=\$([0-9A-Fa-f]{{1,4}})\s+{re.escape(name)}\s+equ\b"),
+            re.compile(rf"/([0-9A-Fa-f]{{1,4}})\s*:\s+.*\b{re.escape(name)}:\s*$"),
+            re.compile(rf":\s*=\$([0-9A-Fa-f]{{1,4}})\s+{re.escape(name)}\s+equ\b"),
         ]
         for name in names
     }
@@ -298,6 +316,13 @@ def test_superfloppy_fat32_fixture_layout() -> None:
     assert_common_bpb(image, 0)
     assert_root_directory(image, with_mbr=False)
     print("[PASS] test_superfloppy_fat32_fixture_layout")
+
+
+def test_chained_root_fat32_fixture_layout() -> None:
+    image = build_fat32_image(with_mbr=True, root_chain=True)
+    assert_common_bpb(image, PARTITION_START_LBA)
+    assert_chained_root_directory(image, with_mbr=True)
+    print("[PASS] test_chained_root_fat32_fixture_layout")
 
 
 def test_sdcard_command_sequence_reads_known_sector() -> None:
@@ -443,6 +468,74 @@ def test_rom_fat32_mount_reads_superfloppy_bpb_layout() -> None:
     print("[PASS] test_rom_fat32_mount_reads_superfloppy_bpb_layout")
 
 
+def run_rom_find_and_read_file(file_name: bytes, image: bytes, dump_end: int) -> tuple[str, dict[str, int]]:
+    assert len(file_name) == 11
+    symbols = _load_symbol_addresses(
+        "FAT32_MOUNT",
+        "FAT32_FIND_83",
+        "FAT32_READ_FILE",
+        "FAT_FILE_CLUS0",
+        "FAT_FILE_SIZE0",
+    )
+    name_addr = 0x0180
+    harness_addr = 0x0100
+    dest_addr = 0x0200
+    harness = [
+        0xBD, (symbols["FAT32_MOUNT"] >> 8) & 0xFF, symbols["FAT32_MOUNT"] & 0xFF,
+        0xCE, (name_addr >> 8) & 0xFF, name_addr & 0xFF,
+        0xBD, (symbols["FAT32_FIND_83"] >> 8) & 0xFF, symbols["FAT32_FIND_83"] & 0xFF,
+        0xCE, (dest_addr >> 8) & 0xFF, dest_addr & 0xFF,
+        0xBD, (symbols["FAT32_READ_FILE"] >> 8) & 0xFF, symbols["FAT32_READ_FILE"] & 0xFF,
+        0x3F,
+    ]
+    input_text = (
+        f"M{name_addr:04X}\r"
+        f"{_hex_bytes(list(file_name))}\r.\r"
+        f"M{harness_addr:04X}\r"
+        f"{_hex_bytes(harness)}\r.\r"
+        f"G{harness_addr:04X}\r"
+        f"D{dest_addr:04X}-{dump_end:04X}\r"
+        f"D{symbols['FAT_FILE_CLUS0']:04X}-{symbols['FAT_FILE_SIZE0'] + 3:04X}\r"
+        "\r"
+    )
+    stdout, stderr, rc = _run_emu_with_sd(input_text, image, max_cycles=80_000_000)
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    return stdout, symbols
+
+
+def test_rom_fat32_find_and_read_multicluster_file() -> None:
+    image = build_fat32_image(with_mbr=True)
+    stdout, _symbols = run_rom_find_and_read_file(b"MULTI   BIN", image, 0x040F)
+    line0 = _dump_line(stdout, 0x0200)
+    line1 = _dump_line(stdout, 0x0400)
+    expected0 = " ".join(f"{value:02X}" for value in MULTI_CLUSTER_1_PREFIX)
+    expected1 = " ".join(f"{value:02X}" for value in MULTI_CLUSTER_2_PREFIX)
+    assert expected0 in line0, f"missing first cluster prefix: {line0!r}"
+    assert expected1 in line1, f"missing second cluster prefix: {line1!r}"
+    print("[PASS] test_rom_fat32_find_and_read_multicluster_file")
+
+
+def test_rom_fat32_find_respects_file_size() -> None:
+    image = build_fat32_image(with_mbr=True)
+    stdout, _symbols = run_rom_find_and_read_file(b"TEST    S  ", image, 0x022F)
+    data = _parse_dump_bytes(stdout, 0x0200)
+    assert bytes(data[:len(TEST_S_CONTENT)]) == TEST_S_CONTENT
+    assert data[len(TEST_S_CONTENT)] == 0x00, "read should stop at file size before padding"
+    print("[PASS] test_rom_fat32_find_respects_file_size")
+
+
+def test_rom_fat32_find_chained_root_entry() -> None:
+    image = build_fat32_image(with_mbr=True, root_chain=True)
+    stdout, symbols = run_rom_find_and_read_file(b"LATE    BIN", image, 0x020F)
+    line = _dump_line(stdout, 0x0200)
+    expected = " ".join(f"{value:02X}" for value in LATE_BIN_CONTENT[:16])
+    assert expected in line, f"missing chained root file data: {line!r}"
+    meta = _parse_dump_bytes(stdout, symbols["FAT_FILE_CLUS0"])
+    assert meta[:4] == list(LATE_BIN_CLUSTER.to_bytes(4, "big"))
+    assert meta[4:8] == list(len(LATE_BIN_CONTENT).to_bytes(4, "big"))
+    print("[PASS] test_rom_fat32_find_chained_root_entry")
+
+
 def main() -> None:
     print("=" * 50)
     print("SD/PIA fixture tests")
@@ -451,12 +544,16 @@ def main() -> None:
     tests = [
         test_mbr_fat32_fixture_layout,
         test_superfloppy_fat32_fixture_layout,
+        test_chained_root_fat32_fixture_layout,
         test_sdcard_command_sequence_reads_known_sector,
         test_sdcard_cs_release_discards_pending_response,
         test_pia_bitbang_reads_known_sector,
         test_rom_sd_read_sector_reads_known_fixture_sector,
         test_rom_fat32_mount_reads_mbr_bpb_layout,
         test_rom_fat32_mount_reads_superfloppy_bpb_layout,
+        test_rom_fat32_find_and_read_multicluster_file,
+        test_rom_fat32_find_respects_file_size,
+        test_rom_fat32_find_chained_root_entry,
     ]
 
     passed = 0
