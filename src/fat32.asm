@@ -1,5 +1,5 @@
-; Minimal FAT32 BPB/MBR parser.
-; Internal API only. It does not read FAT entries or directory entries.
+; Minimal FAT32 read-only helpers.
+; Internal API only. Monitor commands are added in later issues.
 
 FAT32_MOUNT:
         clr     FAT_ERROR
@@ -331,4 +331,393 @@ FAT_ADD_FATSZ_B0:
 FAT_FAIL_A:
         staa    FAT_ERROR
         sec
+        rts
+
+FAT32_FIND_83:
+        jsr     FAT_COPY_FIND_NAME
+        jsr     FAT_COPY_ROOT_TO_CUR
+
+FAT_FIND_DIR_CLUSTER:
+        jsr     FAT_CLUSTER_TO_SD_LBA
+        ldx     #SD_SECTOR_BUF
+        jsr     SD_READ_SECTOR
+        bcc     FAT_FIND_SCAN_PREP
+        ldaa    #FAT_ERR_SD
+        jmp     FAT_FAIL_A
+
+FAT_FIND_SCAN_PREP:
+        ldx     #SD_SECTOR_BUF
+        stx     FAT_ENTRY_PTR
+        ldaa    #16
+        staa    FAT_DIR_COUNT
+
+FAT_FIND_ENTRY_LOOP:
+        ldx     FAT_ENTRY_PTR
+        ldaa    0,x
+        beq     FAT_FIND_NOT_FOUND
+        cmpa    #$E5
+        beq     FAT_FIND_SKIP_ENTRY
+        ldaa    11,x
+        anda    #$0F
+        cmpa    #$0F
+        beq     FAT_FIND_SKIP_ENTRY
+        ldaa    11,x
+        bita    #$18
+        bne     FAT_FIND_SKIP_ENTRY
+        jsr     FAT_COMPARE_ENTRY_NAME
+        bcc     FAT_FIND_MATCH
+
+FAT_FIND_SKIP_ENTRY:
+        jsr     FAT_ADVANCE_ENTRY_PTR
+        dec     FAT_DIR_COUNT
+        bne     FAT_FIND_ENTRY_LOOP
+
+        jsr     FAT32_NEXT_CLUSTER
+        bcc     FAT_FIND_NEXT_CLUSTER
+        ldaa    #FAT_ERR_NOT_FOUND
+        jmp     FAT_FAIL_A
+FAT_FIND_NEXT_CLUSTER:
+        jsr     FAT_COPY_NEXT_TO_CUR
+        jmp     FAT_FIND_DIR_CLUSTER
+
+FAT_FIND_MATCH:
+        jsr     FAT_STORE_FILE_ENTRY
+        ldaa    #FAT_ERR_NONE
+        staa    FAT_ERROR
+        clc
+        rts
+
+FAT_FIND_NOT_FOUND:
+        ldaa    #FAT_ERR_NOT_FOUND
+        jmp     FAT_FAIL_A
+
+FAT32_READ_FILE:
+        stx     FAT_READ_PTR
+        jsr     FAT_COPY_FILE_TO_CUR
+        jsr     FAT_COPY_FILE_SIZE_TO_REM
+
+FAT_READ_FILE_LOOP:
+        jsr     FAT_BYTES_REMAIN
+        bcc     FAT_READ_FILE_DONE
+        jsr     FAT_CLUSTER_TO_SD_LBA
+        ldx     #SD_SECTOR_BUF
+        jsr     SD_READ_SECTOR
+        bcc     FAT_READ_COPY_PREP
+        ldaa    #FAT_ERR_SD
+        jmp     FAT_FAIL_A
+
+FAT_READ_COPY_PREP:
+        jsr     FAT_PREP_COPY_COUNT
+        jsr     FAT_COPY_SECTOR_TO_FILE
+        jsr     FAT_SUB_COPY_COUNT
+        jsr     FAT_BYTES_REMAIN
+        bcc     FAT_READ_FILE_DONE
+        jsr     FAT32_NEXT_CLUSTER
+        bcc     FAT_READ_NEXT_CLUSTER
+        ldaa    #FAT_ERR_CHAIN
+        jmp     FAT_FAIL_A
+FAT_READ_NEXT_CLUSTER:
+        jsr     FAT_COPY_NEXT_TO_CUR
+        jmp     FAT_READ_FILE_LOOP
+
+FAT_READ_FILE_DONE:
+        ldaa    #FAT_ERR_NONE
+        staa    FAT_ERROR
+        clc
+        rts
+
+FAT_COPY_FIND_NAME:
+        ldaa    0,x
+        staa    FAT_FIND_NAME0
+        ldaa    1,x
+        staa    FAT_FIND_NAME1
+        ldaa    2,x
+        staa    FAT_FIND_NAME2
+        ldaa    3,x
+        staa    FAT_FIND_NAME3
+        ldaa    4,x
+        staa    FAT_FIND_NAME4
+        ldaa    5,x
+        staa    FAT_FIND_NAME5
+        ldaa    6,x
+        staa    FAT_FIND_NAME6
+        ldaa    7,x
+        staa    FAT_FIND_NAME7
+        ldaa    8,x
+        staa    FAT_FIND_NAME8
+        ldaa    9,x
+        staa    FAT_FIND_NAME9
+        ldaa    10,x
+        staa    FAT_FIND_NAME10
+        rts
+
+FAT_COPY_ROOT_TO_CUR:
+        ldaa    FAT_ROOT_CLUS0
+        staa    FAT_CUR_CLUS0
+        ldaa    FAT_ROOT_CLUS1
+        staa    FAT_CUR_CLUS1
+        ldaa    FAT_ROOT_CLUS2
+        staa    FAT_CUR_CLUS2
+        ldaa    FAT_ROOT_CLUS3
+        staa    FAT_CUR_CLUS3
+        rts
+
+FAT_COPY_FILE_TO_CUR:
+        ldaa    FAT_FILE_CLUS0
+        staa    FAT_CUR_CLUS0
+        ldaa    FAT_FILE_CLUS1
+        staa    FAT_CUR_CLUS1
+        ldaa    FAT_FILE_CLUS2
+        staa    FAT_CUR_CLUS2
+        ldaa    FAT_FILE_CLUS3
+        staa    FAT_CUR_CLUS3
+        rts
+
+FAT_COPY_NEXT_TO_CUR:
+        ldaa    FAT_NEXT_CLUS0
+        staa    FAT_CUR_CLUS0
+        ldaa    FAT_NEXT_CLUS1
+        staa    FAT_CUR_CLUS1
+        ldaa    FAT_NEXT_CLUS2
+        staa    FAT_CUR_CLUS2
+        ldaa    FAT_NEXT_CLUS3
+        staa    FAT_CUR_CLUS3
+        rts
+
+FAT_COPY_FILE_SIZE_TO_REM:
+        ldaa    FAT_FILE_SIZE0
+        staa    FAT_BYTES_REM0
+        ldaa    FAT_FILE_SIZE1
+        staa    FAT_BYTES_REM1
+        ldaa    FAT_FILE_SIZE2
+        staa    FAT_BYTES_REM2
+        ldaa    FAT_FILE_SIZE3
+        staa    FAT_BYTES_REM3
+        rts
+
+FAT_COMPARE_ENTRY_NAME:
+        ldx     FAT_ENTRY_PTR
+        ldaa    0,x
+        cmpa    FAT_FIND_NAME0
+        bne     FAT_COMPARE_ENTRY_FAIL
+        ldaa    1,x
+        cmpa    FAT_FIND_NAME1
+        bne     FAT_COMPARE_ENTRY_FAIL
+        ldaa    2,x
+        cmpa    FAT_FIND_NAME2
+        bne     FAT_COMPARE_ENTRY_FAIL
+        ldaa    3,x
+        cmpa    FAT_FIND_NAME3
+        bne     FAT_COMPARE_ENTRY_FAIL
+        ldaa    4,x
+        cmpa    FAT_FIND_NAME4
+        bne     FAT_COMPARE_ENTRY_FAIL
+        ldaa    5,x
+        cmpa    FAT_FIND_NAME5
+        bne     FAT_COMPARE_ENTRY_FAIL
+        ldaa    6,x
+        cmpa    FAT_FIND_NAME6
+        bne     FAT_COMPARE_ENTRY_FAIL
+        ldaa    7,x
+        cmpa    FAT_FIND_NAME7
+        bne     FAT_COMPARE_ENTRY_FAIL
+        ldaa    8,x
+        cmpa    FAT_FIND_NAME8
+        bne     FAT_COMPARE_ENTRY_FAIL
+        ldaa    9,x
+        cmpa    FAT_FIND_NAME9
+        bne     FAT_COMPARE_ENTRY_FAIL
+        ldaa    10,x
+        cmpa    FAT_FIND_NAME10
+        bne     FAT_COMPARE_ENTRY_FAIL
+        clc
+        rts
+FAT_COMPARE_ENTRY_FAIL:
+        sec
+        rts
+
+FAT_ADVANCE_ENTRY_PTR:
+        ldx     FAT_ENTRY_PTR
+        ldab    #32
+FAT_ADVANCE_ENTRY_LOOP:
+        inx
+        decb
+        bne     FAT_ADVANCE_ENTRY_LOOP
+        stx     FAT_ENTRY_PTR
+        rts
+
+FAT_STORE_FILE_ENTRY:
+        ldx     FAT_ENTRY_PTR
+        ldaa    21,x
+        staa    FAT_FILE_CLUS0
+        ldaa    20,x
+        staa    FAT_FILE_CLUS1
+        ldaa    27,x
+        staa    FAT_FILE_CLUS2
+        ldaa    26,x
+        staa    FAT_FILE_CLUS3
+        ldaa    31,x
+        staa    FAT_FILE_SIZE0
+        ldaa    30,x
+        staa    FAT_FILE_SIZE1
+        ldaa    29,x
+        staa    FAT_FILE_SIZE2
+        ldaa    28,x
+        staa    FAT_FILE_SIZE3
+        rts
+
+FAT_CLUSTER_TO_SD_LBA:
+        ldaa    FAT_DATA_LBA0
+        staa    SD_LBA0
+        ldaa    FAT_DATA_LBA1
+        staa    SD_LBA1
+        ldaa    FAT_DATA_LBA2
+        staa    SD_LBA2
+        ldaa    FAT_DATA_LBA3
+        staa    SD_LBA3
+        ldaa    FAT_CUR_CLUS3
+        suba    #$02
+        staa    FAT_TMP
+FAT_CLUSTER_ADD_LOOP:
+        ldaa    FAT_TMP
+        beq     FAT_CLUSTER_ADD_DONE
+        jsr     FAT_INC_SD_LBA
+        dec     FAT_TMP
+        bra     FAT_CLUSTER_ADD_LOOP
+FAT_CLUSTER_ADD_DONE:
+        rts
+
+FAT_INC_SD_LBA:
+        inc     SD_LBA3
+        bne     FAT_INC_SD_LBA_DONE
+        inc     SD_LBA2
+        bne     FAT_INC_SD_LBA_DONE
+        inc     SD_LBA1
+        bne     FAT_INC_SD_LBA_DONE
+        inc     SD_LBA0
+FAT_INC_SD_LBA_DONE:
+        rts
+
+FAT32_NEXT_CLUSTER:
+        ldaa    FAT_FAT_LBA0
+        staa    SD_LBA0
+        ldaa    FAT_FAT_LBA1
+        staa    SD_LBA1
+        ldaa    FAT_FAT_LBA2
+        staa    SD_LBA2
+        ldaa    FAT_FAT_LBA3
+        staa    SD_LBA3
+        ldx     #SD_SECTOR_BUF
+        jsr     SD_READ_SECTOR
+        bcc     FAT_NEXT_OFFSET_PREP
+        ldaa    #FAT_ERR_SD
+        jmp     FAT_FAIL_A
+
+FAT_NEXT_OFFSET_PREP:
+        ldaa    FAT_CUR_CLUS3
+        asla
+        asla
+        tab
+        ldx     #SD_SECTOR_BUF
+FAT_NEXT_OFFSET_LOOP:
+        tstb
+        beq     FAT_NEXT_READ
+        inx
+        decb
+        bra     FAT_NEXT_OFFSET_LOOP
+FAT_NEXT_READ:
+        ldaa    3,x
+        anda    #$0F
+        staa    FAT_NEXT_CLUS0
+        ldaa    2,x
+        staa    FAT_NEXT_CLUS1
+        ldaa    1,x
+        staa    FAT_NEXT_CLUS2
+        ldaa    0,x
+        staa    FAT_NEXT_CLUS3
+        ldaa    FAT_NEXT_CLUS0
+        cmpa    #$0F
+        bne     FAT_NEXT_NOT_EOC
+        ldaa    FAT_NEXT_CLUS1
+        cmpa    #$FF
+        bne     FAT_NEXT_NOT_EOC
+        ldaa    FAT_NEXT_CLUS2
+        cmpa    #$FF
+        bne     FAT_NEXT_NOT_EOC
+        ldaa    FAT_NEXT_CLUS3
+        cmpa    #$F8
+        blo     FAT_NEXT_NOT_EOC
+        sec
+        rts
+FAT_NEXT_NOT_EOC:
+        clc
+        rts
+
+FAT_BYTES_REMAIN:
+        ldaa    FAT_BYTES_REM0
+        oraa    FAT_BYTES_REM1
+        oraa    FAT_BYTES_REM2
+        oraa    FAT_BYTES_REM3
+        bne     FAT_BYTES_REMAIN_YES
+        clc
+        rts
+FAT_BYTES_REMAIN_YES:
+        sec
+        rts
+
+FAT_PREP_COPY_COUNT:
+        ldaa    FAT_BYTES_REM0
+        oraa    FAT_BYTES_REM1
+        bne     FAT_PREP_COPY_512
+        ldaa    FAT_BYTES_REM2
+        cmpa    #$02
+        bhs     FAT_PREP_COPY_512
+        clr     FAT_COPY_COUNT
+        ldaa    FAT_BYTES_REM3
+        staa    FAT_COPY_COUNT+1
+        clr     FAT_TMP
+        rts
+FAT_PREP_COPY_512:
+        ldaa    #$02
+        staa    FAT_COPY_COUNT
+        clr     FAT_COPY_COUNT+1
+        ldaa    #$01
+        staa    FAT_TMP
+        rts
+
+FAT_COPY_SECTOR_TO_FILE:
+        ldx     #SD_SECTOR_BUF
+        stx     FAT_ENTRY_PTR
+FAT_COPY_SECTOR_LOOP:
+        ldaa    FAT_COPY_COUNT
+        oraa    FAT_COPY_COUNT+1
+        beq     FAT_COPY_SECTOR_DONE
+        ldx     FAT_ENTRY_PTR
+        ldaa    0,x
+        inx
+        stx     FAT_ENTRY_PTR
+        ldx     FAT_READ_PTR
+        staa    0,x
+        inx
+        stx     FAT_READ_PTR
+        ldx     FAT_COPY_COUNT
+        dex
+        stx     FAT_COPY_COUNT
+        bra     FAT_COPY_SECTOR_LOOP
+FAT_COPY_SECTOR_DONE:
+        rts
+
+FAT_SUB_COPY_COUNT:
+        ldaa    FAT_TMP
+        cmpa    #$01
+        bne     FAT_SUB_FINAL
+        ldaa    FAT_BYTES_REM2
+        suba    #$02
+        staa    FAT_BYTES_REM2
+        rts
+FAT_SUB_FINAL:
+        clr     FAT_BYTES_REM0
+        clr     FAT_BYTES_REM1
+        clr     FAT_BYTES_REM2
+        clr     FAT_BYTES_REM3
         rts
