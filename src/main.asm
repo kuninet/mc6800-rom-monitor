@@ -1435,6 +1435,7 @@ SPURIOUS_IRQ:
 
         include "acia6850.asm"
         include "sdcard.asm"
+        include "fat32.asm"
 
         org     VEC_IRQ
         fdb     SPURIOUS_IRQ     ; VEC_IRQ
