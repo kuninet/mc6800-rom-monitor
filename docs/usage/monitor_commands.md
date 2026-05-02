@@ -19,9 +19,11 @@
 | `D` | 継続アドレスから 64 バイト分をダンプする |
 | `Dssss` | `ssss` から 64 バイト分をダンプする |
 | `Dssss-eeee` | `ssss` から `eeee` までをダンプする |
+| `DIR` | SDカード上のroot directoryにある8.3通常ファイルを表示する |
 | `Mssss` | `ssss` からメモリを変更する |
 | `Gssss` | `ssss` へジャンプして実行する |
 | `L` | S-Record または Intel HEX をロードする |
+| `LF filename` | SDカード上の8.3名ファイルを検索して開く |
 | `H` | コマンド一覧を表示する |
 | `Fssss-eeee vv` | `ssss` から `eeee` までを `vv` で埋める |
 | `B` | 現在のブレークポイント状態を表示する |
@@ -128,13 +130,39 @@ OK
 ロード処理はレコードを受信しながら解析する。
 ロード中の進捗表示は速度を優先して行わず、正常終了時は `OK`、異常時は `?S1` から `?S5`、または `?I1` から `?I5` を表示する。
 
+`LF filename` はSDカード上のroot directoryから8.3 short filenameのファイルを検索する。
+既存の `L` とは別の入口で、Issue #52時点ではファイルを開くところまでを確認し、S-RecordやIntel HEXとしての実ロードはまだ行わない。
+
+```text
+] LF TEST.S
+OK
+]
+```
+
+ファイル名の前後の空白は無視する。subdirectory、LFN、wildcardは対象外である。
+
+## SD directory
+
+`DIR` はSDカード上のroot directoryにある8.3通常ファイルを表示する。
+LFN、削除entry、volume label、subdirectoryは表示しない。
+
+```text
+] DIR
+TEST.S A 0000001E
+TEST.HEX A 00000020
+MULTI.BIN A 00000400
+]
+```
+
+サイズは8桁16進で表示する。`DIR` は `D` dumpとは別コマンドであり、従来の `D0100` や `D0100-011F` はそのまま使える。
+
 ## ヘルプ
 
 `H` は短いコマンド一覧を表示する。
 
 ```text
 ] H
-D M G L B C R U H F
+D DIR M G L LF B C R U H F
 ]
 ```
 
