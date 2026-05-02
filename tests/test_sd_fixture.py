@@ -252,6 +252,28 @@ def _hex_bytes(values: list[int]) -> str:
     return "\r".join(f"{value:02X}" for value in values)
 
 
+def _parse_dump_bytes(stdout: str, address: int) -> list[int]:
+    values: list[int] = []
+    current = address
+    while True:
+        try:
+            line = _dump_line(stdout, current)
+        except AssertionError:
+            break
+        fields = line.split()
+        line_values: list[int] = []
+        for field in fields[1:17]:
+            try:
+                line_values.append(int(field, 16))
+            except ValueError:
+                break
+        if not line_values:
+            break
+        values.extend(line_values)
+        current += len(line_values)
+    return values
+
+
 def _dump_line(stdout: str, address: int) -> str:
     marker = f"{address:04X}"
     for line in stdout.splitlines():
@@ -360,6 +382,67 @@ def test_rom_sd_read_sector_reads_known_fixture_sector() -> None:
     print("[PASS] test_rom_sd_read_sector_reads_known_fixture_sector")
 
 
+def assert_rom_fat32_mount_layout(with_mbr: bool) -> None:
+    image = build_fat32_image(with_mbr=with_mbr)
+    layout = layout_for_image(with_mbr=with_mbr)
+    symbols = _load_symbol_addresses(
+        "FAT32_MOUNT",
+        "FAT_ERROR",
+        "FAT_VOLUME_LBA0",
+        "FAT_FAT_LBA0",
+        "FAT_DATA_LBA0",
+        "FAT_ROOT_CLUS0",
+        "FAT_SEC_PER_CLUS",
+        "FAT_RSVD_HI",
+        "FAT_RSVD_LO",
+        "FAT_NUM_FATS",
+        "FAT_FATSZ0",
+    )
+    harness_addr = 0x0100
+    harness = [
+        0xBD, (symbols["FAT32_MOUNT"] >> 8) & 0xFF, symbols["FAT32_MOUNT"] & 0xFF,
+        0x3F,
+    ]
+    first_addr = symbols["FAT_ERROR"]
+    last_addr = symbols["FAT_FATSZ0"] + 3
+    input_text = (
+        f"M{harness_addr:04X}\r"
+        f"{_hex_bytes(harness)}\r.\r"
+        f"G{harness_addr:04X}\r"
+        f"D{first_addr:04X}-{last_addr:04X}\r"
+        "\r"
+    )
+    stdout, stderr, rc = _run_emu_with_sd(input_text, image)
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+
+    values = _parse_dump_bytes(stdout, first_addr)
+    expected = [
+        0x00,
+        *layout.volume_start_lba.to_bytes(4, "big"),
+        *layout.fat_lba.to_bytes(4, "big"),
+        *layout.data_start_lba.to_bytes(4, "big"),
+        *ROOT_CLUSTER.to_bytes(4, "big"),
+        0x01,
+        0x00, 0x04,
+        0x02,
+        0x00, 0x00, 0x00, 0x01,
+    ]
+    assert values[:len(expected)] == expected, (
+        f"FAT32 mount layout mismatch with_mbr={with_mbr}: "
+        f"got={values[:len(expected)]!r} expected={expected!r}\nstdout={stdout!r}"
+    )
+
+
+def test_rom_fat32_mount_reads_mbr_bpb_layout() -> None:
+    assert_rom_fat32_mount_layout(with_mbr=True)
+    print("[PASS] test_rom_fat32_mount_reads_mbr_bpb_layout")
+
+
+def test_rom_fat32_mount_reads_superfloppy_bpb_layout() -> None:
+    assert_rom_fat32_mount_layout(with_mbr=False)
+    print("[PASS] test_rom_fat32_mount_reads_superfloppy_bpb_layout")
+
+
 def main() -> None:
     print("=" * 50)
     print("SD/PIA fixture tests")
@@ -372,6 +455,8 @@ def main() -> None:
         test_sdcard_cs_release_discards_pending_response,
         test_pia_bitbang_reads_known_sector,
         test_rom_sd_read_sector_reads_known_fixture_sector,
+        test_rom_fat32_mount_reads_mbr_bpb_layout,
+        test_rom_fat32_mount_reads_superfloppy_bpb_layout,
     ]
 
     passed = 0
