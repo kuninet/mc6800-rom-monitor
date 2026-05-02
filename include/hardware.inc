@@ -14,6 +14,21 @@ STACK_TOP        equ MIKBUG_STACK_TOP
 ACIA_CTRL        equ $8018
 ACIA_DATA        equ $8019
 
+; PIAアドレスはエミュレータ暫定値。実機SBC-IOの最終決定は #54 で扱う。
+PIA_BASE         equ $8050
+PIA_PRA          equ PIA_BASE
+PIA_CRA          equ PIA_BASE+1
+PIA_PRB          equ PIA_BASE+2
+PIA_CRB          equ PIA_BASE+3
+
+PIA_DDR_SELECT   equ $04
+
+SPI_SCLK         equ $01
+SPI_MOSI         equ $02
+SPI_MISO         equ $04
+SPI_CS           equ $08
+SPI_OUTPUT_MASK  equ SPI_SCLK+SPI_MOSI+SPI_CS
+
 CHR_CR           equ $0D
 CHR_LF           equ $0A
 CHR_BS           equ $08
@@ -60,6 +75,29 @@ BRK_SAVE_A       equ BRK_SAVE_B+1
 BRK_SAVE_X       equ BRK_SAVE_A+1
 BRK_SAVE_PC      equ BRK_SAVE_X+2
 FILL_VALUE       equ BRK_SAVE_PC+2
+SD_ERROR         equ FILL_VALUE+1
+SD_LBA0          equ SD_ERROR+1
+SD_LBA1          equ SD_LBA0+1
+SD_LBA2          equ SD_LBA1+1
+SD_LBA3          equ SD_LBA2+1
+SD_PORTB_SHADOW  equ SD_LBA3+1
+SD_TX            equ SD_PORTB_SHADOW+1
+SD_RX            equ SD_TX+1
+SD_BIT_COUNT     equ SD_RX+1
+SD_TIMEOUT_HI    equ SD_BIT_COUNT+1
+SD_TIMEOUT_LO    equ SD_TIMEOUT_HI+1
+SD_CMD_BYTE      equ SD_TIMEOUT_LO+1
+SD_CRC_BYTE      equ SD_CMD_BYTE+1
+SD_BUF_PTR       equ SD_CRC_BYTE+1
+
+SD_SECTOR_BUF    equ $1C00
+
+SD_ERR_NONE      equ 0
+SD_ERR_TIMEOUT   equ 1
+SD_ERR_R1        equ 2
+SD_ERR_R7        equ 3
+SD_ERR_OCR       equ 4
+SD_ERR_TOKEN     equ 5
 
 LOAD_MODE_NONE   equ 0
 LOAD_MODE_SREC   equ 1
