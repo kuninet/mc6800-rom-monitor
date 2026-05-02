@@ -130,8 +130,8 @@ OK
 ロード処理はレコードを受信しながら解析する。
 ロード中の進捗表示は速度を優先して行わず、正常終了時は `OK`、異常時は `?S1` から `?S5`、または `?I1` から `?I5` を表示する。
 
-`LF filename` はSDカード上のroot directoryから8.3 short filenameのファイルを検索する。
-既存の `L` とは別の入口で、Issue #52時点ではファイルを開くところまでを確認し、S-RecordやIntel HEXとしての実ロードはまだ行わない。
+`LF filename` はSDカード上のroot directoryから8.3 short filenameのファイルを検索し、S-RecordまたはIntel HEXとしてロードする。
+既存の `L` とは別の入口だが、レコード解析とRAM書き込みは同じローダ処理を使う。
 
 ```text
 ] LF TEST.S
@@ -140,6 +140,7 @@ OK
 ```
 
 ファイル名の前後の空白は無視する。subdirectory、LFN、wildcardは対象外である。
+LOAD後の自動実行は行わない。必要に応じて `Gssss` で開始アドレスへジャンプする。
 
 ## SD directory
 

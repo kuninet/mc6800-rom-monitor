@@ -873,6 +873,7 @@ CMD_LOAD:
 
         clr     LOADER_MODE
         clr     LOADER_STAGE
+        clr     LOADER_INPUT
 
 CMD_LOAD_LOOP:
         jsr     READ_LOADER_RECORD
@@ -916,10 +917,13 @@ CMD_LF:
         ldx     #FAT_FIND_NAME0
         jsr     FAT32_FIND_83
         bcs     CMD_LF_ERROR
-        ldx     #TXT_OK
-        jsr     PDATA1
-        jsr     PRINT_CRLF
-        jmp     MAIN_LOOP
+        jsr     FAT32_STREAM_OPEN
+        bcs     CMD_LF_ERROR
+        clr     LOADER_MODE
+        clr     LOADER_STAGE
+        ldaa    #LOAD_INPUT_FAT
+        staa    LOADER_INPUT
+        bra     CMD_LOAD_LOOP
 CMD_LF_ERROR:
         jmp     MAIN_LOOP_ERROR
 
@@ -1060,7 +1064,8 @@ READ_LOADER_RECORD_FAIL:
         rts
 
 READ_RECORD_HEAD:
-        jsr     ACIA_GETC
+        jsr     LOADER_GETC
+        bcs     READ_RECORD_HEAD_FAIL
         cmpa    #CHR_LF
         beq     READ_RECORD_HEAD
         cmpa    #CHR_CR
@@ -1070,13 +1075,18 @@ READ_RECORD_HEAD:
         staa    HEX_NIBBLE
         clc
         rts
+READ_RECORD_HEAD_FAIL:
+        sec
+        rts
 
 READ_RECORD_TRAILER:
-        jsr     ACIA_GETC
+        jsr     LOADER_GETC
+        bcs     READ_RECORD_TRAILER_FAIL
         cmpa    #CHR_LF
         beq     READ_RECORD_TRAILER_OK
         cmpa    #CHR_CR
         beq     READ_RECORD_TRAILER_OK
+READ_RECORD_TRAILER_FAIL:
         sec
         rts
 READ_RECORD_TRAILER_OK:
@@ -1085,7 +1095,8 @@ READ_RECORD_TRAILER_OK:
 
 READ_HEXBYTE_INPUT:
         pshb
-        jsr     ACIA_GETC
+        jsr     LOADER_GETC
+        bcs     READ_HEXBYTE_INPUT_FAIL
         jsr     HEX_TO_NIBBLE
         bcs     READ_HEXBYTE_INPUT_FAIL
         lsla
@@ -1093,7 +1104,8 @@ READ_HEXBYTE_INPUT:
         lsla
         lsla
         tab
-        jsr     ACIA_GETC
+        jsr     LOADER_GETC
+        bcs     READ_HEXBYTE_INPUT_FAIL
         jsr     HEX_TO_NIBBLE
         bcs     READ_HEXBYTE_INPUT_FAIL
         aba
@@ -1113,7 +1125,8 @@ READ_SREC_RECORD:
 READ_SREC_HEAD_OK:
         ldaa    #1
         staa    LOADER_STAGE
-        jsr     ACIA_GETC
+        jsr     LOADER_GETC
+        bcs     READ_SREC_FAIL_NEAR0
         staa    LOADER_TYPE
         cmpa    #'0'
         beq     READ_SREC_TYPE_OK
@@ -1127,6 +1140,8 @@ READ_SREC_HEAD_OK:
         beq     READ_SREC_TYPE_OK
         cmpa    #'9'
         beq     READ_SREC_TYPE_OK
+        jmp     READ_SREC_FAIL
+READ_SREC_FAIL_NEAR0:
         jmp     READ_SREC_FAIL
 READ_SREC_TYPE_OK:
         ldaa    #2
@@ -1363,6 +1378,16 @@ ADD_TO_LOADER_SUM:
         adda    LOADER_SUM
         staa    LOADER_SUM
         rts
+
+LOADER_GETC:
+        ldaa    LOADER_INPUT
+        cmpa    #LOAD_INPUT_FAT
+        beq     LOADER_GETC_FAT
+        jsr     ACIA_GETC
+        clc
+        rts
+LOADER_GETC_FAT:
+        jmp     FAT32_STREAM_GETC
 
 PRINT_HEX8:
         psha
