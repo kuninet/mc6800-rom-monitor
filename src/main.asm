@@ -66,6 +66,10 @@ MAIN_LOOP:
         ldaa    LINE_BUF
         cmpa    #'D'
         bne     CHK_CMD_MOD
+        jsr     IS_CMD_DIR
+        bcs     MAIN_DISPATCH_DUMP
+        jmp     CMD_DIR
+MAIN_DISPATCH_DUMP:
         jmp     CMD_DUMP
 CHK_CMD_MOD:
         cmpa    #'M'
@@ -107,6 +111,22 @@ CHK_CMD_FILL:
 MAIN_LOOP_ERROR:
         jsr     SHOW_ERROR
         bra     MAIN_LOOP
+
+IS_CMD_DIR:
+        ldab    LINE_LEN
+        cmpb    #3
+        bne     IS_CMD_DIR_FAIL
+        ldaa    LINE_BUF+1
+        cmpa    #'I'
+        bne     IS_CMD_DIR_FAIL
+        ldaa    LINE_BUF+2
+        cmpa    #'R'
+        bne     IS_CMD_DIR_FAIL
+        clc
+        rts
+IS_CMD_DIR_FAIL:
+        sec
+        rts
 
 CMD_DUMP:
         ldab    LINE_LEN
@@ -372,6 +392,229 @@ PARSE_FILL_FAIL:
         sec
         rts
 
+PARSE_FILENAME_83:
+        stx     ARG_PTR
+        stab    ARG_LEN
+        jsr     CLEAR_FIND_NAME
+PARSE_FILENAME_SKIP_HEAD:
+        tst     ARG_LEN
+        bne     PARSE_FILENAME_SKIP_HAS
+        jmp     PARSE_FILENAME_FAIL
+PARSE_FILENAME_SKIP_HAS:
+        ldx     ARG_PTR
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        bne     PARSE_FILENAME_NAME_START
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+        bra     PARSE_FILENAME_SKIP_HEAD
+
+PARSE_FILENAME_NAME_START:
+        ldx     #FAT_FIND_NAME0
+        stx     FAT_ENTRY_PTR
+        clr     ARG2_LEN
+PARSE_FILENAME_NAME_LOOP:
+        tst     ARG_LEN
+        beq     PARSE_FILENAME_NAME_DONE
+        ldx     ARG_PTR
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        bne     PARSE_FILENAME_NAME_NOT_SPACE
+        jmp     PARSE_FILENAME_TRAILING
+PARSE_FILENAME_NAME_NOT_SPACE:
+        cmpa    #'.'
+        bne     PARSE_FILENAME_NAME_NOT_DOT
+        jmp     PARSE_FILENAME_EXT_START
+PARSE_FILENAME_NAME_NOT_DOT:
+        ldab    ARG2_LEN
+        cmpb    #8
+        blo     PARSE_FILENAME_NAME_ROOM
+        jmp     PARSE_FILENAME_FAIL
+PARSE_FILENAME_NAME_ROOM:
+        jsr     TO_UPPER
+        ldx     FAT_ENTRY_PTR
+        staa    0,x
+        inx
+        stx     FAT_ENTRY_PTR
+        inc     ARG2_LEN
+        ldx     ARG_PTR
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+        bra     PARSE_FILENAME_NAME_LOOP
+
+PARSE_FILENAME_NAME_DONE:
+        tst     ARG2_LEN
+        bne     PARSE_FILENAME_NAME_OK
+        jmp     PARSE_FILENAME_FAIL
+PARSE_FILENAME_NAME_OK:
+        clc
+        rts
+
+PARSE_FILENAME_EXT_START:
+        tst     ARG2_LEN
+        bne     PARSE_FILENAME_EXT_NAME_OK
+        jmp     PARSE_FILENAME_FAIL
+PARSE_FILENAME_EXT_NAME_OK:
+        ldx     ARG_PTR
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+        ldx     #FAT_FIND_NAME8
+        stx     FAT_ENTRY_PTR
+        clr     ARG2_LEN
+PARSE_FILENAME_EXT_LOOP:
+        tst     ARG_LEN
+        bne     PARSE_FILENAME_EXT_HAS_LEN
+        jmp     PARSE_FILENAME_OK
+PARSE_FILENAME_EXT_HAS_LEN:
+        ldx     ARG_PTR
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        bne     PARSE_FILENAME_EXT_NOT_SPACE
+        jmp     PARSE_FILENAME_TRAILING
+PARSE_FILENAME_EXT_NOT_SPACE:
+        cmpa    #'.'
+        bne     PARSE_FILENAME_EXT_CHAR_OK
+        jmp     PARSE_FILENAME_FAIL
+PARSE_FILENAME_EXT_CHAR_OK:
+        ldab    ARG2_LEN
+        cmpb    #3
+        blo     PARSE_FILENAME_EXT_ROOM
+        jmp     PARSE_FILENAME_FAIL
+PARSE_FILENAME_EXT_ROOM:
+        jsr     TO_UPPER
+        ldx     FAT_ENTRY_PTR
+        staa    0,x
+        inx
+        stx     FAT_ENTRY_PTR
+        inc     ARG2_LEN
+        ldx     ARG_PTR
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+        bra     PARSE_FILENAME_EXT_LOOP
+
+PARSE_FILENAME_TRAILING:
+        ldx     ARG_PTR
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+PARSE_FILENAME_TRAILING_LOOP:
+        tst     ARG_LEN
+        beq     PARSE_FILENAME_OK
+        ldx     ARG_PTR
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        beq     PARSE_FILENAME_TRAILING_SPACE_OK
+        jmp     PARSE_FILENAME_FAIL
+PARSE_FILENAME_TRAILING_SPACE_OK:
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+        bra     PARSE_FILENAME_TRAILING_LOOP
+
+PARSE_FILENAME_OK:
+        clc
+        rts
+PARSE_FILENAME_FAIL:
+        sec
+        rts
+
+CLEAR_FIND_NAME:
+        ldx     #FAT_FIND_NAME0
+        ldab    #11
+CLEAR_FIND_NAME_LOOP:
+        ldaa    #CHR_SPACE
+        staa    0,x
+        inx
+        decb
+        bne     CLEAR_FIND_NAME_LOOP
+        rts
+
+TO_UPPER:
+        cmpa    #'a'
+        blo     TO_UPPER_DONE
+        cmpa    #'z'
+        bhi     TO_UPPER_DONE
+        suba    #$20
+TO_UPPER_DONE:
+        rts
+
+CMD_DIR_PRINT_ENTRY:
+        ldx     FAT_ENTRY_PTR
+        ldab    #8
+CMD_DIR_PRINT_BASE_LOOP:
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        beq     CMD_DIR_PRINT_BASE_SKIP
+        jsr     MON_OUTEEE
+CMD_DIR_PRINT_BASE_SKIP:
+        inx
+        decb
+        bne     CMD_DIR_PRINT_BASE_LOOP
+        jsr     CMD_DIR_EXT_HAS_CHAR
+        bcs     CMD_DIR_PRINT_ATTR
+        ldaa    #'.'
+        jsr     MON_OUTEEE
+        ldx     FAT_ENTRY_PTR
+        ldab    #8
+CMD_DIR_PRINT_EXT_POS:
+        inx
+        decb
+        bne     CMD_DIR_PRINT_EXT_POS
+        ldab    #3
+CMD_DIR_PRINT_EXT_LOOP:
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        beq     CMD_DIR_PRINT_EXT_SKIP
+        jsr     MON_OUTEEE
+CMD_DIR_PRINT_EXT_SKIP:
+        inx
+        decb
+        bne     CMD_DIR_PRINT_EXT_LOOP
+CMD_DIR_PRINT_ATTR:
+        jsr     PRINT_SPACE
+        ldaa    #'A'
+        jsr     MON_OUTEEE
+        jsr     PRINT_SPACE
+        ldx     FAT_ENTRY_PTR
+        ldaa    31,x
+        jsr     PRINT_HEX8
+        ldx     FAT_ENTRY_PTR
+        ldaa    30,x
+        jsr     PRINT_HEX8
+        ldx     FAT_ENTRY_PTR
+        ldaa    29,x
+        jsr     PRINT_HEX8
+        ldx     FAT_ENTRY_PTR
+        ldaa    28,x
+        jsr     PRINT_HEX8
+        jsr     PRINT_CRLF
+        rts
+
+CMD_DIR_EXT_HAS_CHAR:
+        ldx     FAT_ENTRY_PTR
+        ldab    #8
+CMD_DIR_EXT_POS:
+        inx
+        decb
+        bne     CMD_DIR_EXT_POS
+        ldab    #3
+CMD_DIR_EXT_SCAN:
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        bne     CMD_DIR_EXT_YES
+        inx
+        decb
+        bne     CMD_DIR_EXT_SCAN
+        sec
+        rts
+CMD_DIR_EXT_YES:
+        clc
+        rts
+
 CMP_X_DUMP_END:
         stx     HEX_VALUE_HI
         ldaa    HEX_VALUE_HI
@@ -621,7 +864,7 @@ CMD_FILL_ERR:
 CMD_LOAD:
         ldab    LINE_LEN
         cmpb    #1
-        bne     CMD_LOAD_BADARG
+        bne     CMD_LOAD_EXTENDED
 
         ldaa    #'L'
         jsr     MON_OUTEEE
@@ -653,6 +896,79 @@ CMD_LOAD_ERROR:
 
 CMD_LOAD_BADARG:
         jmp     MAIN_LOOP_ERROR
+
+CMD_LOAD_EXTENDED:
+        ldaa    LINE_BUF+1
+        cmpa    #'F'
+        beq     CMD_LF
+        cmpa    #'f'
+        beq     CMD_LF
+        jmp     CMD_LOAD_BADARG
+
+CMD_LF:
+        ldab    LINE_LEN
+        subb    #2
+        ldx     #LINE_BUF+2
+        jsr     PARSE_FILENAME_83
+        bcs     CMD_LF_ERROR
+        jsr     FAT32_MOUNT
+        bcs     CMD_LF_ERROR
+        ldx     #FAT_FIND_NAME0
+        jsr     FAT32_FIND_83
+        bcs     CMD_LF_ERROR
+        ldx     #TXT_OK
+        jsr     PDATA1
+        jsr     PRINT_CRLF
+        jmp     MAIN_LOOP
+CMD_LF_ERROR:
+        jmp     MAIN_LOOP_ERROR
+
+CMD_DIR:
+        ldab    LINE_LEN
+        cmpb    #3
+        beq     CMD_DIR_START
+        jmp     MAIN_LOOP_ERROR
+CMD_DIR_START:
+        jsr     FAT32_MOUNT
+        bcc     CMD_DIR_MOUNT_OK
+        jmp     MAIN_LOOP_ERROR
+CMD_DIR_MOUNT_OK:
+        jsr     FAT_COPY_ROOT_TO_CUR
+CMD_DIR_CLUSTER:
+        jsr     FAT_CLUSTER_TO_SD_LBA
+        ldx     #SD_SECTOR_BUF
+        jsr     SD_READ_SECTOR
+        bcc     CMD_DIR_SCAN_PREP
+        jmp     MAIN_LOOP_ERROR
+CMD_DIR_SCAN_PREP:
+        ldx     #SD_SECTOR_BUF
+        stx     FAT_ENTRY_PTR
+        ldaa    #16
+        staa    FAT_DIR_COUNT
+CMD_DIR_ENTRY_LOOP:
+        ldx     FAT_ENTRY_PTR
+        ldaa    0,x
+        beq     CMD_DIR_DONE
+        cmpa    #$E5
+        beq     CMD_DIR_SKIP_ENTRY
+        ldaa    11,x
+        anda    #$0F
+        cmpa    #$0F
+        beq     CMD_DIR_SKIP_ENTRY
+        ldaa    11,x
+        bita    #$18
+        bne     CMD_DIR_SKIP_ENTRY
+        jsr     CMD_DIR_PRINT_ENTRY
+CMD_DIR_SKIP_ENTRY:
+        jsr     FAT_ADVANCE_ENTRY_PTR
+        dec     FAT_DIR_COUNT
+        bne     CMD_DIR_ENTRY_LOOP
+        jsr     FAT32_NEXT_CLUSTER
+        bcs     CMD_DIR_DONE
+        jsr     FAT_COPY_NEXT_TO_CUR
+        bra     CMD_DIR_CLUSTER
+CMD_DIR_DONE:
+        jmp     MAIN_LOOP
 
 PRINT_PROMPT:
         ldaa    #CHR_PROMPT
@@ -1350,7 +1666,9 @@ TXT_BRK:        fcc     "BRK "
                 fcb     $04
 TXT_WELCOME:    fcc     "MC6800 MONITOR"
                 fcb     $04
-TXT_HELP:       fcc     "D M G L B C R U H F"
+TXT_HELP:       fcc     "D DIR M G L LF B C R U H F"
+                fcb     $04
+TXT_OK:         fcc     "OK"
                 fcb     $04
 TXT_BP:         fcc     "BP "
                 fcb     $04

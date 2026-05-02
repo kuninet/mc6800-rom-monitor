@@ -536,6 +536,35 @@ def test_rom_fat32_find_chained_root_entry() -> None:
     print("[PASS] test_rom_fat32_find_chained_root_entry")
 
 
+def test_rom_dir_command_lists_root_files() -> None:
+    image = build_fat32_image(with_mbr=True)
+    stdout, stderr, rc = _run_emu_with_sd("DIR\r\r", image, max_cycles=80_000_000)
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert "TEST.S A 0000001E" in stdout, f"missing TEST.S DIR entry: {stdout!r}"
+    assert "TEST.HEX A 00000020" in stdout, f"missing TEST.HEX DIR entry: {stdout!r}"
+    assert "MULTI.BIN A 00000400" in stdout, f"missing MULTI.BIN DIR entry: {stdout!r}"
+    assert "SKIP" not in stdout, f"volume/subdirectory-like entries should be skipped: {stdout!r}"
+    print("[PASS] test_rom_dir_command_lists_root_files")
+
+
+def test_rom_dir_keeps_dump_command() -> None:
+    image = build_fat32_image(with_mbr=True)
+    stdout, stderr, rc = _run_emu_with_sd("D0100\r\r", image)
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert "0100" in stdout, f"dump command should still work: {stdout!r}"
+    print("[PASS] test_rom_dir_keeps_dump_command")
+
+
+def test_rom_lf_command_opens_83_files_only() -> None:
+    image = build_fat32_image(with_mbr=True)
+    input_text = "LF TEST.S\rLF   test.hex   \rLF NOFILE.S\rV\r\r"
+    stdout, stderr, rc = _run_emu_with_sd(input_text, image, max_cycles=80_000_000)
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert stdout.count("OK") >= 2, f"LF should open existing files: {stdout!r}"
+    assert stdout.count("?") >= 2, f"missing LF not found / V errors: {stdout!r}"
+    print("[PASS] test_rom_lf_command_opens_83_files_only")
+
+
 def main() -> None:
     print("=" * 50)
     print("SD/PIA fixture tests")
@@ -554,6 +583,9 @@ def main() -> None:
         test_rom_fat32_find_and_read_multicluster_file,
         test_rom_fat32_find_respects_file_size,
         test_rom_fat32_find_chained_root_entry,
+        test_rom_dir_command_lists_root_files,
+        test_rom_dir_keeps_dump_command,
+        test_rom_lf_command_opens_83_files_only,
     ]
 
     passed = 0

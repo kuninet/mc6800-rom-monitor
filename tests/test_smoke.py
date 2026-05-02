@@ -127,7 +127,7 @@ def test_error_display():
 
 def test_help_command():
     stdout, stderr, rc = run_emu("H\r\r")
-    assert "D M G L B C R U H F" in stdout, f"missing help command list: {stdout!r}"
+    assert "D DIR M G L LF B C R U H F" in stdout, f"missing help command list: {stdout!r}"
     print("[PASS] test_help_command")
 
 
