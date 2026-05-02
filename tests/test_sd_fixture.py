@@ -4,12 +4,17 @@
 from __future__ import annotations
 
 import sys
+import subprocess
+import tempfile
 from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "tests"))
 sys.path.insert(0, str(PROJECT_ROOT / "emu"))
+EMU_PATH = PROJECT_ROOT / "emu" / "sbc6800_emu.py"
+BUILD_ROM_PATH = PROJECT_ROOT / "build" / "mc6800-monitor.bin"
+BUILD_LST_PATH = PROJECT_ROOT / "build" / "mc6800-monitor.lst"
 
 from sbc6800_emu import PIA, PIA_CRB, PIA_PRB, SDCard, SPI_CS, SPI_MISO, SPI_MOSI, SPI_SCLK
 from sd_fixtures import (
@@ -178,6 +183,83 @@ def _poll_until(read_byte, expected: int) -> int:
     raise AssertionError(f"SD byte {expected:02X} timeout")
 
 
+def _load_symbol_addresses(*names: str) -> dict[str, int]:
+    import re
+
+    text = BUILD_LST_PATH.read_text(encoding="utf-8", errors="replace")
+    result: dict[str, int] = {}
+    wanted = set(names)
+    symbol_patterns = {
+        name: [
+            re.compile(rf"\b{re.escape(name)}\s*:\s*([0-9A-Fa-f]{{1,4}})\b"),
+            re.compile(rf":=\$([0-9A-Fa-f]{{1,4}})\s+{re.escape(name)}\s+equ\b"),
+        ]
+        for name in names
+    }
+    for name, patterns in symbol_patterns.items():
+        for pattern in patterns:
+            match = pattern.search(text)
+            if match:
+                result[name] = int(match.group(1), 16)
+                break
+    missing = wanted - set(result)
+    if missing:
+        raise AssertionError(f"missing symbols in listing: {sorted(missing)}")
+    return result
+
+
+def _run_emu_with_sd(input_text: str, sd_image: bytes, max_cycles: int = 30_000_000) -> tuple[str, str, int]:
+    if not BUILD_ROM_PATH.exists() or not BUILD_LST_PATH.exists():
+        raise AssertionError("build output missing; run `make bin` first")
+
+    input_bytes = input_text.encode("ascii")
+    with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as input_file:
+        input_file.write(input_bytes)
+        input_path = Path(input_file.name)
+    with tempfile.NamedTemporaryFile(suffix=".img", delete=False) as sd_file:
+        sd_file.write(sd_image)
+        sd_path = Path(sd_file.name)
+
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(EMU_PATH),
+                str(BUILD_ROM_PATH),
+                "--input",
+                str(input_path),
+                "--max-cycles",
+                str(max_cycles),
+                "--sd",
+                str(sd_path),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+            cwd=PROJECT_ROOT,
+        )
+        return result.stdout, result.stderr, result.returncode
+    except subprocess.TimeoutExpired as exc:
+        return exc.stdout or "", (exc.stderr or "") + "[TIMEOUT]", -1
+    finally:
+        input_path.unlink(missing_ok=True)
+        sd_path.unlink(missing_ok=True)
+
+
+def _hex_bytes(values: list[int]) -> str:
+    return "\r".join(f"{value:02X}" for value in values)
+
+
+def _dump_line(stdout: str, address: int) -> str:
+    marker = f"{address:04X}"
+    for line in stdout.splitlines():
+        if line.lstrip().startswith(marker):
+            return line
+    raise AssertionError(f"missing dump line {marker}: {stdout!r}")
+
+
 def test_mbr_fat32_fixture_layout() -> None:
     image = build_fat32_image(with_mbr=True)
     mbr = sector(image, 0)
@@ -236,6 +318,48 @@ def test_pia_bitbang_reads_known_sector() -> None:
     print("[PASS] test_pia_bitbang_reads_known_sector")
 
 
+def test_rom_sd_read_sector_reads_known_fixture_sector() -> None:
+    image = build_fat32_image(with_mbr=True)
+    layout = layout_for_image(with_mbr=True)
+    symbols = _load_symbol_addresses(
+        "SD_INIT",
+        "SD_READ_SECTOR",
+        "SD_LBA0",
+        "SD_LBA1",
+        "SD_LBA2",
+        "SD_LBA3",
+        "SD_SECTOR_BUF",
+    )
+    lba = layout.cluster_lba(MULTI_CLUSTER_1)
+    harness_addr = 0x0100
+    fail_offset = 0x1B
+    harness = [
+        0xBD, (symbols["SD_INIT"] >> 8) & 0xFF, symbols["SD_INIT"] & 0xFF,
+        0x25, fail_offset,
+        0x86, (lba >> 24) & 0xFF, 0xB7, (symbols["SD_LBA0"] >> 8) & 0xFF, symbols["SD_LBA0"] & 0xFF,
+        0x86, (lba >> 16) & 0xFF, 0xB7, (symbols["SD_LBA1"] >> 8) & 0xFF, symbols["SD_LBA1"] & 0xFF,
+        0x86, (lba >> 8) & 0xFF, 0xB7, (symbols["SD_LBA2"] >> 8) & 0xFF, symbols["SD_LBA2"] & 0xFF,
+        0x86, lba & 0xFF, 0xB7, (symbols["SD_LBA3"] >> 8) & 0xFF, symbols["SD_LBA3"] & 0xFF,
+        0xCE, (symbols["SD_SECTOR_BUF"] >> 8) & 0xFF, symbols["SD_SECTOR_BUF"] & 0xFF,
+        0xBD, (symbols["SD_READ_SECTOR"] >> 8) & 0xFF, symbols["SD_READ_SECTOR"] & 0xFF,
+        0x3F,
+        0x3F,
+    ]
+    input_text = (
+        f"M{harness_addr:04X}\r"
+        f"{_hex_bytes(harness)}\r.\r"
+        f"G{harness_addr:04X}\r"
+        f"D{symbols['SD_SECTOR_BUF']:04X}-{symbols['SD_SECTOR_BUF'] + 0x0F:04X}\r"
+        "\r"
+    )
+    stdout, stderr, rc = _run_emu_with_sd(input_text, image)
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    line = _dump_line(stdout, symbols["SD_SECTOR_BUF"])
+    expected = " ".join(f"{value:02X}" for value in MULTI_CLUSTER_1_PREFIX[:16])
+    assert expected in line, f"sector prefix mismatch: {line!r}\nstdout={stdout!r}"
+    print("[PASS] test_rom_sd_read_sector_reads_known_fixture_sector")
+
+
 def main() -> None:
     print("=" * 50)
     print("SD/PIA fixture tests")
@@ -247,6 +371,7 @@ def main() -> None:
         test_sdcard_command_sequence_reads_known_sector,
         test_sdcard_cs_release_discards_pending_response,
         test_pia_bitbang_reads_known_sector,
+        test_rom_sd_read_sector_reads_known_fixture_sector,
     ]
 
     passed = 0

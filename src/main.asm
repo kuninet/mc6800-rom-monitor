@@ -1434,6 +1434,7 @@ SPURIOUS_IRQ:
         rti
 
         include "acia6850.asm"
+        include "sdcard.asm"
 
         org     VEC_IRQ
         fdb     SPURIOUS_IRQ     ; VEC_IRQ
