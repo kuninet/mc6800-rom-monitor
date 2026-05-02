@@ -426,6 +426,72 @@ FAT_READ_FILE_DONE:
         clc
         rts
 
+FAT32_STREAM_OPEN:
+        jsr     FAT_COPY_FILE_TO_CUR
+        jsr     FAT_COPY_FILE_SIZE_TO_REM
+        clr     FAT_COPY_COUNT
+        clr     FAT_COPY_COUNT+1
+        ldx     #SD_SECTOR_BUF
+        stx     FAT_ENTRY_PTR
+        ldaa    #FAT_ERR_NONE
+        staa    FAT_ERROR
+        clc
+        rts
+
+FAT32_STREAM_GETC:
+        jsr     FAT_BYTES_REMAIN
+        bcs     FAT_STREAM_HAS_REMAIN
+        sec
+        rts
+FAT_STREAM_HAS_REMAIN:
+        ldaa    FAT_COPY_COUNT
+        oraa    FAT_COPY_COUNT+1
+        bne     FAT_STREAM_HAVE_SECTOR
+        jsr     FAT_STREAM_LOAD_SECTOR
+        bcc     FAT_STREAM_HAVE_SECTOR
+        sec
+        rts
+FAT_STREAM_HAVE_SECTOR:
+        ldx     FAT_ENTRY_PTR
+        ldaa    0,x
+        inx
+        stx     FAT_ENTRY_PTR
+        psha
+        ldx     FAT_COPY_COUNT
+        dex
+        stx     FAT_COPY_COUNT
+        jsr     FAT_DEC_BYTES_REM_ONE
+        ldaa    FAT_COPY_COUNT
+        oraa    FAT_COPY_COUNT+1
+        bne     FAT_STREAM_RETURN_BYTE
+        jsr     FAT_BYTES_REMAIN
+        bcc     FAT_STREAM_RETURN_BYTE
+        jsr     FAT32_NEXT_CLUSTER
+        bcc     FAT_STREAM_ADVANCE_CLUSTER
+        pula
+        ldaa    #FAT_ERR_CHAIN
+        jmp     FAT_FAIL_A
+FAT_STREAM_ADVANCE_CLUSTER:
+        jsr     FAT_COPY_NEXT_TO_CUR
+FAT_STREAM_RETURN_BYTE:
+        pula
+        clc
+        rts
+
+FAT_STREAM_LOAD_SECTOR:
+        jsr     FAT_CLUSTER_TO_SD_LBA
+        ldx     #SD_SECTOR_BUF
+        jsr     SD_READ_SECTOR
+        bcc     FAT_STREAM_LOAD_OK
+        ldaa    #FAT_ERR_SD
+        jmp     FAT_FAIL_A
+FAT_STREAM_LOAD_OK:
+        jsr     FAT_PREP_COPY_COUNT
+        ldx     #SD_SECTOR_BUF
+        stx     FAT_ENTRY_PTR
+        clc
+        rts
+
 FAT_COPY_FIND_NAME:
         ldaa    0,x
         staa    FAT_FIND_NAME0
@@ -672,7 +738,7 @@ FAT_PREP_COPY_COUNT:
         ldaa    FAT_BYTES_REM2
         cmpa    #$02
         bhs     FAT_PREP_COPY_512
-        clr     FAT_COPY_COUNT
+        staa    FAT_COPY_COUNT
         ldaa    FAT_BYTES_REM3
         staa    FAT_COPY_COUNT+1
         clr     FAT_TMP
@@ -720,4 +786,29 @@ FAT_SUB_FINAL:
         clr     FAT_BYTES_REM1
         clr     FAT_BYTES_REM2
         clr     FAT_BYTES_REM3
+        rts
+
+FAT_DEC_BYTES_REM_ONE:
+        ldaa    FAT_BYTES_REM3
+        bne     FAT_DEC_REM_LO
+        ldaa    #$FF
+        staa    FAT_BYTES_REM3
+        ldaa    FAT_BYTES_REM2
+        bne     FAT_DEC_REM_B2
+        ldaa    #$FF
+        staa    FAT_BYTES_REM2
+        ldaa    FAT_BYTES_REM1
+        bne     FAT_DEC_REM_B1
+        ldaa    #$FF
+        staa    FAT_BYTES_REM1
+        dec     FAT_BYTES_REM0
+        rts
+FAT_DEC_REM_B1:
+        dec     FAT_BYTES_REM1
+        rts
+FAT_DEC_REM_B2:
+        dec     FAT_BYTES_REM2
+        rts
+FAT_DEC_REM_LO:
+        dec     FAT_BYTES_REM3
         rts

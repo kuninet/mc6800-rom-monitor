@@ -557,12 +557,33 @@ def test_rom_dir_keeps_dump_command() -> None:
 
 def test_rom_lf_command_opens_83_files_only() -> None:
     image = build_fat32_image(with_mbr=True)
-    input_text = "LF TEST.S\rLF   test.hex   \rLF NOFILE.S\rV\r\r"
+    input_text = (
+        "LF TEST.S\r"
+        "D0200-0202\r"
+        "LF   test.hex   \r"
+        "D0300-0302\r"
+        "LF NOFILE.S\r"
+        "V\r"
+        "\r"
+    )
     stdout, stderr, rc = _run_emu_with_sd(input_text, image, max_cycles=80_000_000)
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
-    assert stdout.count("OK") >= 2, f"LF should open existing files: {stdout!r}"
+    assert stdout.count("OK") >= 2, f"LF should load existing files: {stdout!r}"
+    assert "0200 01 02 03" in stdout, f"missing S-Record loaded bytes: {stdout!r}"
+    assert "0300 AA BB CC" in stdout, f"missing Intel HEX loaded bytes: {stdout!r}"
     assert stdout.count("?") >= 2, f"missing LF not found / V errors: {stdout!r}"
     print("[PASS] test_rom_lf_command_opens_83_files_only")
+
+
+def test_rom_lf_file_eof_does_not_wait_for_acia() -> None:
+    image = bytearray(build_fat32_image(with_mbr=True))
+    layout = layout_for_image(with_mbr=True)
+    root_offset = layout.root_dir_lba * SECTOR_SIZE
+    image[root_offset + 28:root_offset + 32] = len(b"S1060200010203F1\r\n").to_bytes(4, "little")
+    stdout, stderr, rc = _run_emu_with_sd("LF TEST.S\r\r", bytes(image), max_cycles=80_000_000)
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator should not hang at file EOF: {stderr!r}"
+    assert "?S" in stdout or "?" in stdout, f"truncated file should report loader error: {stdout!r}"
+    print("[PASS] test_rom_lf_file_eof_does_not_wait_for_acia")
 
 
 def main() -> None:
@@ -586,6 +607,7 @@ def main() -> None:
         test_rom_dir_command_lists_root_files,
         test_rom_dir_keeps_dump_command,
         test_rom_lf_command_opens_83_files_only,
+        test_rom_lf_file_eof_does_not_wait_for_acia,
     ]
 
     passed = 0
