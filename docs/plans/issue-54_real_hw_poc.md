@@ -59,6 +59,21 @@ SD モジュール接続後の `DIR` は `?` で戻った。直後に `D1E90-1EA
 
 MOSI/MISO 入れ替えでも `SD_ERROR=$02` のままだが、読み取り値は変化したため、完全な無応答ではなく MISO 側の読み取りタイミングも疑う。現行 `SD_SPI_XFER` は SCLK を上げる前に MISO を読んでいたため、実機 SD カード向けに `MOSI セット -> SCLK High -> MISO 読み取り -> SCLK Low` の順へ修正する。
 
+## 2026-05-03 実機DIR成功後の分割判断
+
+MISO ラインをプルアップしたところ、実機で `DIR` が成功した。これにより、SD 初期化、FAT32 mount、root directory read は動作していると判断できる。
+
+一方で `LF HELLO.S` は `?` で失敗した。直後の確認では `SD_ERROR=$00`、`FAT_ERROR=$00`、`FAT_SEC_PER_CLUS=$06`、`HELLO.S start cluster=5`、`file size=$54` だった。現行実装は `cluster -> LBA` が `data_start + (cluster - 2)` で、`SecPerClus=1` 前提になっている。実カードでは `SecPerClus=6` のため、file cluster の先頭 LBA がずれて `HELLO.S` の先頭 `S` を読めていない。
+
+このため、親 Issue #54 は実機 PoC 全体として残し、SecPerClus 対応は次のサブ Issue に分割する。
+
+- Issue #65: https://github.com/kuninet/mc6800-rom-monitor/issues/65
+  - `FAT_CLUSTER_TO_SD_LBA` を `data_start + (cluster - 2) * FAT_SEC_PER_CLUS` に変更し、512 byte 以下の単一 sector ファイル `HELLO.S` を読めるようにする。
+- Issue #66: https://github.com/kuninet/mc6800-rom-monitor/issues/66
+  - cluster 内の複数 sector stream read に対応し、`MICBAS13.S` / `MICBAS13.HEX` など 512 byte 超のファイルを読めるようにする。
+
+PR #64 では、実機手順、SPI MISO サンプリング修正、MISO プルアップを含む実機ログ、サブ Issue 分割判断までを扱う。SecPerClus 実装そのものは #65 / #66 の別 PR で進める。
+
 ## テスト方針
 
 PR 前に次を実行する。
