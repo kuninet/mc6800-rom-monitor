@@ -42,3 +42,16 @@ git diff --check
 ```
 
 実機では、`HELLO.S` を root に置いたカードで `LF HELLO.S` を実行し、`OK` と `D0100` のロード結果を確認する。
+
+## 実機確認結果
+
+PR #67 の実装ROMで、実カード上の `HELLO.S` を `LF HELLO.S` でロードできた。続けて `G0100` を実行し、`HELLO, WORLD` が表示され、`BRK 0106` でモニタへ戻るところまで確認できた。
+
+確認時の要点:
+
+- `F0100-01FF 00` でロード先を初期化。
+- `LF HELLO.S` が `OK` を返した。
+- `D0100` で `CE 01 07 BD E0 7E ... 48 45 4C 4C 4F 2C 20 57 4F 52 4C 44 ...` が入り、S-Recordの内容がRAMへ反映された。
+- `G0100` で `HELLO, WORLD` を表示し、`BRK 0106 A=04 B=00 X=0117 SP=1F42 CC=D4` で停止した。
+
+これにより、Issue #65 の範囲である `SecPerClus>1` カード上の512 byte以下ファイルLOADは実機で確認済みとする。512 byteを超える `MICBAS13.S` / `MICBAS13.HEX` のようなファイルは、予定どおり Issue #66 の cluster内複数sector stream read 対応で扱う。
