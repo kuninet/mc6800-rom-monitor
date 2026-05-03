@@ -395,11 +395,12 @@ FAT32_READ_FILE:
         stx     FAT_READ_PTR
         jsr     FAT_COPY_FILE_TO_CUR
         jsr     FAT_COPY_FILE_SIZE_TO_REM
+        clr     FAT_SECTOR_IN_CLUS
 
 FAT_READ_FILE_LOOP:
         jsr     FAT_BYTES_REMAIN
         bcc     FAT_READ_FILE_DONE
-        jsr     FAT_CLUSTER_TO_SD_LBA
+        jsr     FAT_SECTOR_TO_SD_LBA
         ldx     #SD_SECTOR_BUF
         jsr     SD_READ_SECTOR
         bcc     FAT_READ_COPY_PREP
@@ -412,13 +413,11 @@ FAT_READ_COPY_PREP:
         jsr     FAT_SUB_COPY_COUNT
         jsr     FAT_BYTES_REMAIN
         bcc     FAT_READ_FILE_DONE
-        jsr     FAT32_NEXT_CLUSTER
-        bcc     FAT_READ_NEXT_CLUSTER
-        ldaa    #FAT_ERR_CHAIN
-        jmp     FAT_FAIL_A
-FAT_READ_NEXT_CLUSTER:
-        jsr     FAT_COPY_NEXT_TO_CUR
+        jsr     FAT_ADVANCE_FILE_SECTOR
+        bcs     FAT_READ_FILE_ADVANCE_FAIL
         jmp     FAT_READ_FILE_LOOP
+FAT_READ_FILE_ADVANCE_FAIL:
+        rts
 
 FAT_READ_FILE_DONE:
         ldaa    #FAT_ERR_NONE
@@ -431,6 +430,7 @@ FAT32_STREAM_OPEN:
         jsr     FAT_COPY_FILE_SIZE_TO_REM
         clr     FAT_COPY_COUNT
         clr     FAT_COPY_COUNT+1
+        clr     FAT_SECTOR_IN_CLUS
         ldx     #SD_SECTOR_BUF
         stx     FAT_ENTRY_PTR
         ldaa    #FAT_ERR_NONE
@@ -466,20 +466,18 @@ FAT_STREAM_HAVE_SECTOR:
         bne     FAT_STREAM_RETURN_BYTE
         jsr     FAT_BYTES_REMAIN
         bcc     FAT_STREAM_RETURN_BYTE
-        jsr     FAT32_NEXT_CLUSTER
-        bcc     FAT_STREAM_ADVANCE_CLUSTER
+        jsr     FAT_ADVANCE_FILE_SECTOR
+        bcc     FAT_STREAM_RETURN_BYTE
         pula
-        ldaa    #FAT_ERR_CHAIN
-        jmp     FAT_FAIL_A
-FAT_STREAM_ADVANCE_CLUSTER:
-        jsr     FAT_COPY_NEXT_TO_CUR
+        sec
+        rts
 FAT_STREAM_RETURN_BYTE:
         pula
         clc
         rts
 
 FAT_STREAM_LOAD_SECTOR:
-        jsr     FAT_CLUSTER_TO_SD_LBA
+        jsr     FAT_SECTOR_TO_SD_LBA
         ldx     #SD_SECTOR_BUF
         jsr     SD_READ_SECTOR
         bcc     FAT_STREAM_LOAD_OK
@@ -657,6 +655,17 @@ FAT_CLUSTER_ADD_SECTOR_LOOP:
 FAT_CLUSTER_ADD_DONE:
         rts
 
+FAT_SECTOR_TO_SD_LBA:
+        jsr     FAT_CLUSTER_TO_SD_LBA
+        ldab    FAT_SECTOR_IN_CLUS
+        beq     FAT_SECTOR_TO_SD_LBA_DONE
+FAT_SECTOR_TO_SD_LBA_LOOP:
+        jsr     FAT_INC_SD_LBA
+        decb
+        bne     FAT_SECTOR_TO_SD_LBA_LOOP
+FAT_SECTOR_TO_SD_LBA_DONE:
+        rts
+
 FAT_INC_SD_LBA:
         inc     SD_LBA3
         bne     FAT_INC_SD_LBA_DONE
@@ -720,6 +729,22 @@ FAT_NEXT_READ:
         sec
         rts
 FAT_NEXT_NOT_EOC:
+        clc
+        rts
+
+FAT_ADVANCE_FILE_SECTOR:
+        inc     FAT_SECTOR_IN_CLUS
+        ldaa    FAT_SECTOR_IN_CLUS
+        cmpa    FAT_SEC_PER_CLUS
+        blo     FAT_ADVANCE_SAME_CLUSTER
+        clr     FAT_SECTOR_IN_CLUS
+        jsr     FAT32_NEXT_CLUSTER
+        bcc     FAT_ADVANCE_NEXT_CLUSTER
+        ldaa    #FAT_ERR_CHAIN
+        jmp     FAT_FAIL_A
+FAT_ADVANCE_NEXT_CLUSTER:
+        jsr     FAT_COPY_NEXT_TO_CUR
+FAT_ADVANCE_SAME_CLUSTER:
         clc
         rts
 
