@@ -19,6 +19,8 @@ BUILD_LST_PATH = PROJECT_ROOT / "build" / "mc6800-monitor.lst"
 from sbc6800_emu import PIA, PIA_CRB, PIA_PRB, SDCard, SPI_CS, SPI_MISO, SPI_MOSI, SPI_SCLK
 from sd_fixtures import (
     EOC,
+    BIG_S_CLUSTER_1,
+    BIG_S_CONTENT,
     LATE_BIN_CLUSTER,
     LATE_BIN_CONTENT,
     MULTI_CLUSTER_1,
@@ -333,6 +335,8 @@ def test_multisector_cluster_fixture_layout() -> None:
     assert sector(image, layout.cluster_lba(TEST_S_CLUSTER)).startswith(TEST_S_CONTENT)
     assert sector(image, layout.cluster_lba(MULTI_CLUSTER_1)).startswith(MULTI_CLUSTER_1_PREFIX)
     assert sector(image, layout.cluster_lba(MULTI_CLUSTER_1) + 1).startswith(MULTI_CLUSTER_2_PREFIX)
+    assert sector(image, layout.cluster_lba(BIG_S_CLUSTER_1)).startswith(BIG_S_CONTENT[:16])
+    assert sector(image, layout.cluster_lba(BIG_S_CLUSTER_1) + 1).startswith(BIG_S_CONTENT[SECTOR_SIZE:SECTOR_SIZE + 16])
     print("[PASS] test_multisector_cluster_fixture_layout")
 
 
@@ -526,6 +530,28 @@ def test_rom_fat32_find_and_read_multicluster_file() -> None:
     print("[PASS] test_rom_fat32_find_and_read_multicluster_file")
 
 
+def test_rom_fat32_find_and_read_multisector_cluster_file() -> None:
+    image = build_fat32_image(with_mbr=True, sectors_per_cluster=6)
+    stdout, _symbols = run_rom_find_and_read_file(b"MULTI   BIN", image, 0x040F)
+    line0 = _dump_line(stdout, 0x0200)
+    line1 = _dump_line(stdout, 0x0400)
+    expected0 = " ".join(f"{value:02X}" for value in MULTI_CLUSTER_1_PREFIX)
+    expected1 = " ".join(f"{value:02X}" for value in MULTI_CLUSTER_2_PREFIX)
+    assert expected0 in line0, f"missing first sector prefix: {line0!r}"
+    assert expected1 in line1, f"missing second sector prefix: {line1!r}"
+    print("[PASS] test_rom_fat32_find_and_read_multisector_cluster_file")
+
+
+def test_rom_fat32_find_and_read_multisector_cluster_chain_file() -> None:
+    image = build_fat32_image(with_mbr=True, sectors_per_cluster=2)
+    stdout, _symbols = run_rom_find_and_read_file(b"BIGSREC S  ", image, 0x08FF)
+    for offset in (0, SECTOR_SIZE, SECTOR_SIZE * 2):
+        line = _dump_line(stdout, 0x0200 + offset)
+        expected = " ".join(f"{value:02X}" for value in BIG_S_CONTENT[offset:offset + 16])
+        assert expected in line, f"missing BIGSREC data at offset {offset}: {line!r}"
+    print("[PASS] test_rom_fat32_find_and_read_multisector_cluster_chain_file")
+
+
 def test_rom_fat32_find_respects_file_size() -> None:
     image = build_fat32_image(with_mbr=True)
     stdout, _symbols = run_rom_find_and_read_file(b"TEST    S  ", image, 0x022F)
@@ -606,6 +632,42 @@ def test_rom_lf_reads_small_file_from_multisector_cluster() -> None:
     print("[PASS] test_rom_lf_reads_small_file_from_multisector_cluster")
 
 
+def test_rom_lf_reads_file_across_sector_inside_cluster() -> None:
+    image = build_fat32_image(with_mbr=True, sectors_per_cluster=6)
+    stdout, stderr, rc = _run_emu_with_sd(
+        "F0500-079F 00\rLF BIGSREC.S\rD0500-050F\rD0720-072F\r\r",
+        image,
+        max_cycles=160_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert "OK" in stdout, f"LF should load S-Record beyond first sector: {stdout!r}"
+    assert "0500 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F" in stdout, (
+        f"missing first loaded S-Record bytes: {stdout!r}"
+    )
+    assert "0720 20 21 22 23 24 25 26 27 28 29 2A 2B 2C 2D 2E 2F" in stdout, (
+        f"missing bytes loaded after sector boundary: {stdout!r}"
+    )
+    print("[PASS] test_rom_lf_reads_file_across_sector_inside_cluster")
+
+
+def test_rom_lf_reads_file_across_cluster_boundary_multisector_cluster() -> None:
+    image = build_fat32_image(with_mbr=True, sectors_per_cluster=2)
+    stdout, stderr, rc = _run_emu_with_sd(
+        "F0500-079F 00\rLF BIGSREC.S\rD0500-050F\rD0720-072F\r\r",
+        image,
+        max_cycles=160_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert "OK" in stdout, f"LF should load S-Record across cluster boundary: {stdout!r}"
+    assert "0500 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F" in stdout, (
+        f"missing first loaded S-Record bytes: {stdout!r}"
+    )
+    assert "0720 20 21 22 23 24 25 26 27 28 29 2A 2B 2C 2D 2E 2F" in stdout, (
+        f"missing bytes loaded after cluster boundary: {stdout!r}"
+    )
+    print("[PASS] test_rom_lf_reads_file_across_cluster_boundary_multisector_cluster")
+
+
 def main() -> None:
     print("=" * 50)
     print("SD/PIA fixture tests")
@@ -623,6 +685,8 @@ def main() -> None:
         test_rom_fat32_mount_reads_mbr_bpb_layout,
         test_rom_fat32_mount_reads_superfloppy_bpb_layout,
         test_rom_fat32_find_and_read_multicluster_file,
+        test_rom_fat32_find_and_read_multisector_cluster_file,
+        test_rom_fat32_find_and_read_multisector_cluster_chain_file,
         test_rom_fat32_find_respects_file_size,
         test_rom_fat32_find_chained_root_entry,
         test_rom_dir_command_lists_root_files,
@@ -630,6 +694,8 @@ def main() -> None:
         test_rom_lf_command_opens_83_files_only,
         test_rom_lf_file_eof_does_not_wait_for_acia,
         test_rom_lf_reads_small_file_from_multisector_cluster,
+        test_rom_lf_reads_file_across_sector_inside_cluster,
+        test_rom_lf_reads_file_across_cluster_boundary_multisector_cluster,
     ]
 
     passed = 0

@@ -19,6 +19,10 @@ MULTI_CLUSTER_1 = 5
 MULTI_CLUSTER_2 = 6
 ROOT_EXTRA_CLUSTER = 7
 LATE_BIN_CLUSTER = 8
+BIG_S_CLUSTER_1 = 9
+BIG_S_CLUSTER_2 = 10
+BIG_S_CLUSTER_3 = 11
+BIG_S_CLUSTER_4 = 12
 EOC = 0x0FFFFFFF
 
 TEST_S_CONTENT = b"S1060200010203F1\r\nS9030000FC\r\n"
@@ -26,6 +30,27 @@ TEST_HEX_CONTENT = b":03030000AABBCCC9\r\n:00000001FF\r\n"
 MULTI_CLUSTER_1_PREFIX = b"MULTI-CLUSTER-1"
 MULTI_CLUSTER_2_PREFIX = b"MULTI-CLUSTER-2"
 LATE_BIN_CONTENT = b"LATE-ROOT-ENTRY\r\n"
+
+
+def _srec_record(address: int, data: bytes) -> bytes:
+    count = len(data) + 3
+    total = count + ((address >> 8) & 0xFF) + (address & 0xFF) + sum(data)
+    checksum = (~total) & 0xFF
+    return f"S1{count:02X}{address:04X}".encode("ascii") + data.hex().upper().encode("ascii") + f"{checksum:02X}\r\n".encode("ascii")
+
+
+def _make_big_s_content() -> bytes:
+    payload = bytes(value & 0xFF for value in range(640))
+    records = [
+        _srec_record(0x0500 + offset, payload[offset:offset + 16])
+        for offset in range(0, len(payload), 16)
+    ]
+    records.append(b"S9030000FC\r\n")
+    return b"".join(records)
+
+
+BIG_S_CONTENT = _make_big_s_content()
+BIG_S_CLUSTERS = (BIG_S_CLUSTER_1, BIG_S_CLUSTER_2, BIG_S_CLUSTER_3, BIG_S_CLUSTER_4)
 
 
 @dataclass(frozen=True)
@@ -148,6 +173,12 @@ def _write_fats(image: bytearray, layout: Fat32Layout, root_chain: bool) -> None
     if root_chain:
         entries[ROOT_EXTRA_CLUSTER] = EOC
         entries[LATE_BIN_CLUSTER] = EOC
+    big_clusters_needed = _cluster_count_for_size(len(BIG_S_CONTENT), layout.sectors_per_cluster)
+    for index, cluster in enumerate(BIG_S_CLUSTERS[:big_clusters_needed]):
+        if index + 1 < big_clusters_needed:
+            entries[cluster] = BIG_S_CLUSTERS[index + 1]
+        else:
+            entries[cluster] = EOC
     for cluster, value in entries.items():
         offset = cluster * 4
         fat[offset:offset + 4] = value.to_bytes(4, "little")
@@ -162,6 +193,7 @@ def _write_root_dir(image: bytearray, layout: Fat32Layout, root_chain: bool) -> 
         root_entry(b"TEST    S  ", 0x20, TEST_S_CLUSTER, len(TEST_S_CONTENT)),
         root_entry(b"TEST    HEX", 0x20, TEST_HEX_CLUSTER, len(TEST_HEX_CONTENT)),
         root_entry(b"MULTI   BIN", 0x20, MULTI_CLUSTER_1, SECTOR_SIZE * 2),
+        root_entry(b"BIGSREC S  ", 0x20, BIG_S_CLUSTER_1, len(BIG_S_CONTENT)),
     ]
     for index, entry in enumerate(entries):
         start = index * 32
@@ -189,6 +221,7 @@ def _write_file_clusters(image: bytearray, layout: Fat32Layout, root_chain: bool
         _write_cluster(image, layout, MULTI_CLUSTER_2, _padded(MULTI_CLUSTER_2_PREFIX, 0x22))
     else:
         _write_sector(image, layout.cluster_lba(MULTI_CLUSTER_1) + 1, _padded(MULTI_CLUSTER_2_PREFIX, 0x22))
+    _write_file_data(image, layout, BIG_S_CLUSTERS, BIG_S_CONTENT, 0x44)
     if root_chain:
         _write_cluster(image, layout, LATE_BIN_CLUSTER, _padded(LATE_BIN_CONTENT, 0x33))
 
@@ -202,6 +235,28 @@ def _write_sector(image: bytearray, lba: int, data: bytes | bytearray) -> None:
         raise ValueError("sector data must be exactly 512 bytes")
     start = lba * SECTOR_SIZE
     image[start:start + SECTOR_SIZE] = data
+
+
+def _write_file_data(image: bytearray, layout: Fat32Layout, clusters: tuple[int, ...], data: bytes, fill: int) -> None:
+    sector_count = _sector_count_for_size(len(data))
+    cluster_count = _cluster_count_for_size(len(data), layout.sectors_per_cluster)
+    if cluster_count > len(clusters):
+        raise ValueError("not enough clusters for file data")
+    for sector_index in range(sector_count):
+        chunk = data[sector_index * SECTOR_SIZE:(sector_index + 1) * SECTOR_SIZE]
+        sector_data = chunk + bytes([fill]) * (SECTOR_SIZE - len(chunk))
+        cluster_index = sector_index // layout.sectors_per_cluster
+        sector_in_cluster = sector_index % layout.sectors_per_cluster
+        lba = layout.cluster_lba(clusters[cluster_index]) + sector_in_cluster
+        _write_sector(image, lba, sector_data)
+
+
+def _sector_count_for_size(size: int) -> int:
+    return (size + SECTOR_SIZE - 1) // SECTOR_SIZE
+
+
+def _cluster_count_for_size(size: int, sectors_per_cluster: int) -> int:
+    return (_sector_count_for_size(size) + sectors_per_cluster - 1) // sectors_per_cluster
 
 
 def _padded(prefix: bytes, fill: int) -> bytes:

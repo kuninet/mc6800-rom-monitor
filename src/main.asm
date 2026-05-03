@@ -1387,7 +1387,16 @@ LOADER_GETC:
         clc
         rts
 LOADER_GETC_FAT:
-        jmp     FAT32_STREAM_GETC
+        pshb
+        jsr     FAT32_STREAM_GETC
+        bcc     LOADER_GETC_FAT_OK
+        pulb
+        sec
+        rts
+LOADER_GETC_FAT_OK:
+        pulb
+        clc
+        rts
 
 PRINT_HEX8:
         psha
