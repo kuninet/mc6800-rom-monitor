@@ -647,7 +647,11 @@ FAT_CLUSTER_TO_SD_LBA:
 FAT_CLUSTER_ADD_LOOP:
         ldaa    FAT_TMP
         beq     FAT_CLUSTER_ADD_DONE
+        ldab    FAT_SEC_PER_CLUS
+FAT_CLUSTER_ADD_SECTOR_LOOP:
         jsr     FAT_INC_SD_LBA
+        decb
+        bne     FAT_CLUSTER_ADD_SECTOR_LOOP
         dec     FAT_TMP
         bra     FAT_CLUSTER_ADD_LOOP
 FAT_CLUSTER_ADD_DONE:

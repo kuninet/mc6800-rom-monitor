@@ -34,21 +34,22 @@ class Fat32Layout:
     fat_lba: int
     root_dir_lba: int
     data_start_lba: int
+    sectors_per_cluster: int = SECTORS_PER_CLUSTER
 
     def cluster_lba(self, cluster: int) -> int:
-        return self.data_start_lba + (cluster - 2) * SECTORS_PER_CLUSTER
+        return self.data_start_lba + (cluster - 2) * self.sectors_per_cluster
 
 
-def build_fat32_image(with_mbr: bool, root_chain: bool = False) -> bytes:
+def build_fat32_image(with_mbr: bool, root_chain: bool = False, sectors_per_cluster: int = SECTORS_PER_CLUSTER) -> bytes:
     volume_start = PARTITION_START_LBA if with_mbr else 0
     total_sectors = volume_start + TOTAL_VOLUME_SECTORS
     image = bytearray(total_sectors * SECTOR_SIZE)
-    layout = layout_for_image(with_mbr)
+    layout = layout_for_image(with_mbr, sectors_per_cluster=sectors_per_cluster)
 
     if with_mbr:
         _write_mbr(image, volume_start, TOTAL_VOLUME_SECTORS)
 
-    _write_vbr(image, volume_start)
+    _write_vbr(image, volume_start, sectors_per_cluster=sectors_per_cluster)
     _write_fsinfo(image, volume_start + 1)
     _write_fats(image, layout, root_chain=root_chain)
     _write_root_dir(image, layout, root_chain=root_chain)
@@ -56,7 +57,7 @@ def build_fat32_image(with_mbr: bool, root_chain: bool = False) -> bytes:
     return bytes(image)
 
 
-def layout_for_image(with_mbr: bool) -> Fat32Layout:
+def layout_for_image(with_mbr: bool, sectors_per_cluster: int = SECTORS_PER_CLUSTER) -> Fat32Layout:
     volume_start = PARTITION_START_LBA if with_mbr else 0
     fat_lba = volume_start + RESERVED_SECTORS
     data_start = volume_start + RESERVED_SECTORS + FAT_COUNT * FAT_SIZE_SECTORS
@@ -65,6 +66,7 @@ def layout_for_image(with_mbr: bool) -> Fat32Layout:
         fat_lba=fat_lba,
         root_dir_lba=data_start,
         data_start_lba=data_start,
+        sectors_per_cluster=sectors_per_cluster,
     )
 
 
@@ -95,12 +97,12 @@ def _write_mbr(image: bytearray, start_lba: int, sector_count: int) -> None:
     image[0:SECTOR_SIZE] = mbr
 
 
-def _write_vbr(image: bytearray, lba: int) -> None:
+def _write_vbr(image: bytearray, lba: int, sectors_per_cluster: int) -> None:
     vbr = bytearray(SECTOR_SIZE)
     vbr[0:3] = b"\xEB\x58\x90"
     vbr[3:11] = b"MSDOS5.0"
     vbr[11:13] = SECTOR_SIZE.to_bytes(2, "little")
-    vbr[13] = SECTORS_PER_CLUSTER
+    vbr[13] = sectors_per_cluster
     vbr[14:16] = RESERVED_SECTORS.to_bytes(2, "little")
     vbr[16] = FAT_COUNT
     vbr[17:19] = (0).to_bytes(2, "little")
@@ -139,9 +141,10 @@ def _write_fats(image: bytearray, layout: Fat32Layout, root_chain: bool) -> None
         ROOT_CLUSTER: ROOT_EXTRA_CLUSTER if root_chain else EOC,
         TEST_S_CLUSTER: EOC,
         TEST_HEX_CLUSTER: EOC,
-        MULTI_CLUSTER_1: MULTI_CLUSTER_2,
-        MULTI_CLUSTER_2: EOC,
+        MULTI_CLUSTER_1: MULTI_CLUSTER_2 if layout.sectors_per_cluster == 1 else EOC,
     }
+    if layout.sectors_per_cluster == 1:
+        entries[MULTI_CLUSTER_2] = EOC
     if root_chain:
         entries[ROOT_EXTRA_CLUSTER] = EOC
         entries[LATE_BIN_CLUSTER] = EOC
@@ -182,7 +185,10 @@ def _write_file_clusters(image: bytearray, layout: Fat32Layout, root_chain: bool
     _write_cluster(image, layout, TEST_S_CLUSTER, _padded(TEST_S_CONTENT, 0x00))
     _write_cluster(image, layout, TEST_HEX_CLUSTER, _padded(TEST_HEX_CONTENT, 0x00))
     _write_cluster(image, layout, MULTI_CLUSTER_1, _padded(MULTI_CLUSTER_1_PREFIX, 0x11))
-    _write_cluster(image, layout, MULTI_CLUSTER_2, _padded(MULTI_CLUSTER_2_PREFIX, 0x22))
+    if layout.sectors_per_cluster == 1:
+        _write_cluster(image, layout, MULTI_CLUSTER_2, _padded(MULTI_CLUSTER_2_PREFIX, 0x22))
+    else:
+        _write_sector(image, layout.cluster_lba(MULTI_CLUSTER_1) + 1, _padded(MULTI_CLUSTER_2_PREFIX, 0x22))
     if root_chain:
         _write_cluster(image, layout, LATE_BIN_CLUSTER, _padded(LATE_BIN_CONTENT, 0x33))
 
