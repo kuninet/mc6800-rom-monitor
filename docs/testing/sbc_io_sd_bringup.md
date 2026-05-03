@@ -193,6 +193,8 @@ OK
 - `MOSI`、`SCK`、`MISO` のピン順を確認する。
 - MISO が 3.3V High まで上がっているか確認する。
 - 別の SDHC/FAT32 カードで試す。
+- `DIR` 直後に `D1E90-1EA5` を実行し、`SD_ERROR=$02`、`FAT_ERROR=$01` なら FAT 以前の SD 初期化失敗として扱う。
+- `CMD0` の R1 応答が期待 `$01` にならない場合は、SPI の MISO サンプリングタイミングも疑う。ROM 側は SCLK High 後に MISO を読む実装で確認する。
 
 ### `DIR` は出るが `LF` が失敗する
 

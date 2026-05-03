@@ -215,6 +215,8 @@ class PIA:
         self._rx_byte = 0xFF
         self._tx_byte = 0x00
         self._bit_index = 0
+        self._miso_sample = 1
+        self._miso_valid = False
 
     def read(self, addr):
         if addr == PIA_PRA:
@@ -262,6 +264,8 @@ class PIA:
             self._reset_spi(selected=True)
         elif not old_sclk and new_sclk:
             self._clock_rising_edge()
+        elif old_sclk and not new_sclk:
+            self._miso_valid = False
 
         self._last_sclk = 1 if new_sclk else 0
 
@@ -269,6 +273,8 @@ class PIA:
         self._rx_byte = 0xFF
         self._tx_byte = 0x00
         self._bit_index = 0
+        self._miso_sample = 1
+        self._miso_valid = False
         self._last_sclk = 1 if (self.prb & SPI_SCLK) else 0
         if self.sdcard is not None:
             self.sdcard.transfer_byte(0xFF, selected=selected)
@@ -276,6 +282,9 @@ class PIA:
     def _clock_rising_edge(self):
         if self.sdcard is None or (self.prb & SPI_CS):
             return
+
+        self._miso_sample = (self._rx_byte >> (7 - self._bit_index)) & 0x01
+        self._miso_valid = True
 
         if self.prb & SPI_MOSI:
             self._tx_byte |= 1 << (7 - self._bit_index)
@@ -287,7 +296,7 @@ class PIA:
             self._bit_index = 0
 
     def _miso_bit(self):
-        return (self._rx_byte >> (7 - self._bit_index)) & 0x01
+        return self._miso_sample if self._miso_valid else 0
 
 
 class MC6800:

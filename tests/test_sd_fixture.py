@@ -152,9 +152,9 @@ def pia_spi_transfer(pia: PIA, value: int) -> int:
     for bit in range(7, -1, -1):
         mosi = SPI_MOSI if value & (1 << bit) else 0
         pia.write(PIA_PRB, mosi)
+        pia.write(PIA_PRB, mosi | SPI_SCLK)
         if pia.read(PIA_PRB) & SPI_MISO:
             read_value |= 1 << bit
-        pia.write(PIA_PRB, mosi | SPI_SCLK)
         pia.write(PIA_PRB, mosi)
     return read_value
 
