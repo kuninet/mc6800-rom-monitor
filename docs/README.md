@@ -32,6 +32,7 @@
 - [design/architecture.md](design/architecture.md)
 - [plans/implementation_plan.md](plans/implementation_plan.md)
 - [testing/sbc6800_bringup.md](testing/sbc6800_bringup.md)
+- [testing/sbc_io_sd_bringup.md](testing/sbc_io_sd_bringup.md): SBC-IO と microSD SPI モジュールで SD/FAT を実機確認する手順
 - [testing/sbc6800_datapack.md](testing/sbc6800_datapack.md): SBC6800 データパックの扱いと互換確認
 - [testing/macos_tl866ii_plus.md](testing/macos_tl866ii_plus.md): UNIX 系環境で TL866II Plus を使う手順
 - [testing/wsl2_tl866ii_plus.md](testing/wsl2_tl866ii_plus.md): WSL2 で TL866II Plus と minipro を試す手順
