@@ -55,11 +55,11 @@ def entry_cluster(entry: bytes) -> int:
     return (u16(entry, 20) << 16) | u16(entry, 26)
 
 
-def assert_common_bpb(image: bytes, volume_lba: int) -> None:
+def assert_common_bpb(image: bytes, volume_lba: int, sectors_per_cluster: int = 1) -> None:
     bpb = sector(image, volume_lba)
     assert bpb[510:512] == b"\x55\xAA", "missing BPB signature"
     assert u16(bpb, 11) == SECTOR_SIZE, "unexpected bytes per sector"
-    assert bpb[13] == 1, "unexpected sectors per cluster"
+    assert bpb[13] == sectors_per_cluster, "unexpected sectors per cluster"
     assert u16(bpb, 14) == 4, "unexpected reserved sector count"
     assert bpb[16] == 2, "unexpected FAT count"
     assert u16(bpb, 17) == 0, "FAT32 root entry count must be zero"
@@ -152,9 +152,9 @@ def pia_spi_transfer(pia: PIA, value: int) -> int:
     for bit in range(7, -1, -1):
         mosi = SPI_MOSI if value & (1 << bit) else 0
         pia.write(PIA_PRB, mosi)
+        pia.write(PIA_PRB, mosi | SPI_SCLK)
         if pia.read(PIA_PRB) & SPI_MISO:
             read_value |= 1 << bit
-        pia.write(PIA_PRB, mosi | SPI_SCLK)
         pia.write(PIA_PRB, mosi)
     return read_value
 
@@ -323,6 +323,17 @@ def test_chained_root_fat32_fixture_layout() -> None:
     assert_common_bpb(image, PARTITION_START_LBA)
     assert_chained_root_directory(image, with_mbr=True)
     print("[PASS] test_chained_root_fat32_fixture_layout")
+
+
+def test_multisector_cluster_fixture_layout() -> None:
+    image = build_fat32_image(with_mbr=True, sectors_per_cluster=6)
+    layout = layout_for_image(with_mbr=True, sectors_per_cluster=6)
+    assert_common_bpb(image, PARTITION_START_LBA, sectors_per_cluster=6)
+    assert layout.cluster_lba(MULTI_CLUSTER_1) == layout.data_start_lba + (MULTI_CLUSTER_1 - 2) * 6
+    assert sector(image, layout.cluster_lba(TEST_S_CLUSTER)).startswith(TEST_S_CONTENT)
+    assert sector(image, layout.cluster_lba(MULTI_CLUSTER_1)).startswith(MULTI_CLUSTER_1_PREFIX)
+    assert sector(image, layout.cluster_lba(MULTI_CLUSTER_1) + 1).startswith(MULTI_CLUSTER_2_PREFIX)
+    print("[PASS] test_multisector_cluster_fixture_layout")
 
 
 def test_sdcard_command_sequence_reads_known_sector() -> None:
@@ -586,6 +597,15 @@ def test_rom_lf_file_eof_does_not_wait_for_acia() -> None:
     print("[PASS] test_rom_lf_file_eof_does_not_wait_for_acia")
 
 
+def test_rom_lf_reads_small_file_from_multisector_cluster() -> None:
+    image = build_fat32_image(with_mbr=True, sectors_per_cluster=6)
+    stdout, stderr, rc = _run_emu_with_sd("LF TEST.S\rD0200-0202\r\r", image, max_cycles=80_000_000)
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert "OK" in stdout, f"LF should load small file from SecPerClus > 1 image: {stdout!r}"
+    assert "0200 01 02 03" in stdout, f"missing S-Record loaded bytes: {stdout!r}"
+    print("[PASS] test_rom_lf_reads_small_file_from_multisector_cluster")
+
+
 def main() -> None:
     print("=" * 50)
     print("SD/PIA fixture tests")
@@ -595,6 +615,7 @@ def main() -> None:
         test_mbr_fat32_fixture_layout,
         test_superfloppy_fat32_fixture_layout,
         test_chained_root_fat32_fixture_layout,
+        test_multisector_cluster_fixture_layout,
         test_sdcard_command_sequence_reads_known_sector,
         test_sdcard_cs_release_discards_pending_response,
         test_pia_bitbang_reads_known_sector,
@@ -608,6 +629,7 @@ def main() -> None:
         test_rom_dir_keeps_dump_command,
         test_rom_lf_command_opens_83_files_only,
         test_rom_lf_file_eof_does_not_wait_for_acia,
+        test_rom_lf_reads_small_file_from_multisector_cluster,
     ]
 
     passed = 0

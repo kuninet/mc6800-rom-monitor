@@ -306,18 +306,19 @@ SD_SPI_XFER_MOSI_SET:
         staa    SD_PORTB_SHADOW
         staa    PIA_PRB
 
+        ldaa    SD_PORTB_SHADOW
+        oraa    #SPI_SCLK
+        staa    PIA_PRB
+
         ldaa    SD_RX
         asla
         staa    SD_RX
         ldaa    PIA_PRB
         anda    #SPI_MISO
-        beq     SD_SPI_XFER_CLOCK
+        beq     SD_SPI_XFER_CLOCK_LOW
         inc     SD_RX
 
-SD_SPI_XFER_CLOCK:
-        ldaa    SD_PORTB_SHADOW
-        oraa    #SPI_SCLK
-        staa    PIA_PRB
+SD_SPI_XFER_CLOCK_LOW:
         ldaa    SD_PORTB_SHADOW
         staa    PIA_PRB
         dec     SD_BIT_COUNT
