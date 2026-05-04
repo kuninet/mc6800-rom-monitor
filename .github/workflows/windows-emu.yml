@@ -20,6 +20,13 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Setup GNU Make
+        shell: pwsh
+        run: |
+          if (-not (Get-Command make -ErrorAction SilentlyContinue)) {
+            choco install make -y --no-progress
+          }
+
       - name: Extract ASL toolchain
         shell: pwsh
         run: |
@@ -35,19 +42,22 @@ jobs:
           $root = Split-Path -Parent (Split-Path -Parent $asl.FullName)
           "ASL_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Build ROM binary
+      - name: Build ROM binaries
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force build | Out-Null
-          $include = "$pwd\include;$pwd\src"
-          & "$env:ASL_ROOT\bin\asl.exe" -q -L -olist build\mc6800-monitor.lst -o build\mc6800-monitor.p -i $include src\main.asm
+          make bin ASL="$env:ASL_ROOT\bin\asl.exe" P2BIN="$env:ASL_ROOT\bin\p2bin.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & "$env:ASL_ROOT\bin\p2bin.exe" build\mc6800-monitor.p build\mc6800-monitor.bin -q
+          make bin MONITOR_PROFILE=sbcio ASL="$env:ASL_ROOT\bin\asl.exe" P2BIN="$env:ASL_ROOT\bin\p2bin.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Run emulator smoke tests
         env:
           REQUIRE_BUILD_ROM: "1"
         run: |
+          python tests/test_smoke.py
+          python tests/test_sd_fixture.py
+          $env:MONITOR_PROFILE='sbcio'
+          $env:MONITOR_ROM_PATH='build/mc6800-monitor-sbcio.bin'
+          $env:MONITOR_LST_PATH='build/mc6800-monitor-sbcio.lst'
           python tests/test_smoke.py
           python tests/test_sd_fixture.py

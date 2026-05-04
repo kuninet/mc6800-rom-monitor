@@ -4,12 +4,7 @@ ROM_BASE         equ $E000
 ROM_END          equ $FFFF
 MONITOR_BASE     equ $E200
 
-RAM_START        equ $0000
-RAM_END          equ $1FFF
-MIKBUG_VAR_BASE  equ $1F00
-MIKBUG_STACK_TOP equ $1F42
-MONITOR_RAM_BASE equ $1E00
-STACK_TOP        equ MIKBUG_STACK_TOP
+        include "../build/monitor_profile.inc"
 
 ACIA_CTRL        equ $8018
 ACIA_DATA        equ $8019
@@ -152,8 +147,6 @@ FAT_COPY_COUNT   equ FAT_READ_PTR+2
 FAT_TMP          equ FAT_COPY_COUNT+2
 FAT_DIR_COUNT    equ FAT_TMP+1
 FAT_SECTOR_IN_CLUS equ FAT_DIR_COUNT+1
-
-SD_SECTOR_BUF    equ $1C00
 
 SD_ERR_NONE      equ 0
 SD_ERR_TIMEOUT   equ 1

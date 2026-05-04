@@ -12,9 +12,22 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 EMU_PATH = PROJECT_ROOT / "emu" / "sbc6800_emu.py"
-BUILD_ROM_PATH = PROJECT_ROOT / "build" / "mc6800-monitor.bin"
+DEFAULT_BUILD_ROM_PATH = PROJECT_ROOT / "build" / "mc6800-monitor.bin"
 FIXTURE_ROM_PATH = PROJECT_ROOT / "tests" / "fixtures" / "mc6800-monitor.bin"
 DATAPACK_DIR = PROJECT_ROOT / "third_party" / "sbc6800_datapack"
+
+
+def _path_from_env(name: str, default: Path) -> Path:
+    value = os.environ.get(name)
+    if not value:
+        return default
+    path = Path(value)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path
+
+
+BUILD_ROM_PATH = _path_from_env("MONITOR_ROM_PATH", DEFAULT_BUILD_ROM_PATH)
 
 
 def rom_path() -> Path:
@@ -266,7 +279,7 @@ def main():
     if not rom.exists():
         print(f"[FAIL] ROM binary not found: {rom}")
         if os.environ.get("REQUIRE_BUILD_ROM") == "1":
-            print("       CI requires a freshly built build/mc6800-monitor.bin.")
+            print(f"       CI requires a freshly built ROM binary: {rom}")
         else:
             print("       Run `make bin` first, or provide tests/fixtures/mc6800-monitor.bin.")
         sys.exit(1)
