@@ -62,8 +62,10 @@ endif
 ROMBIN := $(OUTDIR)/$(TARGET)-$(ROM_KIND).bin
 
 ifeq ($(OS),Windows_NT)
+SHELL := powershell
+.SHELLFLAGS := -NoProfile -Command
 ASL_PATHSEP := ;
-ASL_INCLUDE_ARG = $(ASL_INCLUDE)
+ASL_INCLUDE_ARG = "$(ASL_INCLUDE)"
 MKDIR_P := powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '$(OUTDIR)' | Out-Null"
 RM_RF := powershell -NoProfile -Command "if (Test-Path -LiteralPath '$(OUTDIR)') { Remove-Item -LiteralPath '$(OUTDIR)' -Recurse -Force }"
 COPY_PROFILE := powershell -NoProfile -Command "Copy-Item -LiteralPath '$(PROFILE_SRC)' -Destination '$(PROFILE_INC)' -Force"
