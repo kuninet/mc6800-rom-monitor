@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import subprocess
 import tempfile
@@ -13,8 +14,22 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "tests"))
 sys.path.insert(0, str(PROJECT_ROOT / "emu"))
 EMU_PATH = PROJECT_ROOT / "emu" / "sbc6800_emu.py"
-BUILD_ROM_PATH = PROJECT_ROOT / "build" / "mc6800-monitor.bin"
-BUILD_LST_PATH = PROJECT_ROOT / "build" / "mc6800-monitor.lst"
+DEFAULT_BUILD_ROM_PATH = PROJECT_ROOT / "build" / "mc6800-monitor.bin"
+DEFAULT_BUILD_LST_PATH = PROJECT_ROOT / "build" / "mc6800-monitor.lst"
+
+
+def _path_from_env(name: str, default: Path) -> Path:
+    value = os.environ.get(name)
+    if not value:
+        return default
+    path = Path(value)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path
+
+
+BUILD_ROM_PATH = _path_from_env("MONITOR_ROM_PATH", DEFAULT_BUILD_ROM_PATH)
+BUILD_LST_PATH = _path_from_env("MONITOR_LST_PATH", DEFAULT_BUILD_LST_PATH)
 
 from sbc6800_emu import PIA, PIA_CRB, PIA_PRB, SDCard, SPI_CS, SPI_MISO, SPI_MOSI, SPI_SCLK
 from sd_fixtures import (
@@ -228,6 +243,10 @@ def _load_symbol_addresses(*names: str) -> dict[str, int]:
     return result
 
 
+def _is_sbcio_build() -> bool:
+    return "-sbcio" in BUILD_ROM_PATH.stem or os.environ.get("MONITOR_PROFILE") == "sbcio"
+
+
 def _run_emu_with_sd(input_text: str, sd_image: bytes, max_cycles: int = 30_000_000) -> tuple[str, str, int]:
     if not BUILD_ROM_PATH.exists() or not BUILD_LST_PATH.exists():
         raise AssertionError("build output missing; run `make bin` first")
@@ -420,6 +439,64 @@ def test_rom_sd_read_sector_reads_known_fixture_sector() -> None:
     expected = " ".join(f"{value:02X}" for value in MULTI_CLUSTER_1_PREFIX[:16])
     assert expected in line, f"sector prefix mismatch: {line!r}\nstdout={stdout!r}"
     print("[PASS] test_rom_sd_read_sector_reads_known_fixture_sector")
+
+
+def test_rom_profile_memory_layout() -> None:
+    symbols = _load_symbol_addresses(
+        "SD_SECTOR_BUF",
+        "MONITOR_RAM_BASE",
+        "FAT_SECTOR_IN_CLUS",
+        "USER_RAM_END",
+        "WORK_RAM_START",
+        "WORK_RAM_END",
+    )
+    if _is_sbcio_build():
+        expected_sector_buf = 0xC000
+        expected_monitor_base = 0xC200
+        expected_user_ram_end = 0x7FFF
+        expected_work_start = 0xC000
+        expected_work_end = 0xDFFF
+    else:
+        expected_sector_buf = 0x1C00
+        expected_monitor_base = 0x1E00
+        expected_user_ram_end = 0x1FFF
+        expected_work_start = 0x1C00
+        expected_work_end = 0x1FFF
+
+    assert symbols["SD_SECTOR_BUF"] == expected_sector_buf, (
+        f"SD_SECTOR_BUF mismatch: got={symbols['SD_SECTOR_BUF']:04X} "
+        f"expected={expected_sector_buf:04X}"
+    )
+    assert symbols["MONITOR_RAM_BASE"] == expected_monitor_base, (
+        f"MONITOR_RAM_BASE mismatch: got={symbols['MONITOR_RAM_BASE']:04X} "
+        f"expected={expected_monitor_base:04X}"
+    )
+    assert symbols["USER_RAM_END"] == expected_user_ram_end, (
+        f"USER_RAM_END mismatch: got={symbols['USER_RAM_END']:04X} "
+        f"expected={expected_user_ram_end:04X}"
+    )
+    assert symbols["WORK_RAM_START"] == expected_work_start, (
+        f"WORK_RAM_START mismatch: got={symbols['WORK_RAM_START']:04X} "
+        f"expected={expected_work_start:04X}"
+    )
+    assert symbols["WORK_RAM_END"] == expected_work_end, (
+        f"WORK_RAM_END mismatch: got={symbols['WORK_RAM_END']:04X} "
+        f"expected={expected_work_end:04X}"
+    )
+    assert symbols["WORK_RAM_START"] <= symbols["SD_SECTOR_BUF"] <= symbols["WORK_RAM_END"]
+    assert symbols["WORK_RAM_START"] <= symbols["MONITOR_RAM_BASE"] <= symbols["WORK_RAM_END"]
+    assert symbols["SD_SECTOR_BUF"] + SECTOR_SIZE <= symbols["MONITOR_RAM_BASE"], (
+        "SD sector buffer must not overlap monitor work area"
+    )
+    if _is_sbcio_build():
+        assert symbols["FAT_SECTOR_IN_CLUS"] <= symbols["WORK_RAM_END"], (
+            "SBC-IO work variables must stay under WORK_RAM_END"
+        )
+    else:
+        assert symbols["FAT_SECTOR_IN_CLUS"] <= symbols["WORK_RAM_END"], (
+            "base work variables must stay inside 8KB RAM"
+        )
+    print("[PASS] test_rom_profile_memory_layout")
 
 
 def assert_rom_fat32_mount_layout(with_mbr: bool) -> None:
@@ -668,6 +745,24 @@ def test_rom_lf_reads_file_across_cluster_boundary_multisector_cluster() -> None
     print("[PASS] test_rom_lf_reads_file_across_cluster_boundary_multisector_cluster")
 
 
+def test_sbcio_sd_fat_ignores_old_low_ram_work_area() -> None:
+    if not _is_sbcio_build():
+        print("[SKIP] test_sbcio_sd_fat_ignores_old_low_ram_work_area")
+        return
+
+    image = build_fat32_image(with_mbr=True, sectors_per_cluster=6)
+    stdout, stderr, rc = _run_emu_with_sd(
+        "F1C00-1EFF A5\rDIR\rLF TEST.S\rD0200-0202\r\r",
+        image,
+        max_cycles=160_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert "TEST.S A 0000001E" in stdout, f"DIR should work after old work area fill: {stdout!r}"
+    assert "OK" in stdout, f"LF should work after old work area fill: {stdout!r}"
+    assert "0200 01 02 03" in stdout, f"missing S-Record loaded bytes: {stdout!r}"
+    print("[PASS] test_sbcio_sd_fat_ignores_old_low_ram_work_area")
+
+
 def main() -> None:
     print("=" * 50)
     print("SD/PIA fixture tests")
@@ -682,6 +777,7 @@ def main() -> None:
         test_sdcard_cs_release_discards_pending_response,
         test_pia_bitbang_reads_known_sector,
         test_rom_sd_read_sector_reads_known_fixture_sector,
+        test_rom_profile_memory_layout,
         test_rom_fat32_mount_reads_mbr_bpb_layout,
         test_rom_fat32_mount_reads_superfloppy_bpb_layout,
         test_rom_fat32_find_and_read_multicluster_file,
@@ -696,6 +792,7 @@ def main() -> None:
         test_rom_lf_reads_small_file_from_multisector_cluster,
         test_rom_lf_reads_file_across_sector_inside_cluster,
         test_rom_lf_reads_file_across_cluster_boundary_multisector_cluster,
+        test_sbcio_sd_fat_ignores_old_low_ram_work_area,
     ]
 
     passed = 0

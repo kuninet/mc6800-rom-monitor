@@ -3,7 +3,16 @@ P2BIN ?= p2bin
 P2HEX ?= p2hex
 MINIPRO ?= minipro
 
-TARGET := mc6800-monitor
+MONITOR_PROFILE ?= base
+ifeq ($(MONITOR_PROFILE),base)
+TARGET_SUFFIX :=
+else ifeq ($(MONITOR_PROFILE),sbcio)
+TARGET_SUFFIX := -sbcio
+else
+$(error Unsupported MONITOR_PROFILE '$(MONITOR_PROFILE)')
+endif
+
+TARGET := mc6800-monitor$(TARGET_SUFFIX)
 OUTDIR := build
 TOPSRC := src/main.asm
 OBJ := $(OUTDIR)/$(TARGET).p
@@ -11,6 +20,8 @@ LST := $(OUTDIR)/$(TARGET).lst
 BIN := $(OUTDIR)/$(TARGET).bin
 SREC := $(OUTDIR)/$(TARGET).srec
 IHEX := $(OUTDIR)/$(TARGET).hex
+PROFILE_SRC := include/profiles/$(MONITOR_PROFILE).inc
+PROFILE_INC := $(OUTDIR)/monitor_profile.inc
 ROM_KIND ?= 27C64
 ROM_FILL ?= 0xFF
 
@@ -52,47 +63,52 @@ ROMBIN := $(OUTDIR)/$(TARGET)-$(ROM_KIND).bin
 
 ifeq ($(OS),Windows_NT)
 ASL_PATHSEP := ;
-ASL_INCLUDE_ARG = $(ASL_INCLUDE)
-MKDIR_P := if not exist "$(OUTDIR)" mkdir "$(OUTDIR)"
-RM_RF := if exist "$(OUTDIR)" rmdir /s /q "$(OUTDIR)"
+ASL_INCLUDE_ARG = "$(ASL_INCLUDE)"
+MKDIR_P := python -c "from pathlib import Path; Path('$(OUTDIR)').mkdir(parents=True, exist_ok=True)"
+RM_RF := python -c "import shutil; shutil.rmtree('$(OUTDIR)', ignore_errors=True)"
+COPY_PROFILE := python -c "import shutil; shutil.copyfile('$(PROFILE_SRC)', '$(PROFILE_INC)')"
 else
 ASL_PATHSEP := :
 ASL_INCLUDE_ARG = "$(ASL_INCLUDE)"
 MKDIR_P := mkdir -p "$(OUTDIR)"
 RM_RF := rm -rf "$(OUTDIR)"
+COPY_PROFILE := cp "$(PROFILE_SRC)" "$(PROFILE_INC)"
 endif
 
-ASL_INCLUDE := $(CURDIR)/include$(ASL_PATHSEP)$(CURDIR)/src
+ASL_INCLUDE := $(CURDIR)/$(OUTDIR)$(ASL_PATHSEP)$(CURDIR)/include$(ASL_PATHSEP)$(CURDIR)/src
 
-.PHONY: all clean bin srec ihex rombin rombin-27c64 rombin-27c128 rombin-27c256 rombin-28c256 rombin-w27c512 program verify readback program-27c64 program-27c128 program-27c256 program-28c256 program-w27c512 program-upd28c256
+.PHONY: all clean bin srec ihex rombin rombin-27c64 rombin-27c128 rombin-27c256 rombin-28c256 rombin-w27c512 program verify readback program-27c64 program-27c128 program-27c256 program-28c256 program-w27c512 program-upd28c256 FORCE
 
 all: srec ihex
 
 $(OUTDIR):
 	$(MKDIR_P)
 
-$(OBJ): $(TOPSRC) include/hardware.inc include/mikbug.inc src/acia6850.asm src/sdcard.asm src/fat32.asm | $(OUTDIR)
-	$(ASL) -q -L -olist $(LST) -o $(OBJ) -i $(ASL_INCLUDE_ARG) $(TOPSRC)
+$(PROFILE_INC): FORCE $(PROFILE_SRC) | $(OUTDIR)
+	$(COPY_PROFILE)
+
+$(OBJ): FORCE $(TOPSRC) include/hardware.inc include/mikbug.inc $(PROFILE_INC) src/acia6850.asm src/sdcard.asm src/fat32.asm | $(OUTDIR)
+	"$(ASL)" -q -L -olist $(LST) -o $(OBJ) -i $(ASL_INCLUDE_ARG) $(TOPSRC)
 
 bin: $(BIN)
 
 $(BIN): $(OBJ)
-	$(P2BIN) $(OBJ) $(BIN) -q
+	"$(P2BIN)" $(OBJ) $(BIN) -q
 
 srec: $(SREC)
 
 $(SREC): $(OBJ)
-	$(P2HEX) $(OBJ) $(SREC) -q -F Moto -M 2
+	"$(P2HEX)" $(OBJ) $(SREC) -q -F Moto -M 2
 
 ihex: $(IHEX)
 
 $(IHEX): $(OBJ)
-	$(P2HEX) $(OBJ) $(IHEX) -q -F Intel -i 1
+	"$(P2HEX)" $(OBJ) $(IHEX) -q -F Intel -i 1
 
 rombin: $(ROMBIN)
 
 $(ROMBIN): $(OBJ)
-	$(P2BIN) $(OBJ) $(ROMBIN) -q -r $(ROM_RANGE_START)-$(ROM_RANGE_END) -l $(ROM_FILL)
+	"$(P2BIN)" $(OBJ) $(ROMBIN) -q -r $(ROM_RANGE_START)-$(ROM_RANGE_END) -l $(ROM_FILL)
 
 rombin-27c64:
 	$(MAKE) rombin ROM_KIND=27C64
