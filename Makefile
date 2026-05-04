@@ -62,13 +62,11 @@ endif
 ROMBIN := $(OUTDIR)/$(TARGET)-$(ROM_KIND).bin
 
 ifeq ($(OS),Windows_NT)
-SHELL := powershell
-.SHELLFLAGS := -NoProfile -Command
 ASL_PATHSEP := ;
 ASL_INCLUDE_ARG = "$(ASL_INCLUDE)"
-MKDIR_P := powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '$(OUTDIR)' | Out-Null"
-RM_RF := powershell -NoProfile -Command "if (Test-Path -LiteralPath '$(OUTDIR)') { Remove-Item -LiteralPath '$(OUTDIR)' -Recurse -Force }"
-COPY_PROFILE := powershell -NoProfile -Command "Copy-Item -LiteralPath '$(PROFILE_SRC)' -Destination '$(PROFILE_INC)' -Force"
+MKDIR_P := python -c "from pathlib import Path; Path('$(OUTDIR)').mkdir(parents=True, exist_ok=True)"
+RM_RF := python -c "import shutil; shutil.rmtree('$(OUTDIR)', ignore_errors=True)"
+COPY_PROFILE := python -c "import shutil; shutil.copyfile('$(PROFILE_SRC)', '$(PROFILE_INC)')"
 else
 ASL_PATHSEP := :
 ASL_INCLUDE_ARG = "$(ASL_INCLUDE)"
@@ -90,27 +88,27 @@ $(PROFILE_INC): FORCE $(PROFILE_SRC) | $(OUTDIR)
 	$(COPY_PROFILE)
 
 $(OBJ): FORCE $(TOPSRC) include/hardware.inc include/mikbug.inc $(PROFILE_INC) src/acia6850.asm src/sdcard.asm src/fat32.asm | $(OUTDIR)
-	$(ASL) -q -L -olist $(LST) -o $(OBJ) -i $(ASL_INCLUDE_ARG) $(TOPSRC)
+	"$(ASL)" -q -L -olist $(LST) -o $(OBJ) -i $(ASL_INCLUDE_ARG) $(TOPSRC)
 
 bin: $(BIN)
 
 $(BIN): $(OBJ)
-	$(P2BIN) $(OBJ) $(BIN) -q
+	"$(P2BIN)" $(OBJ) $(BIN) -q
 
 srec: $(SREC)
 
 $(SREC): $(OBJ)
-	$(P2HEX) $(OBJ) $(SREC) -q -F Moto -M 2
+	"$(P2HEX)" $(OBJ) $(SREC) -q -F Moto -M 2
 
 ihex: $(IHEX)
 
 $(IHEX): $(OBJ)
-	$(P2HEX) $(OBJ) $(IHEX) -q -F Intel -i 1
+	"$(P2HEX)" $(OBJ) $(IHEX) -q -F Intel -i 1
 
 rombin: $(ROMBIN)
 
 $(ROMBIN): $(OBJ)
-	$(P2BIN) $(OBJ) $(ROMBIN) -q -r $(ROM_RANGE_START)-$(ROM_RANGE_END) -l $(ROM_FILL)
+	"$(P2BIN)" $(OBJ) $(ROMBIN) -q -r $(ROM_RANGE_START)-$(ROM_RANGE_END) -l $(ROM_FILL)
 
 rombin-27c64:
 	$(MAKE) rombin ROM_KIND=27C64
