@@ -25,6 +25,21 @@ SBC-IO の MC6821 PIA 経由で SD/FAT read-only の `DIR` と `LF filename` が
 - `$A000-$BFFF` は K68-VDG の VRAM 候補として原則予約し、汎用RAMとしては使わない。
 - 1st ACIA はPC接続用の保守コンソールとして維持し、2nd ACIA を将来のキーボード接続候補にする。
 
+## ビルド分離の運用イメージ
+
+ビルド分離は、単にRAM配置だけを切り替えるのではなく、将来のVRAM、キーボード、PTM、RTC、DOS相当機能を組み合わせられるようにするための土台として扱う。
+
+初期案では、既定の `make bin` は現行互換の 8KB RAM ROM を作る。SBC-IO拡張構成は、たとえば `make bin MONITOR_PROFILE=sbcio` のようなプロファイル指定で作る候補とする。実際の変数名は実装時にMakefileの既存規約へ合わせる。
+
+プロファイルは次のような粒度で考える。
+
+- `base`: 現行互換。8KB RAM、1st ACIA、PIA SD/FAT read-only。
+- `sbcio`: SBC-IO RAM拡張前提。モニタワークとSD bufferを `$C000-$DFFF` へ移す。
+- `sbcio_vdg`: `sbcio` に K68-VDG を加える。`$A000-$BFFF` をVRAMとして予約する。
+- `standalone`: VDG、2nd ACIAキーボード、PTM、AUTOEXECなどを含む将来候補。
+
+機能が増えるとROM容量も厳しくなるため、プロファイルごとに有効機能を選べる構成を検討する。特に FAT read-only、VDG、キーボード、PTM、RTC、BOOT/DOS相当機能は、すべてを常に同居させる前提にしない。
+
 ## メモリマップ案
 
 ### 8KB互換ROM
@@ -86,6 +101,10 @@ SBC-IO の MC6821 PIA 経由で SD/FAT read-only の `DIR` と `LF filename` が
 - 最初は `KEYTEST` で受信文字を表示するだけにする。
 - 画面出力が入った後、コンソール入力を1st ACIA/2nd ACIAで切り替える。
 - キーボード接続はスタンドアロン化の次段階として扱う。
+- キーボードI/Fボードは別基板を想定する。
+- PS/2キーボードは実装が比較的容易だが、入手性が今後悪くなる可能性がある。
+- USBキーボードは将来性と入手性が高いが、MC6800直結では重いため、専用MCU付きキーボードI/Fとして検討する。
+- 初期PoCはPS/2またはMCUでシリアル化したUSBキーボードを2nd ACIAへ接続する案を比較する。
 
 ### 5. PTMタイマ
 
@@ -96,7 +115,17 @@ PTMは最初から割り込み前提にせず、まずは待ち時間やtick用�
 - 簡易tickカウンタ。
 - 将来の音、カーソル点滅、RTC風表示の土台。
 
-### 6. AUTOEXEC.S と BOOT
+### 6. PIA Port A I2C RTC
+
+将来構想として、PIA Port A で I2C をbit-bangし、RTC時計ICを外付けする案を残す。
+
+- SDボード + RTCボードとしてまとめる構成は、スタンドアロン機として実用性がある。
+- SBC-IO上の既存PIAをSD SPIとRTC I2Cで共有するか、SD/RTC専用の独自I/O基板を作るかは検討課題とする。
+- 既存PIAを共有する場合、Port BをSD SPI、Port AをI2C RTCに割り当てる候補とする。
+- I2Cはopen-drain相当の扱いが必要なため、PIA出力方向、プルアップ、レベル変換、5V/3.3V混在を実機確認対象にする。
+- RTCは `AUTOEXEC.S` や将来のDOS相当機能から時刻を読む用途を想定する。
+
+### 7. AUTOEXEC.S と BOOT
 
 SD LOADが実機動作したため、起動自動化は有力な次期機能。
 
@@ -104,7 +133,17 @@ SD LOADが実機動作したため、起動自動化は有力な次期機能。
 - 初期はS-Recordのみを対象にする。
 - AUTOEXECからRTC初期化、VDG初期化、BASIC起動を行う構成にする。
 
-### 7. SAVE/write
+### 8. SDシステム領域bootstrapとオリジナルDOS構想
+
+ROM容量が FAT read-only と VDG 対応で厳しくなる場合、SDカードの予約領域や固定sectorを使ったbootstrap案を将来構想として残す。
+
+- ROMにはSD初期化と第1段bootstrap readだけを残し、FAT/DIR/LF/VDG/キーボードなどをRAM上の第2段へ逃がす。
+- 第2段はrootの `SDFS.BIN` など通常ファイルに置く案を優先し、固定sectorは最小bootstrapに限定する。
+- SD予約領域を使う場合は、専用SD作成ツールとsignature検査が必要になる。
+- 通常のモニタ拡張というより、M6800 DOS相当の別構想として扱う。
+- 初期ロードマップでは実装対象外だが、ROM容量が逼迫した時の退避先として残す。
+
+### 9. SAVE/write
 
 FAT write は便利だが、実装ミスでSDカードを壊しやすい。VDG/キーボード/BOOTの後で検討する。
 
@@ -119,8 +158,10 @@ FAT write は便利だが、実装ミスでSDカードを壊しやすい。VDG/�
 4. K68-VDGの画面テスト。
 5. 2nd ACIAキーボード入力。
 6. PTMタイマ。
-7. `BOOT` / `AUTOEXEC.S`。
-8. SAVE/write。
+7. PIA Port A I2C RTCのPoC。
+8. `BOOT` / `AUTOEXEC.S`。
+9. SDシステム領域bootstrapとオリジナルDOS構想の再評価。
+10. SAVE/write。
 
 ## 検証方針
 
@@ -129,6 +170,8 @@ FAT write は便利だが、実装ミスでSDカードを壊しやすい。VDG/�
 - 拡張ROMでSD bufferを移動しても `DIR`、`LF HELLO.S`、`LF MICBAS13.S` が通ること。
 - BASICロード後にモニタワークやSD状態が低RAMスキャンで壊れにくいこと。
 - VDG導入時は `$A000-$BFFF` と `$C000-$DFFF` の使い分けを文書とテストで確認すること。
+- ビルド分離導入時は、少なくとも `base` と `sbcio` の両方でROM生成とsmoke testを通すこと。
+- キーボードI/F検討時は、PS/2案とUSB+MCU案の部品入手性、実装規模、2nd ACIA接続方法を比較すること。
 
 ## 対象外
 
@@ -137,4 +180,4 @@ FAT write は便利だが、実装ミスでSDカードを壊しやすい。VDG/�
 - 実際のメモリ配置変更。
 - ROMビルドターゲット追加。
 - `MEM` / `MAP` / `RAMTEST` 実装。
-- K68-VDG、2nd ACIA、PTM、AUTOEXEC、SAVE/write 実装。
+- K68-VDG、2nd ACIA、PTM、RTC、AUTOEXEC、bootstrap/DOS、SAVE/write 実装。
