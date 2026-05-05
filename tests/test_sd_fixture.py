@@ -499,6 +499,39 @@ def test_rom_profile_memory_layout() -> None:
     print("[PASS] test_rom_profile_memory_layout")
 
 
+def test_rom_map_command_matches_profile_symbols() -> None:
+    symbols = _load_symbol_addresses(
+        "RAM_START",
+        "RAM_END",
+        "USER_RAM_END",
+        "WORK_RAM_START",
+        "WORK_RAM_END",
+        "SD_SECTOR_BUF",
+        "MONITOR_RAM_BASE",
+        "MIKBUG_VAR_BASE",
+        "STACK_TOP",
+        "ROM_BASE",
+        "ROM_END",
+    )
+    stdout, stderr, rc = _run_emu_with_sd("MAP\r\r", build_fat32_image(with_mbr=True))
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    profile = "SBCIO" if _is_sbcio_build() else "BASE"
+    expected_lines = [
+        f"MAP {profile}",
+        f"RAM {symbols['RAM_START']:04X}-{symbols['RAM_END']:04X}",
+        f"USER {symbols['RAM_START']:04X}-{symbols['USER_RAM_END']:04X}",
+        f"WORK {symbols['WORK_RAM_START']:04X}-{symbols['WORK_RAM_END']:04X}",
+        f"SD {symbols['SD_SECTOR_BUF']:04X}",
+        f"MON {symbols['MONITOR_RAM_BASE']:04X}",
+        f"MIK {symbols['MIKBUG_VAR_BASE']:04X}",
+        f"STK {symbols['STACK_TOP']:04X}",
+        f"ROM {symbols['ROM_BASE']:04X}-{symbols['ROM_END']:04X}",
+    ]
+    for line in expected_lines:
+        assert line in stdout, f"missing MAP line {line!r}: {stdout!r}"
+    print("[PASS] test_rom_map_command_matches_profile_symbols")
+
+
 def assert_rom_fat32_mount_layout(with_mbr: bool) -> None:
     image = build_fat32_image(with_mbr=with_mbr)
     layout = layout_for_image(with_mbr=with_mbr)
@@ -778,6 +811,7 @@ def main() -> None:
         test_pia_bitbang_reads_known_sector,
         test_rom_sd_read_sector_reads_known_fixture_sector,
         test_rom_profile_memory_layout,
+        test_rom_map_command_matches_profile_symbols,
         test_rom_fat32_mount_reads_mbr_bpb_layout,
         test_rom_fat32_mount_reads_superfloppy_bpb_layout,
         test_rom_fat32_find_and_read_multicluster_file,

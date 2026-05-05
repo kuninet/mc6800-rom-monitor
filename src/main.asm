@@ -74,6 +74,10 @@ MAIN_DISPATCH_DUMP:
 CHK_CMD_MOD:
         cmpa    #'M'
         bne     CHK_CMD_GO
+        jsr     IS_CMD_MAP
+        bcs     MAIN_DISPATCH_MOD
+        jmp     CMD_MAP
+MAIN_DISPATCH_MOD:
         jmp     CMD_MOD
 CHK_CMD_GO:
         cmpa    #'G'
@@ -125,6 +129,22 @@ IS_CMD_DIR:
         clc
         rts
 IS_CMD_DIR_FAIL:
+        sec
+        rts
+
+IS_CMD_MAP:
+        ldab    LINE_LEN
+        cmpb    #3
+        bne     IS_CMD_MAP_FAIL
+        ldaa    LINE_BUF+1
+        cmpa    #'A'
+        bne     IS_CMD_MAP_FAIL
+        ldaa    LINE_BUF+2
+        cmpa    #'P'
+        bne     IS_CMD_MAP_FAIL
+        clc
+        rts
+IS_CMD_MAP_FAIL:
         sec
         rts
 
@@ -838,6 +858,17 @@ CMD_HELP:
         jmp     MAIN_LOOP
 CMD_HELP_ERR:
         jmp     MAIN_LOOP_ERROR
+
+CMD_MAP:
+        ldaa    #MONITOR_PROFILE_SBCIO
+        beq     CMD_MAP_BASE
+        ldx     #TXT_MAP_SBCIO
+        bra     CMD_MAP_PRINT
+CMD_MAP_BASE:
+        ldx     #TXT_MAP_BASE
+CMD_MAP_PRINT:
+        jsr     PDATA1
+        jmp     MAIN_LOOP
 
 CMD_FILL:
         ldab    LINE_LEN
@@ -1700,9 +1731,47 @@ TXT_BRK:        fcc     "BRK "
                 fcb     $04
 TXT_WELCOME:    fcc     "MC6800 MONITOR"
                 fcb     $04
-TXT_HELP:       fcc     "D DIR M G L LF B C R U H F"
+TXT_HELP:       fcc     "D DIR M MAP G L LF B C R U H F"
                 fcb     $04
 TXT_OK:         fcc     "OK"
+                fcb     $04
+TXT_MAP_BASE:   fcc     "MAP BASE"
+                fcb     CHR_CR
+                fcc     "RAM 0000-1FFF"
+                fcb     CHR_CR
+                fcc     "USER 0000-1FFF"
+                fcb     CHR_CR
+                fcc     "WORK 1C00-1FFF"
+                fcb     CHR_CR
+                fcc     "SD 1C00"
+                fcb     CHR_CR
+                fcc     "MON 1E00"
+                fcb     CHR_CR
+                fcc     "MIK 1F00"
+                fcb     CHR_CR
+                fcc     "STK 1F42"
+                fcb     CHR_CR
+                fcc     "ROM E000-FFFF"
+                fcb     CHR_CR
+                fcb     $04
+TXT_MAP_SBCIO:  fcc     "MAP SBCIO"
+                fcb     CHR_CR
+                fcc     "RAM 0000-7FFF"
+                fcb     CHR_CR
+                fcc     "USER 0000-7FFF"
+                fcb     CHR_CR
+                fcc     "WORK C000-DFFF"
+                fcb     CHR_CR
+                fcc     "SD C000"
+                fcb     CHR_CR
+                fcc     "MON C200"
+                fcb     CHR_CR
+                fcc     "MIK 1F00"
+                fcb     CHR_CR
+                fcc     "STK 1F42"
+                fcb     CHR_CR
+                fcc     "ROM E000-FFFF"
+                fcb     CHR_CR
                 fcb     $04
 TXT_BP:         fcc     "BP "
                 fcb     $04

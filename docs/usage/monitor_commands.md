@@ -21,6 +21,7 @@
 | `Dssss-eeee` | `ssss` から `eeee` までをダンプする |
 | `DIR` | SDカード上のroot directoryにある8.3通常ファイルを表示する |
 | `Mssss` | `ssss` からメモリを変更する |
+| `MAP` | 現在のビルドが想定する主要メモリ配置を表示する |
 | `Gssss` | `ssss` へジャンプして実行する |
 | `L` | S-Record または Intel HEX をロードする |
 | `LF filename` | SDカード上の8.3名ファイルを検索して開く |
@@ -99,6 +100,26 @@
 `.` を入力するとメモリ変更を終了する。
 不正な値や 3 桁以上の値を入力すると `?` を表示して終了する。
 
+## メモリマップ表示
+
+`MAP` は現在のROMビルドが想定する主要メモリ配置を表示する。RAMを書き換えず、実機上にRAMが存在するかの破壊テストもしない。
+
+```text
+] MAP
+MAP BASE
+RAM 0000-1FFF
+USER 0000-1FFF
+WORK 1C00-1FFF
+SD 1C00
+MON 1E00
+MIK 1F00
+STK 1F42
+ROM E000-FFFF
+]
+```
+
+SBC-IO拡張ROMでは `MAP SBCIO` と表示され、`WORK C000-DFFF`、`SD C000`、`MON C200` などの拡張RAM前提の配置になる。
+
 ## 実行
 
 `Gssss` は指定アドレスへジャンプして実行する。
@@ -163,7 +184,7 @@ MULTI.BIN A 00000400
 
 ```text
 ] H
-D DIR M G L LF B C R U H F
+D DIR M MAP G L LF B C R U H F
 ]
 ```
 

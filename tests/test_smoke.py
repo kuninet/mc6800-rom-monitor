@@ -140,8 +140,40 @@ def test_error_display():
 
 def test_help_command():
     stdout, stderr, rc = run_emu("H\r\r")
-    assert "D DIR M G L LF B C R U H F" in stdout, f"missing help command list: {stdout!r}"
+    assert "D DIR M MAP G L LF B C R U H F" in stdout, f"missing help command list: {stdout!r}"
     print("[PASS] test_help_command")
+
+
+def is_sbcio_build() -> bool:
+    return "-sbcio" in BUILD_ROM_PATH.stem or os.environ.get("MONITOR_PROFILE") == "sbcio"
+
+
+def test_map_command():
+    stdout, stderr, rc = run_emu("F0100-0103 5A\rMAP\rD0100-0103\r\r", max_cycles=5_000_000)
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    if is_sbcio_build():
+        expected = [
+            "MAP SBCIO",
+            "RAM 0000-7FFF",
+            "USER 0000-7FFF",
+            "WORK C000-DFFF",
+            "SD C000",
+            "MON C200",
+        ]
+    else:
+        expected = [
+            "MAP BASE",
+            "RAM 0000-1FFF",
+            "USER 0000-1FFF",
+            "WORK 1C00-1FFF",
+            "SD 1C00",
+            "MON 1E00",
+        ]
+    expected.extend(["MIK 1F00", "STK 1F42", "ROM E000-FFFF"])
+    for text in expected:
+        assert text in stdout, f"missing MAP output {text!r}: {stdout!r}"
+    assert "0100 5A 5A 5A 5A" in stdout, f"MAP should not modify user RAM: {stdout!r}"
+    print("[PASS] test_map_command")
 
 
 def test_breakpoint_query():
@@ -294,6 +326,7 @@ def main():
         test_ihex_load,
         test_error_display,
         test_help_command,
+        test_map_command,
         test_breakpoint_query,
         test_breakpoint_resume_and_clear,
         test_resume_requires_active_breakpoint,
