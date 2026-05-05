@@ -863,12 +863,44 @@ CMD_MAP:
         ldaa    #MONITOR_PROFILE_SBCIO
         beq     CMD_MAP_BASE
         ldx     #TXT_MAP_SBCIO
-        bra     CMD_MAP_PRINT
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_SBCIO_RAM
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_SBCIO_USER
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_SBCIO_WORK
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_SBCIO_SD
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_SBCIO_MON
+        jsr     MAP_PRINT_LINE
+        bra     CMD_MAP_COMMON
 CMD_MAP_BASE:
         ldx     #TXT_MAP_BASE
-CMD_MAP_PRINT:
-        jsr     PDATA1
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_BASE_RAM
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_BASE_USER
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_BASE_WORK
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_BASE_SD
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_BASE_MON
+        jsr     MAP_PRINT_LINE
+CMD_MAP_COMMON:
+        ldx     #TXT_MAP_MIK
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_STK
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_ROM
+        jsr     MAP_PRINT_LINE
         jmp     MAIN_LOOP
+
+MAP_PRINT_LINE:
+        jsr     PDATA1
+        jsr     PRINT_CRLF
+        rts
 
 CMD_FILL:
         ldab    LINE_LEN
@@ -1735,44 +1767,36 @@ TXT_HELP:       fcc     "D DIR M MAP G L LF B C R U H F"
                 fcb     $04
 TXT_OK:         fcc     "OK"
                 fcb     $04
-TXT_MAP_BASE:   fcc     "MAP BASE"
-                fcb     CHR_CR
-                fcc     "RAM 0000-1FFF"
-                fcb     CHR_CR
-                fcc     "USER 0000-1FFF"
-                fcb     CHR_CR
-                fcc     "WORK 1C00-1FFF"
-                fcb     CHR_CR
-                fcc     "SD 1C00"
-                fcb     CHR_CR
-                fcc     "MON 1E00"
-                fcb     CHR_CR
-                fcc     "MIK 1F00"
-                fcb     CHR_CR
-                fcc     "STK 1F42"
-                fcb     CHR_CR
-                fcc     "ROM E000-FFFF"
-                fcb     CHR_CR
-                fcb     $04
-TXT_MAP_SBCIO:  fcc     "MAP SBCIO"
-                fcb     CHR_CR
-                fcc     "RAM 0000-7FFF"
-                fcb     CHR_CR
-                fcc     "USER 0000-7FFF"
-                fcb     CHR_CR
-                fcc     "WORK C000-DFFF"
-                fcb     CHR_CR
-                fcc     "SD C000"
-                fcb     CHR_CR
-                fcc     "MON C200"
-                fcb     CHR_CR
-                fcc     "MIK 1F00"
-                fcb     CHR_CR
-                fcc     "STK 1F42"
-                fcb     CHR_CR
-                fcc     "ROM E000-FFFF"
-                fcb     CHR_CR
-                fcb     $04
+TXT_MAP_BASE:       fcc     "MAP BASE"
+                    fcb     $04
+TXT_MAP_BASE_RAM:   fcc     "RAM 0000-1FFF"
+                    fcb     $04
+TXT_MAP_BASE_USER:  fcc     "USER 0000-1FFF"
+                    fcb     $04
+TXT_MAP_BASE_WORK:  fcc     "WORK 1C00-1FFF"
+                    fcb     $04
+TXT_MAP_BASE_SD:    fcc     "SD 1C00"
+                    fcb     $04
+TXT_MAP_BASE_MON:   fcc     "MON 1E00"
+                    fcb     $04
+TXT_MAP_SBCIO:      fcc     "MAP SBCIO"
+                    fcb     $04
+TXT_MAP_SBCIO_RAM:  fcc     "RAM 0000-7FFF"
+                    fcb     $04
+TXT_MAP_SBCIO_USER: fcc     "USER 0000-7FFF"
+                    fcb     $04
+TXT_MAP_SBCIO_WORK: fcc     "WORK C000-DFFF"
+                    fcb     $04
+TXT_MAP_SBCIO_SD:   fcc     "SD C000"
+                    fcb     $04
+TXT_MAP_SBCIO_MON:  fcc     "MON C200"
+                    fcb     $04
+TXT_MAP_MIK:        fcc     "MIK 1F00"
+                    fcb     $04
+TXT_MAP_STK:        fcc     "STK 1F42"
+                    fcb     $04
+TXT_MAP_ROM:        fcc     "ROM E000-FFFF"
+                    fcb     $04
 TXT_BP:         fcc     "BP "
                 fcb     $04
 TXT_NONE:       fcc     "NONE"
