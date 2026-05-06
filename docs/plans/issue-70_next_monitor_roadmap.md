@@ -136,6 +136,7 @@ PTMは最初から割り込み前提にせず、まずは待ち時間やtick用�
 - 既存PIAを共有する場合、Port BをSD SPI、Port AをI2C RTCに割り当てる候補とする。
 - I2Cはopen-drain相当の扱いが必要なため、PIA出力方向、プルアップ、レベル変換、5V/3.3V混在を実機確認対象にする。
 - RTCは `AUTOEXEC.S` や将来のDOS相当機能から時刻を読む用途を想定する。
+- Port B の余りビット (bit 6/7) を I2C に流用する代替案と、RTC/EEPROM/OLED の同居検討は [i2c_bus_overlay_evaluation.md](i2c_bus_overlay_evaluation.md) にまとめてある。
 
 ### 7. AUTOEXEC.S と BOOT
 
