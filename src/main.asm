@@ -94,6 +94,10 @@ CHK_CMD_BREAK:
 CHK_CMD_RESUME:
         cmpa    #'R'
         bne     CHK_CMD_CLEAR
+        jsr     IS_CMD_RAMTEST
+        bcs     MAIN_DISPATCH_RESUME
+        jmp     CMD_RAMTEST
+MAIN_DISPATCH_RESUME:
         jmp     CMD_RESUME
 CHK_CMD_CLEAR:
         cmpa    #'C'
@@ -145,6 +149,68 @@ IS_CMD_MAP:
         clc
         rts
 IS_CMD_MAP_FAIL:
+        sec
+        rts
+
+IS_CMD_RAMTEST:
+        ldab    LINE_LEN
+        cmpb    #17
+        bne     IS_CMD_RAMTEST_FAIL
+        ldx     #LINE_BUF
+        ldaa    0,x
+        cmpa    #'R'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    1,x
+        cmpa    #'A'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    2,x
+        cmpa    #'M'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    3,x
+        cmpa    #'T'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    4,x
+        cmpa    #'E'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    5,x
+        cmpa    #'S'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    6,x
+        cmpa    #'T'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    7,x
+        cmpa    #CHR_SPACE
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    8,x
+        cmpa    #'C'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    9,x
+        cmpa    #'0'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    10,x
+        cmpa    #'0'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    11,x
+        cmpa    #'0'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    12,x
+        cmpa    #'-'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    13,x
+        cmpa    #'D'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    14,x
+        cmpa    #'F'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    15,x
+        cmpa    #'F'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    16,x
+        cmpa    #'F'
+        bne     IS_CMD_RAMTEST_FAIL
+        clc
+        rts
+IS_CMD_RAMTEST_FAIL:
         sec
         rts
 
@@ -900,6 +966,55 @@ CMD_MAP_COMMON:
 MAP_PRINT_LINE:
         jsr     PDATA1
         jsr     PRINT_CRLF
+        rts
+
+CMD_RAMTEST:
+        ldaa    #MONITOR_PROFILE_SBCIO
+        beq     CMD_RAMTEST_ERR
+        ldx     #TXT_RAMTEST_RANGE
+        jsr     MAP_PRINT_LINE
+        jsr     RAMTEST_C000_DFFF
+        bcs     CMD_RAMTEST_FAIL
+        ldx     #TXT_OK
+        jsr     MAP_PRINT_LINE
+        jmp     MAIN_LOOP
+CMD_RAMTEST_FAIL:
+        stx     HEX_VALUE_HI
+        ldx     #TXT_RAMTEST_NG
+        jsr     PDATA1
+        ldx     HEX_VALUE_HI
+        jsr     PRINT_HEX16
+        jsr     PRINT_CRLF
+        jmp     MAIN_LOOP
+CMD_RAMTEST_ERR:
+        jmp     MAIN_LOOP_ERROR
+
+RAMTEST_C000_DFFF:
+        ldx     #$C000
+RAMTEST_LOOP:
+        ldaa    0,x
+        psha
+        ldaa    #$55
+        staa    0,x
+        cmpa    0,x
+        bne     RAMTEST_FAIL
+        ldaa    #$AA
+        staa    0,x
+        cmpa    0,x
+        bne     RAMTEST_FAIL
+        pula
+        staa    0,x
+        cpx     #$DFFF
+        beq     RAMTEST_OK
+        inx
+        bra     RAMTEST_LOOP
+RAMTEST_OK:
+        clc
+        rts
+RAMTEST_FAIL:
+        pula
+        staa    0,x
+        sec
         rts
 
 CMD_FILL:
@@ -1763,10 +1878,14 @@ TXT_BRK:        fcc     "BRK "
                 fcb     $04
 TXT_WELCOME:    fcc     "MC6800 MONITOR"
                 fcb     $04
-TXT_HELP:       fcc     "D DIR M MAP G L LF B C R U H F"
+TXT_HELP:       fcc     "D DIR M MAP RAMTEST G L LF B C R U H F"
                 fcb     $04
 TXT_OK:         fcc     "OK"
                 fcb     $04
+TXT_RAMTEST_RANGE:  fcc     "RAMTEST C000-DFFF"
+                    fcb     $04
+TXT_RAMTEST_NG:     fcc     "NG "
+                    fcb     $04
 TXT_MAP_BASE:       fcc     "MAP BASE"
                     fcb     $04
 TXT_MAP_BASE_RAM:   fcc     "RAM 0000-1FFF"

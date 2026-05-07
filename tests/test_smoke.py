@@ -140,7 +140,7 @@ def test_error_display():
 
 def test_help_command():
     stdout, stderr, rc = run_emu("H\r\r")
-    assert "D DIR M MAP G L LF B C R U H F" in stdout, f"missing help command list: {stdout!r}"
+    assert "D DIR M MAP RAMTEST G L LF B C R U H F" in stdout, f"missing help command list: {stdout!r}"
     print("[PASS] test_help_command")
 
 
@@ -174,6 +174,29 @@ def test_map_command():
         assert text in stdout, f"missing MAP output {text!r}: {stdout!r}"
     assert "0100 5A 5A 5A 5A" in stdout, f"MAP should not modify user RAM: {stdout!r}"
     print("[PASS] test_map_command")
+
+
+def test_ramtest_command():
+    input_text = (
+        "RAMTEST\r"
+        "RAMTEST A000-BFFF\r"
+        "RAMTEST E000-FFFF\r"
+        "RAMTEST 8000-80FF\r"
+        "RAMTEST C000-DFFF\r"
+        "R\r"
+        "\r"
+    )
+    stdout, stderr, rc = run_emu(input_text, max_cycles=30_000_000)
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    if is_sbcio_build():
+        assert "RAMTEST C000-DFFF" in stdout, f"missing RAMTEST range echo: {stdout!r}"
+        assert "OK" in stdout, f"SBCIO RAMTEST should pass in emulator: {stdout!r}"
+        assert "NG" not in stdout, f"SBCIO RAMTEST should not report NG: {stdout!r}"
+        assert stdout.count("?") >= 4, f"invalid RAMTEST forms and bare R should be rejected: {stdout!r}"
+    else:
+        assert "OK" not in stdout, f"base RAMTEST should not run: {stdout!r}"
+        assert stdout.count("?") >= 5, f"base RAMTEST and invalid forms should be rejected: {stdout!r}"
+    print("[PASS] test_ramtest_command")
 
 
 def test_breakpoint_query():
@@ -259,6 +282,28 @@ def test_breakpoint_resume_restores_user_sp():
     print("[PASS] test_breakpoint_resume_restores_user_sp")
 
 
+def test_ramtest_does_not_break_resume_state():
+    input_text = (
+        "M0100\r"
+        "86\r42\rB7\r01\r20\r86\r99\rB7\r01\r21\r3F\r.\r"
+        "B0105\r"
+        "G0100\r"
+        "RAMTEST C000-DFFF\r"
+        "R\r"
+        "D0120-0121\r"
+        "\r"
+    )
+    stdout, stderr, rc = run_emu(input_text, max_cycles=40_000_000)
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert "BRK 0105" in stdout, f"missing breakpoint hit: {stdout!r}"
+    if is_sbcio_build():
+        assert "RAMTEST C000-DFFF" in stdout and "OK" in stdout, f"SBCIO RAMTEST should run: {stdout!r}"
+    else:
+        assert "OK" not in stdout, f"base RAMTEST should not run: {stdout!r}"
+    assert "0120 42 99" in stdout, f"resume state was broken by RAMTEST handling: {stdout!r}"
+    print("[PASS] test_ramtest_does_not_break_resume_state")
+
+
 def test_fill_command():
     input_text = (
         "F0100-0103 AA\r"
@@ -327,11 +372,13 @@ def main():
         test_error_display,
         test_help_command,
         test_map_command,
+        test_ramtest_command,
         test_breakpoint_query,
         test_breakpoint_resume_and_clear,
         test_resume_requires_active_breakpoint,
         test_breakpoint_resume_restores_registers,
         test_breakpoint_resume_restores_user_sp,
+        test_ramtest_does_not_break_resume_state,
         test_fill_command,
         test_unassemble_command,
         test_datapack_hello,

@@ -22,6 +22,7 @@
 | `DIR` | SDカード上のroot directoryにある8.3通常ファイルを表示する |
 | `Mssss` | `ssss` からメモリを変更する |
 | `MAP` | 現在のビルドが想定する主要メモリ配置を表示する |
+| `RAMTEST C000-DFFF` | SBC-IO拡張ROMで `$C000-$DFFF` のRAMを破壊テストする |
 | `Gssss` | `ssss` へジャンプして実行する |
 | `L` | S-Record または Intel HEX をロードする |
 | `LF filename` | SDカード上の8.3名ファイルを検索して開く |
@@ -120,6 +121,33 @@ ROM E000-FFFF
 
 SBC-IO拡張ROMでは `MAP SBCIO` と表示され、`WORK C000-DFFF`、`SD C000`、`MON C200` などの拡張RAM前提の配置になる。
 
+## RAM確認
+
+`RAMTEST C000-DFFF` は、SBC-IO拡張ROM profileで `$C000-$DFFF` のRAMを確認する破壊系コマンドである。
+実行中は対象範囲へ `$55` / `$AA` を書き込み、読出し確認後に元値へ戻す。
+
+```text
+] RAMTEST C000-DFFF
+RAMTEST C000-DFFF
+OK
+]
+```
+
+初期実装では安全のため、受け付ける範囲は `C000-DFFF` の完全指定だけである。
+`base` profile、無引数、`A000-BFFF`、`E000-FFFF`、その他の範囲は `?` を返す。
+`$A000-$BFFF` はK68-VDG VRAM候補なので触らない。
+
+失敗時は `NG xxxx` の形式で失敗アドレスを表示する。
+
+```text
+] RAMTEST C000-DFFF
+RAMTEST C000-DFFF
+NG C234
+]
+```
+
+電源断やリセットが途中で発生した場合の内容保持は保証しない。
+
 ## 実行
 
 `Gssss` は指定アドレスへジャンプして実行する。
@@ -184,7 +212,7 @@ MULTI.BIN A 00000400
 
 ```text
 ] H
-D DIR M MAP G L LF B C R U H F
+D DIR M MAP RAMTEST G L LF B C R U H F
 ]
 ```
 
