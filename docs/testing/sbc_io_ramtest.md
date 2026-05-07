@@ -12,7 +12,7 @@ SBC-IO拡張ROM profileで、拡張RAM候補の `$C000-$DFFF` が実機で読み
 - `sbcio` profile のROMを書き込んでいること。
 - `MAP` で `MAP SBCIO`、`WORK C000-DFFF`、`SD C000`、`MON C200` が表示されること。
 - `$A000-$BFFF` は K68-VDG VRAM 候補なので、`RAMTEST` の対象にしない。
-- `base` profileでは `RAMTEST C000-DFFF` は実行対象外で、`?` を返す。
+- `base` profileでは `RAMTEST 0000-1BFF` だけを許可し、`RAMTEST 2000-7FFF` と `RAMTEST C000-DFFF` は `?` を返す。
 
 ## 実行手順
 
@@ -32,7 +32,25 @@ SBC-IO拡張ROM profileで、拡張RAM候補の `$C000-$DFFF` が実機で読み
    ]
    ```
 
-2. `RAMTEST C000-DFFF` を実行する。
+2. 標準RAMの安全側範囲を確認する。
+
+   ```text
+   ] RAMTEST 0000-1BFF
+   RAMTEST 0000-1BFF
+   OK
+   ]
+   ```
+
+3. SBC-IO拡張RAMの `$2000-$7FFF` を確認する。
+
+   ```text
+   ] RAMTEST 2000-7FFF
+   RAMTEST 2000-7FFF
+   OK
+   ]
+   ```
+
+4. SBC-IO拡張work領域の `$C000-$DFFF` を確認する。
 
    ```text
    ] RAMTEST C000-DFFF
@@ -41,7 +59,7 @@ SBC-IO拡張ROM profileで、拡張RAM候補の `$C000-$DFFF` が実機で読み
    ]
    ```
 
-3. 成功後、通常コマンドが復帰していることを確認する。
+5. 成功後、通常コマンドが復帰していることを確認する。
 
    ```text
    ] H
@@ -49,7 +67,7 @@ SBC-IO拡張ROM profileで、拡張RAM候補の `$C000-$DFFF` が実機で読み
    ] D0100
    ```
 
-4. SDカードを接続している場合は、SD/FAT workが復帰していることも確認する。
+6. SDカードを接続している場合は、SD/FAT workが復帰していることも確認する。
 
    ```text
    ] DIR
@@ -76,6 +94,8 @@ NG C234
 
 ```text
 ] RAMTEST
+?
+] RAMTEST 1C00-1FFF
 ?
 ] RAMTEST A000-BFFF
 ?

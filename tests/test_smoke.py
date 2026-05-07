@@ -182,6 +182,14 @@ def test_ramtest_command():
         "RAMTEST A000-BFFF\r"
         "RAMTEST E000-FFFF\r"
         "RAMTEST 8000-80FF\r"
+        "RAMTEST 1C00-1FFF\r"
+        "RAMTEST 1BFF-1C00\r"
+        "RAMTEST 7FFF-8000\r"
+        "RAMTEST BFFF-C000\r"
+        "RAMTEST DFFF-E000\r"
+        "RAMTEST 2000-DFFF\r"
+        "RAMTEST 0000-1BFF\r"
+        "RAMTEST 2000-7FFF\r"
         "RAMTEST C000-DFFF\r"
         "R\r"
         "\r"
@@ -189,13 +197,16 @@ def test_ramtest_command():
     stdout, stderr, rc = run_emu(input_text, max_cycles=30_000_000)
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
     if is_sbcio_build():
+        assert "RAMTEST 0000-1BFF" in stdout, f"missing low RAMTEST range echo: {stdout!r}"
+        assert "RAMTEST 2000-7FFF" in stdout, f"missing extended RAMTEST range echo: {stdout!r}"
         assert "RAMTEST C000-DFFF" in stdout, f"missing RAMTEST range echo: {stdout!r}"
-        assert "OK" in stdout, f"SBCIO RAMTEST should pass in emulator: {stdout!r}"
+        assert stdout.count("OK") >= 3, f"SBCIO RAMTEST ranges should pass in emulator: {stdout!r}"
         assert "NG" not in stdout, f"SBCIO RAMTEST should not report NG: {stdout!r}"
-        assert stdout.count("?") >= 4, f"invalid RAMTEST forms and bare R should be rejected: {stdout!r}"
+        assert stdout.count("?") >= 10, f"invalid RAMTEST forms and bare R should be rejected: {stdout!r}"
     else:
-        assert "OK" not in stdout, f"base RAMTEST should not run: {stdout!r}"
-        assert stdout.count("?") >= 5, f"base RAMTEST and invalid forms should be rejected: {stdout!r}"
+        assert "RAMTEST 0000-1BFF" in stdout, f"base should allow low RAMTEST range: {stdout!r}"
+        assert stdout.count("OK") == 1, f"base should only run low RAMTEST range: {stdout!r}"
+        assert stdout.count("?") >= 12, f"base invalid/unsafe ranges should be rejected: {stdout!r}"
     print("[PASS] test_ramtest_command")
 
 
@@ -299,7 +310,7 @@ def test_ramtest_does_not_break_resume_state():
     if is_sbcio_build():
         assert "RAMTEST C000-DFFF" in stdout and "OK" in stdout, f"SBCIO RAMTEST should run: {stdout!r}"
     else:
-        assert "OK" not in stdout, f"base RAMTEST should not run: {stdout!r}"
+        assert "OK" not in stdout, f"base should reject C000-DFFF RAMTEST: {stdout!r}"
     assert "0120 42 99" in stdout, f"resume state was broken by RAMTEST handling: {stdout!r}"
     print("[PASS] test_ramtest_does_not_break_resume_state")
 

@@ -17,8 +17,10 @@ Issue #74 では `MAP` により、ビルド時の想定メモリ配置を表示
 
 ## 採用方針
 
-- 初期実装で受け付ける構文は `RAMTEST C000-DFFF` の完全一致だけにする。
-- `RAMTEST` は `sbcio` profile 専用とし、`base` profile では同じ入力でも `?` を返す。
+- 初期実装で受け付ける構文は、安全側で選んだ明示範囲だけに限定する。
+- `base` profile では `RAMTEST 0000-1BFF` だけを許可する。
+- `sbcio` profile では `RAMTEST 0000-1BFF`、`RAMTEST 2000-7FFF`、`RAMTEST C000-DFFF` を許可する。
+- `$1C00-$1FFF` はbaseのSD buffer、monitor work、MIKBUG互換work、stackに近いため拒否する。
 - `$A000-$BFFF` は K68-VDG VRAM 候補なので触らない。
 - ROM、I/O、任意範囲、RAM自動検出、長時間バーンインは扱わない。
 - `R` は既存の breakpoint resume なので、`RAMTEST` 完全一致を先に判定し、それ以外の `R` は従来どおり `CMD_RESUME` へ渡す。
@@ -40,9 +42,9 @@ Issue #74 では `MAP` により、ビルド時の想定メモリ配置を表示
 
 ## 検証方針
 
-- `sbcio` で `RAMTEST C000-DFFF` が `OK` を返すこと。
-- `base` で `RAMTEST C000-DFFF` が `?` を返すこと。
-- `RAMTEST` 無引数、`RAMTEST A000-BFFF`、`RAMTEST E000-FFFF`、`RAMTEST 8000-80FF` が拒否されること。
+- `base` で `RAMTEST 0000-1BFF` が `OK` を返し、`RAMTEST 2000-7FFF` と `RAMTEST C000-DFFF` が `?` を返すこと。
+- `sbcio` で `RAMTEST 0000-1BFF`、`RAMTEST 2000-7FFF`、`RAMTEST C000-DFFF` が `OK` を返すこと。
+- `RAMTEST` 無引数、`RAMTEST 1C00-1FFF`、`RAMTEST A000-BFFF`、`RAMTEST E000-FFFF`、`RAMTEST 8000-80FF` が拒否されること。
 - `R` 単独が既存どおり `CMD_RESUME` として扱われること。
 - `sbcio` で `RAMTEST C000-DFFF` 後に `DIR` と `LF TEST.S` が動き、monitor/SD/FAT work が復帰していること。
 
