@@ -1,9 +1,8 @@
-# SBC-IO 拡張RAM RAMTEST確認手順
+# SBC-IO拡張RAM RAMTEST確認手順
 
 ## 目的
 
-SBC-IO拡張ROM profileで、拡張RAM候補の `$C000-$DFFF` が実機で読み書きできることを確認する。
-
+SBC-IO拡張ROM profileで、拡張RAM候補の `$2000-$7FFF` と `$C000-$DFFF` が実機で読み書きできることを確認する。
 `RAMTEST` は破壊系コマンドであり、実行中は対象範囲へ `$55` / `$AA` を書き込む。
 各バイトの元値は復元するが、実行中に電源断やリセットが発生した場合の内容保持は保証しない。
 
@@ -12,7 +11,8 @@ SBC-IO拡張ROM profileで、拡張RAM候補の `$C000-$DFFF` が実機で読み
 - `sbcio` profile のROMを書き込んでいること。
 - `MAP` で `MAP SBCIO`、`WORK C000-DFFF`、`SD C000`、`MON C200` が表示されること。
 - `$A000-$BFFF` は K68-VDG VRAM 候補なので、`RAMTEST` の対象にしない。
-- `base` profileでは `RAMTEST 0000-1BFF` だけを許可し、`RAMTEST 2000-7FFF` と `RAMTEST C000-DFFF` は `?` を返す。
+- `RAMTEST` 自身はゼロページ `$00F0-$00F5` を一時ワークに使い、実行中のスタックもゼロページ直下へ移すため、`$0000-$00FF` は検査対象外にする。
+- `base` profileでは `0100-1BFF` 内だけを許可し、`2000-7FFF` や `C000-DFFF` は `?` を返す。
 
 ## 実行手順
 
@@ -32,27 +32,40 @@ SBC-IO拡張ROM profileで、拡張RAM候補の `$C000-$DFFF` が実機で読み
    ]
    ```
 
-2. 標準RAMの安全側範囲を確認する。
+2. 標準RAM側の安全範囲を確認する。
 
    ```text
-   ] RAMTEST 0000-1BFF
-   RAMTEST 0000-1BFF
+   ] RAMTEST 0100-1BFF
+   RAMTEST 0100-1BFF
    OK
    ]
    ```
 
-3. SBC-IO拡張RAMの `$2000-$7FFF` を確認する。
+3. SBC-IO拡張RAMを含む `$0100-$7FFF` 内を確認する。
+   まずは短い範囲で試し、必要なら全域へ広げる。
 
    ```text
-   ] RAMTEST 2000-7FFF
-   RAMTEST 2000-7FFF
+   ] RAMTEST 0100-7FFF
+   RAMTEST 0100-7FFF
+   OK
+   ]
+   ] RAMTEST 2000-3FFF
+   RAMTEST 2000-3FFF
+   OK
+   ]
+   ] RAMTEST 4000-7FFF
+   RAMTEST 4000-7FFF
    OK
    ]
    ```
 
-4. SBC-IO拡張work領域の `$C000-$DFFF` を確認する。
+4. SBC-IO拡張work領域の `$C000-$DFFF` 内を確認する。
 
    ```text
+   ] RAMTEST C200-C2FF
+   RAMTEST C200-C2FF
+   OK
+   ]
    ] RAMTEST C000-DFFF
    RAMTEST C000-DFFF
    OK
@@ -95,14 +108,14 @@ NG C234
 ```text
 ] RAMTEST
 ?
-] RAMTEST 1C00-1FFF
+] RAMTEST 0000-00FF
 ?
-] RAMTEST A000-BFFF
+] RAMTEST 1BFF-2000
 ?
 ] RAMTEST E000-FFFF
 ?
-] RAMTEST 8000-80FF
+] RAMTEST DFFF-E000
 ?
 ```
 
-任意範囲指定、RAM容量自動検出、長時間バーンインは別Issueで扱う。
+任意の許可領域追加、RAM容量自動検出、長時間バーンインは別Issueで扱う。

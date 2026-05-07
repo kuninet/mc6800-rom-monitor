@@ -155,125 +155,32 @@ IS_CMD_MAP_FAIL:
 IS_CMD_RAMTEST:
         ldab    LINE_LEN
         cmpb    #17
-        bne     IS_CMD_RAMTEST_FAIL_NEAR
+        bne     IS_CMD_RAMTEST_FAIL
         ldx     #LINE_BUF
         ldaa    0,x
         cmpa    #'R'
-        bne     IS_CMD_RAMTEST_FAIL_NEAR
+        bne     IS_CMD_RAMTEST_FAIL
         ldaa    1,x
         cmpa    #'A'
-        bne     IS_CMD_RAMTEST_FAIL_NEAR
+        bne     IS_CMD_RAMTEST_FAIL
         ldaa    2,x
         cmpa    #'M'
-        bne     IS_CMD_RAMTEST_FAIL_NEAR
+        bne     IS_CMD_RAMTEST_FAIL
         ldaa    3,x
         cmpa    #'T'
-        bne     IS_CMD_RAMTEST_FAIL_NEAR
+        bne     IS_CMD_RAMTEST_FAIL
         ldaa    4,x
         cmpa    #'E'
-        bne     IS_CMD_RAMTEST_FAIL_NEAR
+        bne     IS_CMD_RAMTEST_FAIL
         ldaa    5,x
         cmpa    #'S'
-        bne     IS_CMD_RAMTEST_FAIL_NEAR
+        bne     IS_CMD_RAMTEST_FAIL
         ldaa    6,x
         cmpa    #'T'
-        bne     IS_CMD_RAMTEST_FAIL_NEAR
+        bne     IS_CMD_RAMTEST_FAIL
         ldaa    7,x
         cmpa    #CHR_SPACE
-        bne     IS_CMD_RAMTEST_FAIL_NEAR
-        ldaa    8,x
-        cmpa    #'0'
-        beq     IS_CMD_RAMTEST_0000
-        cmpa    #'2'
-        beq     IS_CMD_RAMTEST_2000
-        cmpa    #'C'
-        beq     IS_CMD_RAMTEST_C000
-IS_CMD_RAMTEST_FAIL_NEAR:
-        jmp     IS_CMD_RAMTEST_FAIL
-IS_CMD_RAMTEST_0000:
-        ldaa    9,x
-        cmpa    #'0'
-        bne     IS_CMD_RAMTEST_FAIL_NEAR2
-        ldaa    10,x
-        cmpa    #'0'
-        bne     IS_CMD_RAMTEST_FAIL_NEAR2
-        ldaa    11,x
-        cmpa    #'0'
-        bne     IS_CMD_RAMTEST_FAIL_NEAR2
-        ldaa    12,x
-        cmpa    #'-'
-        bne     IS_CMD_RAMTEST_FAIL_NEAR2
-        ldaa    13,x
-        cmpa    #'1'
-        bne     IS_CMD_RAMTEST_FAIL_NEAR2
-        ldaa    14,x
-        cmpa    #'B'
-        bne     IS_CMD_RAMTEST_FAIL_NEAR2
-        ldaa    15,x
-        cmpa    #'F'
-        bne     IS_CMD_RAMTEST_FAIL_NEAR2
-        ldaa    16,x
-        cmpa    #'F'
-        bne     IS_CMD_RAMTEST_FAIL_NEAR2
-        ldab    #1
-        clc
-        rts
-IS_CMD_RAMTEST_FAIL_NEAR2:
-        jmp     IS_CMD_RAMTEST_FAIL
-IS_CMD_RAMTEST_2000:
-        ldaa    9,x
-        cmpa    #'0'
         bne     IS_CMD_RAMTEST_FAIL
-        ldaa    10,x
-        cmpa    #'0'
-        bne     IS_CMD_RAMTEST_FAIL
-        ldaa    11,x
-        cmpa    #'0'
-        bne     IS_CMD_RAMTEST_FAIL
-        ldaa    12,x
-        cmpa    #'-'
-        bne     IS_CMD_RAMTEST_FAIL
-        ldaa    13,x
-        cmpa    #'7'
-        bne     IS_CMD_RAMTEST_FAIL
-        ldaa    14,x
-        cmpa    #'F'
-        bne     IS_CMD_RAMTEST_FAIL
-        ldaa    15,x
-        cmpa    #'F'
-        bne     IS_CMD_RAMTEST_FAIL
-        ldaa    16,x
-        cmpa    #'F'
-        bne     IS_CMD_RAMTEST_FAIL
-        ldab    #2
-        clc
-        rts
-IS_CMD_RAMTEST_C000:
-        ldaa    9,x
-        cmpa    #'0'
-        bne     IS_CMD_RAMTEST_FAIL
-        ldaa    10,x
-        cmpa    #'0'
-        bne     IS_CMD_RAMTEST_FAIL
-        ldaa    11,x
-        cmpa    #'0'
-        bne     IS_CMD_RAMTEST_FAIL
-        ldaa    12,x
-        cmpa    #'-'
-        bne     IS_CMD_RAMTEST_FAIL
-        ldaa    13,x
-        cmpa    #'D'
-        bne     IS_CMD_RAMTEST_FAIL
-        ldaa    14,x
-        cmpa    #'F'
-        bne     IS_CMD_RAMTEST_FAIL
-        ldaa    15,x
-        cmpa    #'F'
-        bne     IS_CMD_RAMTEST_FAIL
-        ldaa    16,x
-        cmpa    #'F'
-        bne     IS_CMD_RAMTEST_FAIL
-        ldab    #3
         clc
         rts
 IS_CMD_RAMTEST_FAIL:
@@ -1035,36 +942,26 @@ MAP_PRINT_LINE:
         rts
 
 CMD_RAMTEST:
-        pshb
-        ldaa    #MONITOR_PROFILE_SBCIO
-        bne     CMD_RAMTEST_SBCIO
-        pulb
-        cmpb    #1
-        beq     CMD_RAMTEST_0000_1BFF
-        jmp     CMD_RAMTEST_ERR
-CMD_RAMTEST_SBCIO:
-        pulb
-        cmpb    #1
-        beq     CMD_RAMTEST_0000_1BFF
-        cmpb    #2
-        beq     CMD_RAMTEST_2000_7FFF
-        cmpb    #3
-        beq     CMD_RAMTEST_C000_DFFF
-        jmp     CMD_RAMTEST_ERR
-CMD_RAMTEST_0000_1BFF:
-        ldx     #TXT_RAMTEST_0000_1BFF
-        jsr     MAP_PRINT_LINE
-        jsr     RAMTEST_0000_1BFF
-        bra     CMD_RAMTEST_RESULT
-CMD_RAMTEST_2000_7FFF:
-        ldx     #TXT_RAMTEST_2000_7FFF
-        jsr     MAP_PRINT_LINE
-        jsr     RAMTEST_2000_7FFF
-        bra     CMD_RAMTEST_RESULT
-CMD_RAMTEST_C000_DFFF:
-        ldx     #TXT_RAMTEST_C000_DFFF
-        jsr     MAP_PRINT_LINE
-        jsr     RAMTEST_C000_DFFF
+        jsr     PARSE_RAMTEST_ARGS
+        bcs     CMD_RAMTEST_ERR
+        jsr     RAMTEST_VALIDATE_RANGE
+        bcs     CMD_RAMTEST_ERR
+        ldx     #TXT_RAMTEST_PREFIX
+        jsr     PDATA1
+        ldx     DUMP_ADDR
+        jsr     PRINT_HEX16
+        ldaa    #'-'
+        jsr     MON_OUTEEE
+        ldx     DUMP_END
+        jsr     PRINT_HEX16
+        jsr     PRINT_CRLF
+        ldx     DUMP_END
+        stx     RAMTEST_END_SAFE
+        tsx
+        stx     RAMTEST_SP_SAFE
+        lds     #RAMTEST_STACK_TOP
+        jsr     RAMTEST_RANGE
+        lds     RAMTEST_SP_SAFE
 CMD_RAMTEST_RESULT:
         bcs     CMD_RAMTEST_FAIL
         ldx     #TXT_OK
@@ -1081,35 +978,86 @@ CMD_RAMTEST_FAIL:
 CMD_RAMTEST_ERR:
         jmp     MAIN_LOOP_ERROR
 
-RAMTEST_0000_1BFF:
-        ldx     #$0000
-RAMTEST_0000_1BFF_LOOP:
-        jsr     RAMTEST_ONE_BYTE
-        bcs     RAMTEST_RANGE_FAIL
-        cpx     #$1BFF
-        beq     RAMTEST_RANGE_OK
-        inx
-        bra     RAMTEST_0000_1BFF_LOOP
+PARSE_RAMTEST_ARGS:
+        ldaa    LINE_BUF+12
+        cmpa    #'-'
+        bne     PARSE_RAMTEST_FAIL
+        ldx     #LINE_BUF+8
+        ldab    #4
+        jsr     PARSE_HEX
+        bcs     PARSE_RAMTEST_FAIL
+        ldx     HEX_VALUE_HI
+        stx     DUMP_ADDR
+        ldx     #LINE_BUF+13
+        ldab    #4
+        jsr     PARSE_HEX
+        bcs     PARSE_RAMTEST_FAIL
+        ldx     HEX_VALUE_HI
+        stx     DUMP_END
+        ldx     DUMP_ADDR
+        jsr     CMP_X_DUMP_END
+        bhi     PARSE_RAMTEST_FAIL
+        clc
+        rts
+PARSE_RAMTEST_FAIL:
+        sec
+        rts
 
-RAMTEST_2000_7FFF:
-        ldx     #$2000
-RAMTEST_2000_7FFF_LOOP:
-        jsr     RAMTEST_ONE_BYTE
-        bcs     RAMTEST_RANGE_FAIL
-        cpx     #$7FFF
-        beq     RAMTEST_RANGE_OK
-        inx
-        bra     RAMTEST_2000_7FFF_LOOP
+RAMTEST_VALIDATE_RANGE:
+        ldaa    #RAMTEST1_ENABLED
+        beq     RAMTEST_VALIDATE_REGION2
+        ldx     #RAMTEST1_START
+        stx     RAMTEST_END_SAFE
+        ldx     DUMP_ADDR
+        jsr     CMP_X_RAMTEST_SAFE
+        blo     RAMTEST_VALIDATE_REGION2
+        ldx     #RAMTEST1_END
+        stx     RAMTEST_END_SAFE
+        ldx     DUMP_END
+        jsr     CMP_X_RAMTEST_SAFE
+        bls     RAMTEST_VALIDATE_OK
+RAMTEST_VALIDATE_REGION2:
+        ldaa    #RAMTEST2_ENABLED
+        beq     RAMTEST_VALIDATE_REGION3
+        ldx     #RAMTEST2_START
+        stx     RAMTEST_END_SAFE
+        ldx     DUMP_ADDR
+        jsr     CMP_X_RAMTEST_SAFE
+        blo     RAMTEST_VALIDATE_REGION3
+        ldx     #RAMTEST2_END
+        stx     RAMTEST_END_SAFE
+        ldx     DUMP_END
+        jsr     CMP_X_RAMTEST_SAFE
+        bls     RAMTEST_VALIDATE_OK
+RAMTEST_VALIDATE_REGION3:
+        ldaa    #RAMTEST3_ENABLED
+        beq     RAMTEST_VALIDATE_FAIL
+        ldx     #RAMTEST3_START
+        stx     RAMTEST_END_SAFE
+        ldx     DUMP_ADDR
+        jsr     CMP_X_RAMTEST_SAFE
+        blo     RAMTEST_VALIDATE_FAIL
+        ldx     #RAMTEST3_END
+        stx     RAMTEST_END_SAFE
+        ldx     DUMP_END
+        jsr     CMP_X_RAMTEST_SAFE
+        bls     RAMTEST_VALIDATE_OK
+RAMTEST_VALIDATE_FAIL:
+        sec
+        rts
+RAMTEST_VALIDATE_OK:
+        clc
+        rts
 
-RAMTEST_C000_DFFF:
-        ldx     #$C000
-RAMTEST_C000_DFFF_LOOP:
+RAMTEST_RANGE:
+        ldx     DUMP_ADDR
+RAMTEST_RANGE_LOOP:
         jsr     RAMTEST_ONE_BYTE
         bcs     RAMTEST_RANGE_FAIL
-        cpx     #$DFFF
+        cpx     RAMTEST_END_SAFE
         beq     RAMTEST_RANGE_OK
         inx
-        bra     RAMTEST_C000_DFFF_LOOP
+        bra     RAMTEST_RANGE_LOOP
 
 RAMTEST_ONE_BYTE:
         ldaa    0,x
@@ -1136,6 +1084,16 @@ RAMTEST_RANGE_OK:
         rts
 RAMTEST_RANGE_FAIL:
         sec
+        rts
+
+CMP_X_RAMTEST_SAFE:
+        stx     RAMTEST_CMP_SAFE
+        ldaa    RAMTEST_CMP_SAFE
+        cmpa    RAMTEST_END_SAFE
+        bne     CMP_X_RAMTEST_SAFE_DONE
+        ldaa    RAMTEST_CMP_SAFE+1
+        cmpa    RAMTEST_END_SAFE+1
+CMP_X_RAMTEST_SAFE_DONE:
         rts
 
 CMD_FILL:
@@ -2003,12 +1961,8 @@ TXT_HELP:       fcc     "D DIR M MAP RAMTEST G L LF B C R U H F"
                 fcb     $04
 TXT_OK:         fcc     "OK"
                 fcb     $04
-TXT_RAMTEST_0000_1BFF: fcc     "RAMTEST 0000-1BFF"
-                       fcb     $04
-TXT_RAMTEST_2000_7FFF: fcc     "RAMTEST 2000-7FFF"
-                       fcb     $04
-TXT_RAMTEST_C000_DFFF: fcc     "RAMTEST C000-DFFF"
-                       fcb     $04
+TXT_RAMTEST_PREFIX: fcc     "RAMTEST "
+                    fcb     $04
 TXT_RAMTEST_NG:     fcc     "NG "
                     fcb     $04
 TXT_MAP_BASE:       fcc     "MAP BASE"
