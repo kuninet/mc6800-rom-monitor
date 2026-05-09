@@ -94,6 +94,10 @@ CHK_CMD_BREAK:
 CHK_CMD_RESUME:
         cmpa    #'R'
         bne     CHK_CMD_CLEAR
+        jsr     IS_CMD_RAMTEST
+        bcs     MAIN_DISPATCH_RESUME
+        jmp     CMD_RAMTEST
+MAIN_DISPATCH_RESUME:
         jmp     CMD_RESUME
 CHK_CMD_CLEAR:
         cmpa    #'C'
@@ -145,6 +149,41 @@ IS_CMD_MAP:
         clc
         rts
 IS_CMD_MAP_FAIL:
+        sec
+        rts
+
+IS_CMD_RAMTEST:
+        ldab    LINE_LEN
+        cmpb    #17
+        bne     IS_CMD_RAMTEST_FAIL
+        ldx     #LINE_BUF
+        ldaa    0,x
+        cmpa    #'R'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    1,x
+        cmpa    #'A'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    2,x
+        cmpa    #'M'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    3,x
+        cmpa    #'T'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    4,x
+        cmpa    #'E'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    5,x
+        cmpa    #'S'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    6,x
+        cmpa    #'T'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    7,x
+        cmpa    #CHR_SPACE
+        bne     IS_CMD_RAMTEST_FAIL
+        clc
+        rts
+IS_CMD_RAMTEST_FAIL:
         sec
         rts
 
@@ -900,6 +939,161 @@ CMD_MAP_COMMON:
 MAP_PRINT_LINE:
         jsr     PDATA1
         jsr     PRINT_CRLF
+        rts
+
+CMD_RAMTEST:
+        jsr     PARSE_RAMTEST_ARGS
+        bcs     CMD_RAMTEST_ERR
+        jsr     RAMTEST_VALIDATE_RANGE
+        bcs     CMD_RAMTEST_ERR
+        ldx     #TXT_RAMTEST_PREFIX
+        jsr     PDATA1
+        ldx     DUMP_ADDR
+        jsr     PRINT_HEX16
+        ldaa    #'-'
+        jsr     MON_OUTEEE
+        ldx     DUMP_END
+        jsr     PRINT_HEX16
+        jsr     PRINT_CRLF
+        ldx     DUMP_END
+        stx     RAMTEST_END_SAFE
+        tsx
+        stx     RAMTEST_SP_SAFE
+        lds     #RAMTEST_STACK_TOP
+        jsr     RAMTEST_RANGE
+        lds     RAMTEST_SP_SAFE
+CMD_RAMTEST_RESULT:
+        bcs     CMD_RAMTEST_FAIL
+        ldx     #TXT_OK
+        jsr     MAP_PRINT_LINE
+        jmp     MAIN_LOOP
+CMD_RAMTEST_FAIL:
+        stx     HEX_VALUE_HI
+        ldx     #TXT_RAMTEST_NG
+        jsr     PDATA1
+        ldx     HEX_VALUE_HI
+        jsr     PRINT_HEX16
+        jsr     PRINT_CRLF
+        jmp     MAIN_LOOP
+CMD_RAMTEST_ERR:
+        jmp     MAIN_LOOP_ERROR
+
+PARSE_RAMTEST_ARGS:
+        ldaa    LINE_BUF+12
+        cmpa    #'-'
+        bne     PARSE_RAMTEST_FAIL
+        ldx     #LINE_BUF+8
+        ldab    #4
+        jsr     PARSE_HEX
+        bcs     PARSE_RAMTEST_FAIL
+        ldx     HEX_VALUE_HI
+        stx     DUMP_ADDR
+        ldx     #LINE_BUF+13
+        ldab    #4
+        jsr     PARSE_HEX
+        bcs     PARSE_RAMTEST_FAIL
+        ldx     HEX_VALUE_HI
+        stx     DUMP_END
+        ldx     DUMP_ADDR
+        jsr     CMP_X_DUMP_END
+        bhi     PARSE_RAMTEST_FAIL
+        clc
+        rts
+PARSE_RAMTEST_FAIL:
+        sec
+        rts
+
+RAMTEST_VALIDATE_RANGE:
+        ldaa    #RAMTEST1_ENABLED
+        beq     RAMTEST_VALIDATE_REGION2
+        ldx     #RAMTEST1_START
+        stx     RAMTEST_END_SAFE
+        ldx     DUMP_ADDR
+        jsr     CMP_X_RAMTEST_SAFE
+        blo     RAMTEST_VALIDATE_REGION2
+        ldx     #RAMTEST1_END
+        stx     RAMTEST_END_SAFE
+        ldx     DUMP_END
+        jsr     CMP_X_RAMTEST_SAFE
+        bls     RAMTEST_VALIDATE_OK
+RAMTEST_VALIDATE_REGION2:
+        ldaa    #RAMTEST2_ENABLED
+        beq     RAMTEST_VALIDATE_REGION3
+        ldx     #RAMTEST2_START
+        stx     RAMTEST_END_SAFE
+        ldx     DUMP_ADDR
+        jsr     CMP_X_RAMTEST_SAFE
+        blo     RAMTEST_VALIDATE_REGION3
+        ldx     #RAMTEST2_END
+        stx     RAMTEST_END_SAFE
+        ldx     DUMP_END
+        jsr     CMP_X_RAMTEST_SAFE
+        bls     RAMTEST_VALIDATE_OK
+RAMTEST_VALIDATE_REGION3:
+        ldaa    #RAMTEST3_ENABLED
+        beq     RAMTEST_VALIDATE_FAIL
+        ldx     #RAMTEST3_START
+        stx     RAMTEST_END_SAFE
+        ldx     DUMP_ADDR
+        jsr     CMP_X_RAMTEST_SAFE
+        blo     RAMTEST_VALIDATE_FAIL
+        ldx     #RAMTEST3_END
+        stx     RAMTEST_END_SAFE
+        ldx     DUMP_END
+        jsr     CMP_X_RAMTEST_SAFE
+        bls     RAMTEST_VALIDATE_OK
+RAMTEST_VALIDATE_FAIL:
+        sec
+        rts
+RAMTEST_VALIDATE_OK:
+        clc
+        rts
+
+RAMTEST_RANGE:
+        ldx     DUMP_ADDR
+RAMTEST_RANGE_LOOP:
+        jsr     RAMTEST_ONE_BYTE
+        bcs     RAMTEST_RANGE_FAIL
+        cpx     RAMTEST_END_SAFE
+        beq     RAMTEST_RANGE_OK
+        inx
+        bra     RAMTEST_RANGE_LOOP
+
+RAMTEST_ONE_BYTE:
+        ldaa    0,x
+        psha
+        ldaa    #$55
+        staa    0,x
+        cmpa    0,x
+        bne     RAMTEST_FAIL
+        ldaa    #$AA
+        staa    0,x
+        cmpa    0,x
+        bne     RAMTEST_FAIL
+        pula
+        staa    0,x
+        clc
+        rts
+RAMTEST_FAIL:
+        pula
+        staa    0,x
+        sec
+        rts
+RAMTEST_RANGE_OK:
+        clc
+        rts
+RAMTEST_RANGE_FAIL:
+        sec
+        rts
+
+CMP_X_RAMTEST_SAFE:
+        stx     RAMTEST_CMP_SAFE
+        ldaa    RAMTEST_CMP_SAFE
+        cmpa    RAMTEST_END_SAFE
+        bne     CMP_X_RAMTEST_SAFE_DONE
+        ldaa    RAMTEST_CMP_SAFE+1
+        cmpa    RAMTEST_END_SAFE+1
+CMP_X_RAMTEST_SAFE_DONE:
         rts
 
 CMD_FILL:
@@ -1763,10 +1957,14 @@ TXT_BRK:        fcc     "BRK "
                 fcb     $04
 TXT_WELCOME:    fcc     "MC6800 MONITOR"
                 fcb     $04
-TXT_HELP:       fcc     "D DIR M MAP G L LF B C R U H F"
+TXT_HELP:       fcc     "D DIR M MAP RAMTEST G L LF B C R U H F"
                 fcb     $04
 TXT_OK:         fcc     "OK"
                 fcb     $04
+TXT_RAMTEST_PREFIX: fcc     "RAMTEST "
+                    fcb     $04
+TXT_RAMTEST_NG:     fcc     "NG "
+                    fcb     $04
 TXT_MAP_BASE:       fcc     "MAP BASE"
                     fcb     $04
 TXT_MAP_BASE_RAM:   fcc     "RAM 0000-1FFF"

@@ -796,6 +796,26 @@ def test_sbcio_sd_fat_ignores_old_low_ram_work_area() -> None:
     print("[PASS] test_sbcio_sd_fat_ignores_old_low_ram_work_area")
 
 
+def test_sbcio_ramtest_preserves_sd_fat_work_area() -> None:
+    if not _is_sbcio_build():
+        print("[SKIP] test_sbcio_ramtest_preserves_sd_fat_work_area")
+        return
+
+    image = build_fat32_image(with_mbr=True, sectors_per_cluster=6)
+    stdout, stderr, rc = _run_emu_with_sd(
+        "RAMTEST C000-DFFF\rDIR\rLF TEST.S\rD0200-0202\r\r",
+        image,
+        max_cycles=200_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert "RAMTEST C000-DFFF" in stdout, f"RAMTEST should echo tested range: {stdout!r}"
+    assert "OK" in stdout, f"RAMTEST/LF should report OK: {stdout!r}"
+    assert "NG" not in stdout, f"RAMTEST should not fail in emulator: {stdout!r}"
+    assert "TEST.S A 0000001E" in stdout, f"DIR should work after RAMTEST: {stdout!r}"
+    assert "0200 01 02 03" in stdout, f"LF should work after RAMTEST: {stdout!r}"
+    print("[PASS] test_sbcio_ramtest_preserves_sd_fat_work_area")
+
+
 def main() -> None:
     print("=" * 50)
     print("SD/PIA fixture tests")
@@ -827,6 +847,7 @@ def main() -> None:
         test_rom_lf_reads_file_across_sector_inside_cluster,
         test_rom_lf_reads_file_across_cluster_boundary_multisector_cluster,
         test_sbcio_sd_fat_ignores_old_low_ram_work_area,
+        test_sbcio_ramtest_preserves_sd_fat_work_area,
     ]
 
     passed = 0
