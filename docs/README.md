@@ -31,6 +31,9 @@
 - [design/memory_map.md](design/memory_map.md)
 - [design/architecture.md](design/architecture.md)
 - [plans/implementation_plan.md](plans/implementation_plan.md)
+- [plans/issue-70_next_monitor_roadmap.md](plans/issue-70_next_monitor_roadmap.md): 次期モニタ拡張ロードマップ
+- [plans/i2c_bus_overlay_evaluation.md](plans/i2c_bus_overlay_evaluation.md): PIA I2C 配置検討メモ
+- [plans/issue-80_pia_port_a_i2c_rtc.md](plans/issue-80_pia_port_a_i2c_rtc.md): PIA Port A I2C RTC PoC 設計
 - [testing/sbc6800_bringup.md](testing/sbc6800_bringup.md)
 - [testing/sbc_io_sd_bringup.md](testing/sbc_io_sd_bringup.md): SBC-IO と microSD SPI モジュールで SD/FAT を実機確認する手順
 - [testing/sbc6800_datapack.md](testing/sbc6800_datapack.md): SBC6800 データパックの扱いと互換確認
