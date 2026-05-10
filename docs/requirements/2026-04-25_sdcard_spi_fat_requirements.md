@@ -104,7 +104,7 @@ PIA 直結の初期目標は、PC で通常の FAT32 として読める SD カ�
 
 既存の `L` はシリアル受信 LOAD として維持する。`L filename` は入力互換性を崩す可能性があるため、初期候補は `LF filename` とする。
 
-## Root配置とAUTOEXEC.S
+## 第2段起動とAUTOEXEC.S
 
 初期実装では subdirectory をサポートしないため、第2段 SD/FAT driver または M6800 DOS 相当の本体は root directory の `SDFS.BIN` に固定する。`/MC6800/SDFS.BIN` や `/MC6800/BOOT.SYS` は、subdirectory 対応後の将来候補とする。
 
@@ -117,10 +117,12 @@ Root directory の初期構成例は次の通り。
 | `TEST.S` | 手動 LOAD 用 S-Record サンプル |
 | `TEST.HEX` | 手動 LOAD 用 Intel HEX サンプル |
 
+`BOOT` は `AUTOEXEC.S` を直接読むコマンドではなく、SD上の第2段システムを起動する入口として扱う。`AUTOEXEC.S` は `SDFS.BIN` または将来の M6800 DOS 相当が起動後に扱う任意の起動スクリプト相当とし、ROM側 `BOOT` や第1段bootstrapの直接責務には含めない。
+
 ROM 直 FAT 案の起動順序は次の通り。
 
 1. ROM が SDHC 初期化と BPB 最小読取を行う。
-2. ROM が root directory から `SDFS.BIN` を探す。
+2. `BOOT` 相当処理が root directory から `SDFS.BIN` を探す。
 3. ROM が `SDFS.BIN` を `$C000` などへ読み込み、signature または最小ヘッダを確認して実行する。
 4. `SDFS.BIN` が DIR/LF などの SD/FAT 操作を提供する。
 5. `SDFS.BIN` が root directory の `AUTOEXEC.S` を探し、存在する場合だけ既存 S-Record ローダ相当で RAM へ LOAD する。
@@ -135,7 +137,7 @@ Reserved sector bootstrap 案の起動順序は次の通り。
 5. 第1段 bootstrap が `SDFS.BIN` の signature または最小ヘッダを確認して制御を渡す。
 6. `SDFS.BIN` が DIR/LF と `AUTOEXEC.S` 処理を提供する。
 
-`AUTOEXEC.S` は初期必須ではない。用途例は次の通り。
+`AUTOEXEC.S` は第2段起動の初期必須ではない。用途例は次の通り。
 
 - RTC 読み出しルーチン。
 - MC6847 画面初期化。
