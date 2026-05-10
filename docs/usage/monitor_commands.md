@@ -119,7 +119,7 @@ ROM E000-FFFF
 ]
 ```
 
-SBC-IO拡張ROMでは `MAP SBCIO` と表示され、`WORK C000-DFFF`、`SD C000`、`MON C200` などの拡張RAM前提の配置になる。
+SBC-IO拡張ROMでは `MAP SBCIO` と表示され、`WORK C000-DFFF`、`SD C000`、`MON C200`、`MIK C300`、`STK DFFF` などの拡張RAM前提の配置になる。
 
 ## RAM確認
 

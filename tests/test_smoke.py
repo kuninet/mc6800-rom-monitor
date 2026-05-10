@@ -159,6 +159,8 @@ def test_map_command():
             "WORK C000-DFFF",
             "SD C000",
             "MON C200",
+            "MIK C300",
+            "STK DFFF",
         ]
     else:
         expected = [
@@ -168,8 +170,10 @@ def test_map_command():
             "WORK 1C00-1FFF",
             "SD 1C00",
             "MON 1E00",
+            "MIK 1F00",
+            "STK 1F42",
         ]
-    expected.extend(["MIK 1F00", "STK 1F42", "ROM E000-FFFF"])
+    expected.append("ROM E000-FFFF")
     for text in expected:
         assert text in stdout, f"missing MAP output {text!r}: {stdout!r}"
     assert "0100 5A 5A 5A 5A" in stdout, f"MAP should not modify user RAM: {stdout!r}"
