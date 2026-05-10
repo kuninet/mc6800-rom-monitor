@@ -9,7 +9,7 @@ SBC-IO拡張ROM profileで、拡張RAM候補の `$2000-$7FFF` と `$C000-$DFFF` 
 ## 前提
 
 - `sbcio` profile のROMを書き込んでいること。
-- `MAP` で `MAP SBCIO`、`WORK C000-DFFF`、`SD C000`、`MON C200` が表示されること。
+- `MAP` で `MAP SBCIO`、`WORK C000-DFFF`、`SD C000`、`MON C200`、`MIK C300`、`STK DFFF` が表示されること。
 - `$A000-$BFFF` は K68-VDG VRAM 候補なので、`RAMTEST` の対象にしない。
 - `RAMTEST` 自身はゼロページ `$00F0-$00F5` を一時ワークに使い、実行中のスタックもゼロページ直下へ移すため、`$0000-$00FF` は検査対象外にする。
 - ゼロページの作業領域と一時スタック領域は指定範囲外でも書き換わるため、`RAMTEST` 前後で `$0000-$00FF` の内容保持は確認対象にしない。
@@ -27,8 +27,8 @@ SBC-IO拡張ROM profileで、拡張RAM候補の `$2000-$7FFF` と `$C000-$DFFF` 
    WORK C000-DFFF
    SD C000
    MON C200
-   MIK 1F00
-   STK 1F42
+   MIK C300
+   STK DFFF
    ROM E000-FFFF
    ]
    ```

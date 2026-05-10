@@ -928,10 +928,19 @@ CMD_MAP_BASE:
         ldx     #TXT_MAP_BASE_MON
         jsr     MAP_PRINT_LINE
 CMD_MAP_COMMON:
-        ldx     #TXT_MAP_MIK
+        ldaa    #MONITOR_PROFILE_SBCIO
+        beq     CMD_MAP_COMMON_BASE
+        ldx     #TXT_MAP_SBCIO_MIK
         jsr     MAP_PRINT_LINE
-        ldx     #TXT_MAP_STK
+        ldx     #TXT_MAP_SBCIO_STK
         jsr     MAP_PRINT_LINE
+        bra     CMD_MAP_ROM
+CMD_MAP_COMMON_BASE:
+        ldx     #TXT_MAP_BASE_MIK
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_BASE_STK
+        jsr     MAP_PRINT_LINE
+CMD_MAP_ROM:
         ldx     #TXT_MAP_ROM
         jsr     MAP_PRINT_LINE
         jmp     MAIN_LOOP
@@ -958,6 +967,7 @@ CMD_RAMTEST:
         ldx     DUMP_END
         stx     RAMTEST_END_SAFE
         tsx
+        dex
         stx     RAMTEST_SP_SAFE
         lds     #RAMTEST_STACK_TOP
         jsr     RAMTEST_RANGE
@@ -1989,9 +1999,13 @@ TXT_MAP_SBCIO_SD:   fcc     "SD C000"
                     fcb     $04
 TXT_MAP_SBCIO_MON:  fcc     "MON C200"
                     fcb     $04
-TXT_MAP_MIK:        fcc     "MIK 1F00"
+TXT_MAP_BASE_MIK:   fcc     "MIK 1F00"
                     fcb     $04
-TXT_MAP_STK:        fcc     "STK 1F42"
+TXT_MAP_BASE_STK:   fcc     "STK 1F42"
+                    fcb     $04
+TXT_MAP_SBCIO_MIK:  fcc     "MIK C300"
+                    fcb     $04
+TXT_MAP_SBCIO_STK:  fcc     "STK DFFF"
                     fcb     $04
 TXT_MAP_ROM:        fcc     "ROM E000-FFFF"
                     fcb     $04

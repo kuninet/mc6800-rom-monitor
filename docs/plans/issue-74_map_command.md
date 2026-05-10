@@ -35,6 +35,7 @@ ROM E000-FFFF
 ```
 
 `sbcio` profileでは `MAP SBCIO`、`RAM 0000-7FFF`、`WORK C000-DFFF`、`SD C000`、`MON C200` になる。
+Issue #76 で `sbcio` のMIKBUG互換ワーク予約とスタックは `MIK C300`、`STK DFFF` へ移した。
 
 ## 対象外
 

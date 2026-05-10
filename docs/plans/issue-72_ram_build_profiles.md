@@ -55,7 +55,7 @@ SD/FATワークを `$C000-$DFFF` 側へ逃がす。
 
 `RAM_END` は従来互換の汎用RAM終端として残し、`USER_RAM_END` はユーザー/BASIC向け低RAMの終端、`WORK_RAM_START` / `WORK_RAM_END` はモニタ内部ワーク候補範囲として扱う。`sbcio` ではユーザー領域とモニタワーク領域を分けて読み取れるようにする。
 
-`MIKBUG_VAR_BASE` と `STACK_TOP` は、今回は低RAMに残す。BASIC互換性をさらに上げるためのスタック移動やMIKBUG互換ワーク退避は、影響が大きいため別Issueで扱う。
+`MIKBUG_VAR_BASE` と `STACK_TOP` は、Issue #72 時点では低RAMに残した。BASIC互換性をさらに上げるためのスタック移動やMIKBUG互換ワーク退避は影響が大きいため後続Issueで扱う判断だったが、Issue #76 で電大版BASIC向けに `sbcio` profileのみ `$C000-$DFFF` 側へ移す。
 
 `$A000-$BFFF` はK68-VDG VRAM候補として予約し、今回の汎用RAM領域にはしない。
 
