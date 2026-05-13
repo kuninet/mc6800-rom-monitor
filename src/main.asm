@@ -113,8 +113,12 @@ CHK_CMD_HELP:
         jmp     CMD_HELP
 CHK_CMD_FILL:
         cmpa    #'F'
-        bne     MAIN_LOOP_ERROR
+        bne     CHK_CMD_VDGTEST
         jmp     CMD_FILL
+CHK_CMD_VDGTEST:
+        cmpa    #'V'
+        bne     MAIN_LOOP_ERROR
+        jmp     CMD_VDGTEST
 
 MAIN_LOOP_ERROR:
         jsr     SHOW_ERROR
@@ -890,7 +894,13 @@ CMD_HELP:
         ldab    LINE_LEN
         cmpb    #1
         bne     CMD_HELP_ERR
+        ldaa    #MONITOR_FEATURE_VDG
+        beq     CMD_HELP_BASE
+        ldx     #TXT_HELP_VDG
+        bra     CMD_HELP_PRINT
+CMD_HELP_BASE:
         ldx     #TXT_HELP
+CMD_HELP_PRINT:
         jsr     PDATA1
         ldaa    #CHR_CR
         jsr     MON_OUTEEE
@@ -899,10 +909,41 @@ CMD_HELP_ERR:
         jmp     MAIN_LOOP_ERROR
 
 CMD_MAP:
+        ldaa    #MONITOR_FEATURE_VDG
+        beq     CMD_MAP_PROFILE
+        ldaa    #MONITOR_PROFILE_K6802_VDG
+        beq     CMD_MAP_SBCIO_VDG_PROFILE
+        ldx     #TXT_MAP_K6802_VDG
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_SBCIO_RAM
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_SBCIO_USER
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_K6802_WORK
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_K6802_SD
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_K6802_MON
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_K6802_MIK
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_K6802_STK
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_K6802_VRAM
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_VDG_CTL
+        jsr     MAP_PRINT_LINE
+        jmp     CMD_MAP_ROM
+CMD_MAP_SBCIO_VDG_PROFILE:
+        ldx     #TXT_MAP_SBCIO_VDG
+        jsr     MAP_PRINT_LINE
+        bra     CMD_MAP_SBCIO_BODY
+CMD_MAP_PROFILE:
         ldaa    #MONITOR_PROFILE_SBCIO
         beq     CMD_MAP_BASE
         ldx     #TXT_MAP_SBCIO
         jsr     MAP_PRINT_LINE
+CMD_MAP_SBCIO_BODY:
         ldx     #TXT_MAP_SBCIO_RAM
         jsr     MAP_PRINT_LINE
         ldx     #TXT_MAP_SBCIO_USER
@@ -933,6 +974,12 @@ CMD_MAP_COMMON:
         ldx     #TXT_MAP_SBCIO_MIK
         jsr     MAP_PRINT_LINE
         ldx     #TXT_MAP_SBCIO_STK
+        jsr     MAP_PRINT_LINE
+        ldaa    #MONITOR_FEATURE_VDG
+        beq     CMD_MAP_ROM
+        ldx     #TXT_MAP_VDG_VRAM
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_VDG_CTL
         jsr     MAP_PRINT_LINE
         bra     CMD_MAP_ROM
 CMD_MAP_COMMON_BASE:
@@ -1126,6 +1173,68 @@ CMD_FILL_LOOP:
 CMD_FILL_DONE:
         jmp     MAIN_LOOP
 CMD_FILL_ERR:
+        jmp     MAIN_LOOP_ERROR
+
+CMD_VDGTEST:
+        ldaa    #MONITOR_FEATURE_VDG
+        beq     CMD_VDGTEST_ERR
+        ldab    LINE_LEN
+        cmpb    #7
+        bne     CMD_VDGTEST_ERR
+        ldx     #LINE_BUF
+        ldaa    0,x
+        cmpa    #'V'
+        bne     CMD_VDGTEST_ERR
+        ldaa    1,x
+        cmpa    #'D'
+        bne     CMD_VDGTEST_ERR
+        ldaa    2,x
+        cmpa    #'G'
+        bne     CMD_VDGTEST_ERR
+        ldaa    3,x
+        cmpa    #'T'
+        bne     CMD_VDGTEST_ERR
+        ldaa    4,x
+        cmpa    #'E'
+        bne     CMD_VDGTEST_ERR
+        ldaa    5,x
+        cmpa    #'S'
+        bne     CMD_VDGTEST_ERR
+        ldaa    6,x
+        cmpa    #'T'
+        bne     CMD_VDGTEST_ERR
+        ldaa    #VDG_MODE
+        staa    VDG_CTL
+        ldx     #VDG_VRAM_START
+CMD_VDGTEST_CLEAR:
+        ldaa    #$60
+        staa    0,x
+        cpx     #VDG_TEXT_END
+        beq     CMD_VDGTEST_WRITE
+        inx
+        bra     CMD_VDGTEST_CLEAR
+CMD_VDGTEST_WRITE:
+        ldx     #TXT_VDGTEST_MESSAGE
+        stx     DUMP_END
+        ldx     #VDG_VRAM_START
+        stx     DUMP_ADDR
+CMD_VDGTEST_WRITE_LOOP:
+        ldx     DUMP_END
+        ldaa    0,x
+        cmpa    #$04
+        beq     CMD_VDGTEST_OK
+        inx
+        stx     DUMP_END
+        ldx     DUMP_ADDR
+        staa    0,x
+        inx
+        stx     DUMP_ADDR
+        bra     CMD_VDGTEST_WRITE_LOOP
+CMD_VDGTEST_OK:
+        ldx     #TXT_OK
+        jsr     MAP_PRINT_LINE
+        jmp     MAIN_LOOP
+CMD_VDGTEST_ERR:
         jmp     MAIN_LOOP_ERROR
 
 CMD_LOAD:
@@ -1969,6 +2078,8 @@ TXT_WELCOME:    fcc     "MC6800 MONITOR"
                 fcb     $04
 TXT_HELP:       fcc     "D DIR M MAP RAMTEST G L LF B C R U H F"
                 fcb     $04
+TXT_HELP_VDG:   fcc     "D DIR M MAP RAMTEST VDGTEST G L LF B C R U H F"
+                fcb     $04
 TXT_OK:         fcc     "OK"
                 fcb     $04
 TXT_RAMTEST_PREFIX: fcc     "RAMTEST "
@@ -1989,15 +2100,25 @@ TXT_MAP_BASE_MON:   fcc     "MON 1E00"
                     fcb     $04
 TXT_MAP_SBCIO:      fcc     "MAP SBCIO"
                     fcb     $04
+TXT_MAP_SBCIO_VDG:  fcc     "MAP SBCIO VDG"
+                    fcb     $04
+TXT_MAP_K6802_VDG:  fcc     "MAP K6802 VDG"
+                    fcb     $04
 TXT_MAP_SBCIO_RAM:  fcc     "RAM 0000-7FFF"
                     fcb     $04
 TXT_MAP_SBCIO_USER: fcc     "USER 0000-7FFF"
                     fcb     $04
 TXT_MAP_SBCIO_WORK: fcc     "WORK C000-DFFF"
                     fcb     $04
+TXT_MAP_K6802_WORK: fcc     "WORK A000-BFFF"
+                    fcb     $04
 TXT_MAP_SBCIO_SD:   fcc     "SD C000"
                     fcb     $04
+TXT_MAP_K6802_SD:   fcc     "SD A000"
+                    fcb     $04
 TXT_MAP_SBCIO_MON:  fcc     "MON C200"
+                    fcb     $04
+TXT_MAP_K6802_MON:  fcc     "MON A200"
                     fcb     $04
 TXT_MAP_BASE_MIK:   fcc     "MIK 1F00"
                     fcb     $04
@@ -2005,10 +2126,22 @@ TXT_MAP_BASE_STK:   fcc     "STK 1F42"
                     fcb     $04
 TXT_MAP_SBCIO_MIK:  fcc     "MIK C300"
                     fcb     $04
+TXT_MAP_K6802_MIK:  fcc     "MIK A300"
+                    fcb     $04
 TXT_MAP_SBCIO_STK:  fcc     "STK DFFF"
+                    fcb     $04
+TXT_MAP_K6802_STK:  fcc     "STK BFFF"
+                    fcb     $04
+TXT_MAP_VDG_VRAM:   fcc     "VRAM A000-BFFF"
+                    fcb     $04
+TXT_MAP_K6802_VRAM: fcc     "VRAM C000-DFFF"
+                    fcb     $04
+TXT_MAP_VDG_CTL:    fcc     "VDG 8110"
                     fcb     $04
 TXT_MAP_ROM:        fcc     "ROM E000-FFFF"
                     fcb     $04
+TXT_VDGTEST_MESSAGE: fcc    "MC6800 MONITOR K68-VDG"
+                     fcb    $04
 TXT_BP:         fcc     "BP "
                 fcb     $04
 TXT_NONE:       fcc     "NONE"

@@ -23,6 +23,7 @@
 | `Mssss` | `ssss` からメモリを変更する |
 | `MAP` | 現在のビルドが想定する主要メモリ配置を表示する |
 | `RAMTEST ssss-eeee` | 許可された明示範囲のRAMを破壊テストする |
+| `VDGTEST` | VDG有効profileでK68-VDG画面をクリアし固定文字列を表示する |
 | `Gssss` | `ssss` へジャンプして実行する |
 | `L` | S-Record または Intel HEX をロードする |
 | `LF filename` | SDカード上の8.3名ファイルを検索して開く |
@@ -121,6 +122,55 @@ ROM E000-FFFF
 
 SBC-IO拡張ROMでは `MAP SBCIO` と表示され、`WORK C000-DFFF`、`SD C000`、`MON C200`、`MIK C300`、`STK DFFF` などの拡張RAM前提の配置になる。
 
+K68-VDG表示PoC用の `sbcio_vdg` profileでは、SBC-IO拡張ROMの配置に加えて K68-VDG 用の VRAM と設定レジスタを表示する。
+
+```text
+] MAP
+MAP SBCIO VDG
+RAM 0000-7FFF
+USER 0000-7FFF
+WORK C000-DFFF
+SD C000
+MON C200
+MIK C300
+STK DFFF
+VRAM A000-BFFF
+VDG 8110
+ROM E000-FFFF
+]
+```
+
+K6802-SBCでK68-VDGのVRAMを `$C000-$DFFF` に置く `k6802_vdg` profileでは、SD/FATとモニタのワーク領域を `$A000-$BFFF` に移す。
+
+```text
+] MAP
+MAP K6802 VDG
+RAM 0000-7FFF
+USER 0000-7FFF
+WORK A000-BFFF
+SD A000
+MON A200
+MIK A300
+STK BFFF
+VRAM C000-DFFF
+VDG 8110
+ROM E000-FFFF
+]
+```
+
+## K68-VDG表示PoC
+
+`VDGTEST` は VDG有効profile専用の表示確認コマンドである。K68-VDG の設定レジスタ `$8110` に VDG mode `$00` を書き込み、画面範囲を `$60` でクリアした後、VRAM先頭から `MC6800 MONITOR K68-VDG` を書く。
+`sbcio_vdg` では `$A000-$A1FF` をクリアして `$A000` へ書き、`k6802_vdg` では `$C000-$C1FF` をクリアして `$C000` へ書く。
+
+```text
+] VDGTEST
+OK
+]
+```
+
+`base` / `sbcio` profileでは `VDGTEST` は未対応コマンドとして `?` を返す。
+
 ## RAM確認
 
 `RAMTEST ssss-eeee` は、許可された範囲内のRAMを確認する破壊系コマンドである。
@@ -137,10 +187,11 @@ OK
 `RAMTEST` 自身はゼロページ `$00F0-$00F5` を一時ワークに使い、実行中のスタックもゼロページ直下へ移すため、`$0000-$00FF` は検査対象外にする。
 ゼロページの作業領域と一時スタック領域は指定範囲外でも書き換わるため、`RAMTEST` 前後で `$0000-$00FF` の内容保持は保証しない。
 `base` profileでは `0100-1BFF` 内の範囲だけを許可する。
-`sbcio` profileでは `0100-7FFF`、`C000-DFFF` 内の範囲を許可する。
+`sbcio` / `sbcio_vdg` profileでは `0100-7FFF`、`C000-DFFF` 内の範囲を許可する。
+`k6802_vdg` profileでは `0100-7FFF`、`A000-BFFF` 内の範囲を許可する。
 たとえば `sbcio` では `RAMTEST 2000-3FFF` や `RAMTEST C200-C2FF` は実行できる。
 無引数、片側欠落、5桁以上、余分な文字、開始 > 終了、`0000-00FF` や `7FFF-C000` のように許可領域外を含む範囲は `?` を返す。
-`$A000-$BFFF` はK68-VDG VRAM候補なので触らない。
+`sbcio_vdg` の `$A000-$BFFF` や `k6802_vdg` の `$C000-$DFFF` はK68-VDG VRAMなので触らない。
 
 失敗時は `NG xxxx` の形式で失敗アドレスを表示する。
 
@@ -218,6 +269,14 @@ MULTI.BIN A 00000400
 ```text
 ] H
 D DIR M MAP RAMTEST G L LF B C R U H F
+]
+```
+
+`sbcio_vdg` / `k6802_vdg` profileでは `VDGTEST` を含めて表示する。
+
+```text
+] H
+D DIR M MAP RAMTEST VDGTEST G L LF B C R U H F
 ]
 ```
 

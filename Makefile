@@ -8,6 +8,10 @@ ifeq ($(MONITOR_PROFILE),base)
 TARGET_SUFFIX :=
 else ifeq ($(MONITOR_PROFILE),sbcio)
 TARGET_SUFFIX := -sbcio
+else ifeq ($(MONITOR_PROFILE),sbcio_vdg)
+TARGET_SUFFIX := -sbcio-vdg
+else ifeq ($(MONITOR_PROFILE),k6802_vdg)
+TARGET_SUFFIX := -k6802-vdg
 else
 $(error Unsupported MONITOR_PROFILE '$(MONITOR_PROFILE)')
 endif

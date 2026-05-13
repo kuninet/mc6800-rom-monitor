@@ -14,8 +14,21 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "tests"))
 sys.path.insert(0, str(PROJECT_ROOT / "emu"))
 EMU_PATH = PROJECT_ROOT / "emu" / "sbc6800_emu.py"
-DEFAULT_BUILD_ROM_PATH = PROJECT_ROOT / "build" / "mc6800-monitor.bin"
-DEFAULT_BUILD_LST_PATH = PROJECT_ROOT / "build" / "mc6800-monitor.lst"
+
+
+def _default_build_stem() -> str:
+    suffix_by_profile = {
+        "base": "",
+        "sbcio": "-sbcio",
+        "sbcio_vdg": "-sbcio-vdg",
+        "k6802_vdg": "-k6802-vdg",
+    }
+    suffix = suffix_by_profile.get(os.environ.get("MONITOR_PROFILE", "base"), "")
+    return f"mc6800-monitor{suffix}"
+
+
+DEFAULT_BUILD_ROM_PATH = PROJECT_ROOT / "build" / f"{_default_build_stem()}.bin"
+DEFAULT_BUILD_LST_PATH = PROJECT_ROOT / "build" / f"{_default_build_stem()}.lst"
 
 
 def _path_from_env(name: str, default: Path) -> Path:
@@ -29,7 +42,12 @@ def _path_from_env(name: str, default: Path) -> Path:
 
 
 BUILD_ROM_PATH = _path_from_env("MONITOR_ROM_PATH", DEFAULT_BUILD_ROM_PATH)
-BUILD_LST_PATH = _path_from_env("MONITOR_LST_PATH", DEFAULT_BUILD_LST_PATH)
+if os.environ.get("MONITOR_LST_PATH"):
+    BUILD_LST_PATH = _path_from_env("MONITOR_LST_PATH", DEFAULT_BUILD_LST_PATH)
+elif os.environ.get("MONITOR_ROM_PATH"):
+    BUILD_LST_PATH = BUILD_ROM_PATH.with_suffix(".lst")
+else:
+    BUILD_LST_PATH = DEFAULT_BUILD_LST_PATH
 
 from sbc6800_emu import PIA, PIA_CRB, PIA_PRB, SDCard, SPI_CS, SPI_MISO, SPI_MOSI, SPI_SCLK
 from sd_fixtures import (
@@ -228,6 +246,7 @@ def _load_symbol_addresses(*names: str) -> dict[str, int]:
             re.compile(rf"\b{re.escape(name)}\s*:\s*([0-9A-Fa-f]{{1,4}})\b"),
             re.compile(rf"/([0-9A-Fa-f]{{1,4}})\s*:\s+.*\b{re.escape(name)}:\s*$"),
             re.compile(rf":\s*=\$([0-9A-Fa-f]{{1,4}})\s+{re.escape(name)}\s+equ\b"),
+            re.compile(rf":\s*=([0-9A-Fa-f]{{1,4}})\s+{re.escape(name)}\s+equ\b"),
         ]
         for name in names
     }
@@ -244,7 +263,23 @@ def _load_symbol_addresses(*names: str) -> dict[str, int]:
 
 
 def _is_sbcio_build() -> bool:
-    return "-sbcio" in BUILD_ROM_PATH.stem or os.environ.get("MONITOR_PROFILE") == "sbcio"
+    return (
+        "-sbcio" in BUILD_ROM_PATH.stem
+        or "-k6802-vdg" in BUILD_ROM_PATH.stem
+        or os.environ.get("MONITOR_PROFILE") in ("sbcio", "sbcio_vdg", "k6802_vdg")
+    )
+
+
+def _is_vdg_build() -> bool:
+    return (
+        "-sbcio-vdg" in BUILD_ROM_PATH.stem
+        or "-k6802-vdg" in BUILD_ROM_PATH.stem
+        or os.environ.get("MONITOR_PROFILE") in ("sbcio_vdg", "k6802_vdg")
+    )
+
+
+def _is_k6802_vdg_build() -> bool:
+    return "-k6802-vdg" in BUILD_ROM_PATH.stem or os.environ.get("MONITOR_PROFILE") == "k6802_vdg"
 
 
 def _run_emu_with_sd(input_text: str, sd_image: bytes, max_cycles: int = 30_000_000) -> tuple[str, str, int]:
@@ -449,8 +484,18 @@ def test_rom_profile_memory_layout() -> None:
         "USER_RAM_END",
         "WORK_RAM_START",
         "WORK_RAM_END",
+        "MONITOR_FEATURE_VDG",
+        "VDG_CTL",
+        "VDG_VRAM_START",
+        "VDG_VRAM_END",
     )
-    if _is_sbcio_build():
+    if _is_k6802_vdg_build():
+        expected_sector_buf = 0xA000
+        expected_monitor_base = 0xA200
+        expected_user_ram_end = 0x7FFF
+        expected_work_start = 0xA000
+        expected_work_end = 0xBFFF
+    elif _is_sbcio_build():
         expected_sector_buf = 0xC000
         expected_monitor_base = 0xC200
         expected_user_ram_end = 0x7FFF
@@ -488,6 +533,27 @@ def test_rom_profile_memory_layout() -> None:
     assert symbols["SD_SECTOR_BUF"] + SECTOR_SIZE <= symbols["MONITOR_RAM_BASE"], (
         "SD sector buffer must not overlap monitor work area"
     )
+    if _is_vdg_build():
+        expected_vram_start = 0xC000 if _is_k6802_vdg_build() else 0xA000
+        expected_vram_end = 0xDFFF if _is_k6802_vdg_build() else 0xBFFF
+        assert symbols["MONITOR_FEATURE_VDG"] == 1, "VDG profiles must enable VDG feature"
+        assert symbols["VDG_CTL"] == 0x8110, "VDG control register must use K68-VDG address"
+        assert symbols["VDG_VRAM_START"] == expected_vram_start, (
+            f"K68-VDG VRAM start mismatch: got={symbols['VDG_VRAM_START']:04X} "
+            f"expected={expected_vram_start:04X}"
+        )
+        assert symbols["VDG_VRAM_END"] == expected_vram_end, (
+            f"K68-VDG VRAM end mismatch: got={symbols['VDG_VRAM_END']:04X} "
+            f"expected={expected_vram_end:04X}"
+        )
+        assert (
+            symbols["VDG_VRAM_END"] < symbols["WORK_RAM_START"]
+            or symbols["WORK_RAM_END"] < symbols["VDG_VRAM_START"]
+        ), (
+            "K68-VDG VRAM must not overlap SBC-IO work RAM"
+        )
+    else:
+        assert symbols["MONITOR_FEATURE_VDG"] == 0, "non-VDG profiles must keep VDG disabled"
     if _is_sbcio_build():
         assert symbols["FAT_SECTOR_IN_CLUS"] <= symbols["WORK_RAM_END"], (
             "SBC-IO work variables must stay under WORK_RAM_END"
@@ -512,10 +578,19 @@ def test_rom_map_command_matches_profile_symbols() -> None:
         "STACK_TOP",
         "ROM_BASE",
         "ROM_END",
+        "VDG_VRAM_START",
+        "VDG_VRAM_END",
     )
     stdout, stderr, rc = _run_emu_with_sd("MAP\r\r", build_fat32_image(with_mbr=True))
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
-    profile = "SBCIO" if _is_sbcio_build() else "BASE"
+    if _is_k6802_vdg_build():
+        profile = "K6802 VDG"
+    elif _is_vdg_build():
+        profile = "SBCIO VDG"
+    elif _is_sbcio_build():
+        profile = "SBCIO"
+    else:
+        profile = "BASE"
     expected_lines = [
         f"MAP {profile}",
         f"RAM {symbols['RAM_START']:04X}-{symbols['RAM_END']:04X}",
@@ -527,6 +602,9 @@ def test_rom_map_command_matches_profile_symbols() -> None:
         f"STK {symbols['STACK_TOP']:04X}",
         f"ROM {symbols['ROM_BASE']:04X}-{symbols['ROM_END']:04X}",
     ]
+    if _is_vdg_build():
+        expected_lines.insert(-1, f"VRAM {symbols['VDG_VRAM_START']:04X}-{symbols['VDG_VRAM_END']:04X}")
+        expected_lines.insert(-1, "VDG 8110")
     for line in expected_lines:
         assert line in stdout, f"missing MAP line {line!r}: {stdout!r}"
     print("[PASS] test_rom_map_command_matches_profile_symbols")
@@ -801,14 +879,15 @@ def test_sbcio_ramtest_preserves_sd_fat_work_area() -> None:
         print("[SKIP] test_sbcio_ramtest_preserves_sd_fat_work_area")
         return
 
+    work_range = "A000-BFFF" if _is_k6802_vdg_build() else "C000-DFFF"
     image = build_fat32_image(with_mbr=True, sectors_per_cluster=6)
     stdout, stderr, rc = _run_emu_with_sd(
-        "RAMTEST C000-DFFF\rDIR\rLF TEST.S\rD0200-0202\r\r",
+        f"RAMTEST {work_range}\rDIR\rLF TEST.S\rD0200-0202\r\r",
         image,
         max_cycles=200_000_000,
     )
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
-    assert "RAMTEST C000-DFFF" in stdout, f"RAMTEST should echo tested range: {stdout!r}"
+    assert f"RAMTEST {work_range}" in stdout, f"RAMTEST should echo tested range: {stdout!r}"
     assert "OK" in stdout, f"RAMTEST/LF should report OK: {stdout!r}"
     assert "NG" not in stdout, f"RAMTEST should not fail in emulator: {stdout!r}"
     assert "TEST.S A 0000001E" in stdout, f"DIR should work after RAMTEST: {stdout!r}"
