@@ -43,10 +43,12 @@ OUTEEE:
 MONITOR_ENTRY:
         lds     #STACK_TOP
         jsr     ACIA_INIT
+ if MONITOR_FEATURE_KEYBOARD
         ldaa    #MONITOR_FEATURE_KEYBOARD
         beq     MONITOR_ENTRY_NO_KEYBOARD
         jsr     ACIA2_INIT
 MONITOR_ENTRY_NO_KEYBOARD:
+ endif
         jmp     MAIN_LOOP
 
 RESET:
@@ -56,10 +58,12 @@ RESET:
         clr     BP_ACTIVE
         clr     BRK_ACTIVE
         jsr     ACIA_INIT
+ if MONITOR_FEATURE_KEYBOARD
         ldaa    #MONITOR_FEATURE_KEYBOARD
         beq     RESET_NO_KEYBOARD
         jsr     ACIA2_INIT
 RESET_NO_KEYBOARD:
+ endif
         ldx     #TXT_WELCOME
         jsr     PDATA1
         ldaa    #CHR_CR
@@ -74,10 +78,12 @@ MAIN_LOOP:
         ldaa    LINE_BUF
         cmpa    #'D'
         bne     CHK_CMD_MOD
+ if MONITOR_FEATURE_SD
         jsr     IS_CMD_DIR
         bcs     MAIN_DISPATCH_DUMP
         jmp     CMD_DIR
 MAIN_DISPATCH_DUMP:
+ endif
         jmp     CMD_DUMP
 CHK_CMD_MOD:
         cmpa    #'M'
@@ -121,21 +127,28 @@ CHK_CMD_HELP:
         jmp     CMD_HELP
 CHK_CMD_FILL:
         cmpa    #'F'
-        bne     CHK_CMD_VDGTEST
+        bne     CHK_CMD_AFTER_FILL
         jmp     CMD_FILL
-CHK_CMD_VDGTEST:
+CHK_CMD_AFTER_FILL:
+ if MONITOR_FEATURE_VDG
         cmpa    #'V'
-        bne     CHK_CMD_KEYTEST
+        bne     CHK_CMD_AFTER_VDGTEST
         jmp     CMD_VDGTEST
-CHK_CMD_KEYTEST:
+CHK_CMD_AFTER_VDGTEST:
+ endif
+ if MONITOR_FEATURE_KEYBOARD
         cmpa    #'K'
         bne     MAIN_LOOP_ERROR
         jmp     CMD_KEYTEST
+ else
+        jmp     MAIN_LOOP_ERROR
+ endif
 
 MAIN_LOOP_ERROR:
         jsr     SHOW_ERROR
         bra     MAIN_LOOP
 
+ if MONITOR_FEATURE_SD
 IS_CMD_DIR:
         ldab    LINE_LEN
         cmpb    #3
@@ -151,6 +164,7 @@ IS_CMD_DIR:
 IS_CMD_DIR_FAIL:
         sec
         rts
+ endif
 
 IS_CMD_MAP:
         ldab    LINE_LEN
@@ -467,6 +481,7 @@ PARSE_FILL_FAIL:
         sec
         rts
 
+ if MONITOR_FEATURE_SD
 PARSE_FILENAME_83:
         stx     ARG_PTR
         stab    ARG_LEN
@@ -689,6 +704,7 @@ CMD_DIR_EXT_SCAN:
 CMD_DIR_EXT_YES:
         clc
         rts
+ endif
 
 CMP_X_DUMP_END:
         stx     HEX_VALUE_HI
@@ -906,23 +922,7 @@ CMD_HELP:
         ldab    LINE_LEN
         cmpb    #1
         bne     CMD_HELP_ERR
-        ldaa    #MONITOR_FEATURE_VDG
-        beq     CMD_HELP_NO_VDG
-        ldaa    #MONITOR_FEATURE_KEYBOARD
-        beq     CMD_HELP_VDG_ONLY
-        ldx     #TXT_HELP_VDG_KEYBOARD
-        bra     CMD_HELP_PRINT
-CMD_HELP_VDG_ONLY:
-        ldx     #TXT_HELP_VDG
-        bra     CMD_HELP_PRINT
-CMD_HELP_NO_VDG:
-        ldaa    #MONITOR_FEATURE_KEYBOARD
-        beq     CMD_HELP_BASE
-        ldx     #TXT_HELP_KEYBOARD
-        bra     CMD_HELP_PRINT
-CMD_HELP_BASE:
         ldx     #TXT_HELP
-CMD_HELP_PRINT:
         jsr     PDATA1
         ldaa    #CHR_CR
         jsr     MON_OUTEEE
@@ -931,92 +931,93 @@ CMD_HELP_ERR:
         jmp     MAIN_LOOP_ERROR
 
 CMD_MAP:
-        ldaa    #MONITOR_FEATURE_VDG
-        beq     CMD_MAP_PROFILE
-        ldaa    #MONITOR_PROFILE_K6802_VDG
-        beq     CMD_MAP_SBCIO_VDG_PROFILE
+ if MONITOR_PROFILE_K6802_VDG
         ldx     #TXT_MAP_K6802_VDG
-        jsr     MAP_PRINT_LINE
-        ldx     #TXT_MAP_SBCIO_RAM
-        jsr     MAP_PRINT_LINE
-        ldx     #TXT_MAP_SBCIO_USER
-        jsr     MAP_PRINT_LINE
-        ldx     #TXT_MAP_K6802_WORK
-        jsr     MAP_PRINT_LINE
-        ldx     #TXT_MAP_K6802_SD
-        jsr     MAP_PRINT_LINE
-        ldx     #TXT_MAP_K6802_MON
-        jsr     MAP_PRINT_LINE
-        ldx     #TXT_MAP_K6802_MIK
-        jsr     MAP_PRINT_LINE
-        ldx     #TXT_MAP_K6802_STK
-        jsr     MAP_PRINT_LINE
-        ldx     #TXT_MAP_K6802_VRAM
-        jsr     MAP_PRINT_LINE
-        ldx     #TXT_MAP_VDG_CTL
-        jsr     MAP_PRINT_LINE
-        ldx     #TXT_MAP_KEYBOARD
-        jsr     MAP_PRINT_LINE
-        jmp     CMD_MAP_ROM
-CMD_MAP_SBCIO_VDG_PROFILE:
+ else
+ if MONITOR_PROFILE_SBCIO
+ if MONITOR_FEATURE_VDG
         ldx     #TXT_MAP_SBCIO_VDG
-        jsr     MAP_PRINT_LINE
-        bra     CMD_MAP_SBCIO_BODY
-CMD_MAP_PROFILE:
-        ldaa    #MONITOR_PROFILE_SBCIO
-        beq     CMD_MAP_BASE
+ else
         ldx     #TXT_MAP_SBCIO
-        jsr     MAP_PRINT_LINE
-CMD_MAP_SBCIO_BODY:
-        ldx     #TXT_MAP_SBCIO_RAM
-        jsr     MAP_PRINT_LINE
-        ldx     #TXT_MAP_SBCIO_USER
-        jsr     MAP_PRINT_LINE
-        ldx     #TXT_MAP_SBCIO_WORK
-        jsr     MAP_PRINT_LINE
-        ldx     #TXT_MAP_SBCIO_SD
-        jsr     MAP_PRINT_LINE
-        ldx     #TXT_MAP_SBCIO_MON
-        jsr     MAP_PRINT_LINE
-        bra     CMD_MAP_COMMON
-CMD_MAP_BASE:
+ endif
+ else
         ldx     #TXT_MAP_BASE
+ endif
+ endif
         jsr     MAP_PRINT_LINE
+
+ if BUILD_MEMORY_CONFIG_BASE8K
         ldx     #TXT_MAP_BASE_RAM
         jsr     MAP_PRINT_LINE
         ldx     #TXT_MAP_BASE_USER
         jsr     MAP_PRINT_LINE
         ldx     #TXT_MAP_BASE_WORK
         jsr     MAP_PRINT_LINE
+ if MONITOR_FEATURE_SD
         ldx     #TXT_MAP_BASE_SD
         jsr     MAP_PRINT_LINE
+ endif
         ldx     #TXT_MAP_BASE_MON
         jsr     MAP_PRINT_LINE
-CMD_MAP_COMMON:
-        ldaa    #MONITOR_PROFILE_SBCIO
-        beq     CMD_MAP_COMMON_BASE
-        ldx     #TXT_MAP_SBCIO_MIK
-        jsr     MAP_PRINT_LINE
-        ldx     #TXT_MAP_SBCIO_STK
-        jsr     MAP_PRINT_LINE
-        ldaa    #MONITOR_FEATURE_VDG
-        beq     CMD_MAP_KEYBOARD
-        ldx     #TXT_MAP_VDG_VRAM
-        jsr     MAP_PRINT_LINE
-        ldx     #TXT_MAP_VDG_CTL
-        jsr     MAP_PRINT_LINE
-CMD_MAP_KEYBOARD:
-        ldaa    #MONITOR_FEATURE_KEYBOARD
-        beq     CMD_MAP_ROM
-        ldx     #TXT_MAP_KEYBOARD
-        jsr     MAP_PRINT_LINE
-        bra     CMD_MAP_ROM
-CMD_MAP_COMMON_BASE:
         ldx     #TXT_MAP_BASE_MIK
         jsr     MAP_PRINT_LINE
         ldx     #TXT_MAP_BASE_STK
         jsr     MAP_PRINT_LINE
-CMD_MAP_ROM:
+ endif
+
+ if BUILD_MEMORY_CONFIG_RAM64_C000_WORK
+        ldx     #TXT_MAP_SBCIO_RAM
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_SBCIO_USER
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_SBCIO_WORK
+        jsr     MAP_PRINT_LINE
+ if MONITOR_FEATURE_SD
+        ldx     #TXT_MAP_SBCIO_SD
+        jsr     MAP_PRINT_LINE
+ endif
+        ldx     #TXT_MAP_SBCIO_MON
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_SBCIO_MIK
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_SBCIO_STK
+        jsr     MAP_PRINT_LINE
+ endif
+
+ if BUILD_MEMORY_CONFIG_RAM64_A000_WORK
+        ldx     #TXT_MAP_SBCIO_RAM
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_SBCIO_USER
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_K6802_WORK
+        jsr     MAP_PRINT_LINE
+ if MONITOR_FEATURE_SD
+        ldx     #TXT_MAP_K6802_SD
+        jsr     MAP_PRINT_LINE
+ endif
+        ldx     #TXT_MAP_K6802_MON
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_K6802_MIK
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_K6802_STK
+        jsr     MAP_PRINT_LINE
+ endif
+
+ if MONITOR_FEATURE_VDG
+ if BUILD_VDG_VRAM_C000
+        ldx     #TXT_MAP_K6802_VRAM
+        jsr     MAP_PRINT_LINE
+ else
+        ldx     #TXT_MAP_VDG_VRAM
+        jsr     MAP_PRINT_LINE
+ endif
+        ldx     #TXT_MAP_VDG_CTL
+        jsr     MAP_PRINT_LINE
+ endif
+ if MONITOR_FEATURE_KEYBOARD
+        ldx     #TXT_MAP_KEYBOARD
+        jsr     MAP_PRINT_LINE
+ endif
         ldx     #TXT_MAP_ROM
         jsr     MAP_PRINT_LINE
         jmp     MAIN_LOOP
@@ -1204,6 +1205,7 @@ CMD_FILL_DONE:
 CMD_FILL_ERR:
         jmp     MAIN_LOOP_ERROR
 
+ if MONITOR_FEATURE_VDG
 CMD_VDGTEST:
         ldaa    #MONITOR_FEATURE_VDG
         beq     CMD_VDGTEST_ERR
@@ -1265,7 +1267,9 @@ CMD_VDGTEST_OK:
         jmp     MAIN_LOOP
 CMD_VDGTEST_ERR:
         jmp     MAIN_LOOP_ERROR
+ endif
 
+ if MONITOR_FEATURE_KEYBOARD
 CMD_KEYTEST:
         ldaa    #MONITOR_FEATURE_KEYBOARD
         beq     CMD_KEYTEST_ERR
@@ -1318,6 +1322,7 @@ CMD_KEYTEST_PRINT:
         jmp     MAIN_LOOP
 CMD_KEYTEST_ERR:
         jmp     MAIN_LOOP_ERROR
+ endif
 
 CMD_LOAD:
         ldab    LINE_LEN
@@ -1357,13 +1362,16 @@ CMD_LOAD_BADARG:
         jmp     MAIN_LOOP_ERROR
 
 CMD_LOAD_EXTENDED:
+ if MONITOR_FEATURE_SD
         ldaa    LINE_BUF+1
         cmpa    #'F'
         beq     CMD_LF
         cmpa    #'f'
         beq     CMD_LF
+ endif
         jmp     CMD_LOAD_BADARG
 
+ if MONITOR_FEATURE_SD
 CMD_LF:
         ldab    LINE_LEN
         subb    #2
@@ -1431,6 +1439,7 @@ CMD_DIR_SKIP_ENTRY:
         bra     CMD_DIR_CLUSTER
 CMD_DIR_DONE:
         jmp     MAIN_LOOP
+ endif
 
 PRINT_PROMPT:
         ldaa    #CHR_PROMPT
@@ -1838,12 +1847,15 @@ ADD_TO_LOADER_SUM:
         rts
 
 LOADER_GETC:
+ if MONITOR_FEATURE_SD
         ldaa    LOADER_INPUT
         cmpa    #LOAD_INPUT_FAT
         beq     LOADER_GETC_FAT
+ endif
         jsr     ACIA_GETC
         clc
         rts
+ if MONITOR_FEATURE_SD
 LOADER_GETC_FAT:
         pshb
         jsr     FAT32_STREAM_GETC
@@ -1855,6 +1867,7 @@ LOADER_GETC_FAT_OK:
         pulb
         clc
         rts
+ endif
 
 PRINT_HEX8:
         psha
@@ -2158,14 +2171,37 @@ TXT_BRK:        fcc     "BRK "
                 fcb     $04
 TXT_WELCOME:    fcc     "MC6800 MONITOR"
                 fcb     $04
-TXT_HELP:       fcc     "D DIR M MAP RAMTEST G L LF B C R U H F"
+TXT_HELP:
+ if MONITOR_FEATURE_SD
+ if MONITOR_FEATURE_VDG
+ if MONITOR_FEATURE_KEYBOARD
+                fcc     "D DIR M MAP RAMTEST VDGTEST KEYTEST G L LF B C R U H F"
+ else
+                fcc     "D DIR M MAP RAMTEST VDGTEST G L LF B C R U H F"
+ endif
+ else
+ if MONITOR_FEATURE_KEYBOARD
+                fcc     "D DIR M MAP RAMTEST KEYTEST G L LF B C R U H F"
+ else
+                fcc     "D DIR M MAP RAMTEST G L LF B C R U H F"
+ endif
+ endif
+ else
+ if MONITOR_FEATURE_VDG
+ if MONITOR_FEATURE_KEYBOARD
+                fcc     "D M MAP RAMTEST VDGTEST KEYTEST G L B C R U H F"
+ else
+                fcc     "D M MAP RAMTEST VDGTEST G L B C R U H F"
+ endif
+ else
+ if MONITOR_FEATURE_KEYBOARD
+                fcc     "D M MAP RAMTEST KEYTEST G L B C R U H F"
+ else
+                fcc     "D M MAP RAMTEST G L B C R U H F"
+ endif
+ endif
+ endif
                 fcb     $04
-TXT_HELP_VDG:   fcc     "D DIR M MAP RAMTEST VDGTEST G L LF B C R U H F"
-                fcb     $04
-TXT_HELP_KEYBOARD: fcc "D DIR M MAP RAMTEST KEYTEST G L LF B C R U H F"
-                   fcb $04
-TXT_HELP_VDG_KEYBOARD: fcc "D DIR M MAP RAMTEST VDGTEST KEYTEST G L LF B C R U H F"
-                       fcb $04
 TXT_OK:         fcc     "OK"
                 fcb     $04
 TXT_RAMTEST_PREFIX: fcc     "RAMTEST "
@@ -2180,8 +2216,10 @@ TXT_MAP_BASE_USER:  fcc     "USER 0000-1FFF"
                     fcb     $04
 TXT_MAP_BASE_WORK:  fcc     "WORK 1C00-1FFF"
                     fcb     $04
+ if MONITOR_FEATURE_SD
 TXT_MAP_BASE_SD:    fcc     "SD 1C00"
                     fcb     $04
+ endif
 TXT_MAP_BASE_MON:   fcc     "MON 1E00"
                     fcb     $04
 TXT_MAP_SBCIO:      fcc     "MAP SBCIO"
@@ -2198,10 +2236,12 @@ TXT_MAP_SBCIO_WORK: fcc     "WORK C000-DFFF"
                     fcb     $04
 TXT_MAP_K6802_WORK: fcc     "WORK A000-BFFF"
                     fcb     $04
+ if MONITOR_FEATURE_SD
 TXT_MAP_SBCIO_SD:   fcc     "SD C000"
                     fcb     $04
 TXT_MAP_K6802_SD:   fcc     "SD A000"
                     fcb     $04
+ endif
 TXT_MAP_SBCIO_MON:  fcc     "MON C200"
                     fcb     $04
 TXT_MAP_K6802_MON:  fcc     "MON A200"
@@ -2218,20 +2258,28 @@ TXT_MAP_SBCIO_STK:  fcc     "STK DFFF"
                     fcb     $04
 TXT_MAP_K6802_STK:  fcc     "STK BFFF"
                     fcb     $04
+ if MONITOR_FEATURE_VDG
 TXT_MAP_VDG_VRAM:   fcc     "VRAM A000-BFFF"
                     fcb     $04
 TXT_MAP_K6802_VRAM: fcc     "VRAM C000-DFFF"
                     fcb     $04
 TXT_MAP_VDG_CTL:    fcc     "VDG 8110"
                     fcb     $04
+ endif
+ if MONITOR_FEATURE_KEYBOARD
 TXT_MAP_KEYBOARD:   fcc     "KEY 8094-8095"
                     fcb     $04
+ endif
 TXT_MAP_ROM:        fcc     "ROM E000-FFFF"
                     fcb     $04
+ if MONITOR_FEATURE_VDG
 TXT_VDGTEST_MESSAGE: fcc    "MC6800 MONITOR K68-VDG"
                      fcb    $04
+ endif
+ if MONITOR_FEATURE_KEYBOARD
 TXT_KEY_PREFIX: fcc     "KEY "
                 fcb     $04
+ endif
 TXT_BP:         fcc     "BP "
                 fcb     $04
 TXT_NONE:       fcc     "NONE"
@@ -2314,8 +2362,10 @@ SPURIOUS_IRQ:
         rti
 
         include "acia6850.asm"
+ if MONITOR_FEATURE_SD
         include "sdcard.asm"
         include "fat32.asm"
+ endif
 
         org     VEC_IRQ
         fdb     SPURIOUS_IRQ     ; VEC_IRQ

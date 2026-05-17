@@ -5,12 +5,14 @@ ACIA_INIT:
         staa    ACIA_CTRL
         rts
 
+ if MONITOR_FEATURE_KEYBOARD
 ACIA2_INIT:
         ldaa    #ACIA_CTRL_RESET
         staa    ACIA2_CTRL
         ldaa    #ACIA_CTRL_INIT
         staa    ACIA2_CTRL
         rts
+ endif
 
 ACIA_WAIT_TX:
         ldaa    ACIA_CTRL
@@ -36,6 +38,7 @@ ACIA_GETC:
         ldaa    ACIA_DATA
         rts
 
+ if MONITOR_FEATURE_KEYBOARD
 ACIA2_WAIT_RX:
         ldaa    ACIA2_CTRL
         bita    #ACIA_STAT_RDRF
@@ -46,6 +49,7 @@ ACIA2_GETC:
         bsr     ACIA2_WAIT_RX
         ldaa    ACIA2_DATA
         rts
+ endif
 
 MIKBUG_OUTEEE_IMPL:
         jsr     ACIA_PUTC
