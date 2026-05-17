@@ -8,6 +8,8 @@ MONITOR_BASE     equ $E200
 
 ACIA_CTRL        equ $8018
 ACIA_DATA        equ $8019
+ACIA2_CTRL       equ $8094
+ACIA2_DATA       equ $8095
 
 ; PIAアドレスはエミュレータ暫定値。実機SBC-IOの最終決定は #54 で扱う。
 PIA_BASE         equ $8050

@@ -27,6 +27,8 @@ RAM_START = 0x0000
 RAM_END = 0x1FFF
 ACIA_CTRL = 0x8018
 ACIA_DATA = 0x8019
+ACIA2_CTRL = 0x8094
+ACIA2_DATA = 0x8095
 PIA_PRA = 0x8050
 PIA_CRA = 0x8051
 PIA_PRB = 0x8052
@@ -302,7 +304,7 @@ class PIA:
 class MC6800:
     """MC6800 CPU エミュレータコア"""
 
-    def __init__(self, acia, pia=None):
+    def __init__(self, acia, acia2=None, pia=None):
         # レジスタ
         self.a = 0x00       # アキュムレータ A
         self.b = 0x00       # アキュムレータ B
@@ -322,6 +324,7 @@ class MC6800:
 
         # ACIA
         self.acia = acia
+        self.acia2 = acia2
         self.pia = pia
 
         # 実行カウンタ（暴走検知用）
@@ -336,6 +339,10 @@ class MC6800:
             return self.acia.read_status()
         elif addr == ACIA_DATA:
             return self.acia.read_data()
+        elif self.acia2 is not None and addr == ACIA2_CTRL:
+            return self.acia2.read_status()
+        elif self.acia2 is not None and addr == ACIA2_DATA:
+            return self.acia2.read_data()
         elif self.pia is not None and PIA_PRA <= addr <= PIA_CRB:
             return self.pia.read(addr)
         return self.mem[addr]
@@ -349,6 +356,12 @@ class MC6800:
             return
         elif addr == ACIA_DATA:
             self.acia.write_data(val)
+            return
+        elif self.acia2 is not None and addr == ACIA2_CTRL:
+            self.acia2.write_ctrl(val)
+            return
+        elif self.acia2 is not None and addr == ACIA2_DATA:
+            self.acia2.write_data(val)
             return
         elif self.pia is not None and PIA_PRA <= addr <= PIA_CRB:
             self.pia.write(addr, val)
@@ -1633,6 +1646,8 @@ def main():
     parser.add_argument("--max-cycles", type=int, default=100_000_000,
                         help="最大実行サイクル数（デフォルト: 100000000）")
     parser.add_argument("--sd", help="SD card image file attached to the temporary PIA SPI port")
+    parser.add_argument("--key-input",
+                        help="2nd ACIA keyboard input script file")
     args = parser.parse_args()
 
     # ROM ロード
@@ -1644,11 +1659,16 @@ def main():
     if args.input:
         with open(args.input, "rb") as f:
             input_data = list(f.read())
+    key_input_data = None
+    if args.key_input:
+        with open(args.key_input, "rb") as f:
+            key_input_data = list(f.read())
 
     acia = ACIA(input_data=input_data)
+    acia2 = ACIA(input_data=key_input_data) if key_input_data is not None else None
     sdcard = SDCard.from_file(args.sd) if args.sd else None
     pia = PIA(sdcard) if sdcard is not None else None
-    cpu = MC6800(acia, pia=pia)
+    cpu = MC6800(acia, acia2=acia2, pia=pia)
     cpu.max_cycles = args.max_cycles
 
     # ROM のサイズに応じて配置を決定

@@ -24,6 +24,7 @@
 | `MAP` | 現在のビルドが想定する主要メモリ配置を表示する |
 | `RAMTEST ssss-eeee` | 許可された明示範囲のRAMを破壊テストする |
 | `VDGTEST` | VDG有効profileでK68-VDG画面をクリアし固定文字列を表示する |
+| `KEYTEST` | SBC-IO系profileで2nd ACIAのキーボード受信文字を表示する |
 | `Gssss` | `ssss` へジャンプして実行する |
 | `L` | S-Record または Intel HEX をロードする |
 | `LF filename` | SDカード上の8.3名ファイルを検索して開く |
@@ -121,6 +122,7 @@ ROM E000-FFFF
 ```
 
 SBC-IO拡張ROMでは `MAP SBCIO` と表示され、`WORK C000-DFFF`、`SD C000`、`MON C200`、`MIK C300`、`STK DFFF` などの拡張RAM前提の配置になる。
+SBC-IO系profileでは、2nd ACIAキーボード入力候補として `KEY 8094-8095` も表示する。
 
 K68-VDG表示PoC用の `sbcio_vdg` profileでは、SBC-IO拡張ROMの配置に加えて K68-VDG 用の VRAM と設定レジスタを表示する。
 
@@ -136,6 +138,7 @@ MIK C300
 STK DFFF
 VRAM A000-BFFF
 VDG 8110
+KEY 8094-8095
 ROM E000-FFFF
 ]
 ```
@@ -154,6 +157,7 @@ MIK A300
 STK BFFF
 VRAM C000-DFFF
 VDG 8110
+KEY 8094-8095
 ROM E000-FFFF
 ]
 ```
@@ -170,6 +174,21 @@ OK
 ```
 
 `base` / `sbcio` profileでは `VDGTEST` は未対応コマンドとして `?` を返す。
+
+## 2nd ACIAキーボード入力PoC
+
+`KEYTEST` はSBC-IO系profile専用の受信確認コマンドである。
+SBC-IOの2nd ACIA `$8094-$8095` へ接続したKKBD-USBなどのUARTキーボードI/Fから1文字を受信し、1st ACIAの保守コンソールへ16進値と表示可能文字を出力する。
+制御文字は表示文字を `.` に置き換える。
+
+```text
+] KEYTEST
+KEY 41 A
+]
+```
+
+`base` profileでは `KEYTEST` は未対応コマンドとして `?` を返す。
+`KEYTEST` はPoC確認用であり、通常のモニタ入力、MIKBUG互換 `INEEE`、BASIC入力を2nd ACIAへ切り替えない。
 
 ## RAM確認
 
@@ -272,11 +291,19 @@ D DIR M MAP RAMTEST G L LF B C R U H F
 ]
 ```
 
-`sbcio_vdg` / `k6802_vdg` profileでは `VDGTEST` を含めて表示する。
+`sbcio` profileでは `KEYTEST` を含めて表示する。
 
 ```text
 ] H
-D DIR M MAP RAMTEST VDGTEST G L LF B C R U H F
+D DIR M MAP RAMTEST KEYTEST G L LF B C R U H F
+]
+```
+
+`sbcio_vdg` / `k6802_vdg` profileでは `VDGTEST` と `KEYTEST` を含めて表示する。
+
+```text
+] H
+D DIR M MAP RAMTEST VDGTEST KEYTEST G L LF B C R U H F
 ]
 ```
 
