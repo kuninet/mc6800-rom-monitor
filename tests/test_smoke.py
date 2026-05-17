@@ -160,19 +160,29 @@ def test_error_display():
 
 def test_help_command():
     stdout, stderr, rc = run_emu("H\r\r")
-    if is_vdg_build() and is_keyboard_build():
+    if is_sd_build() and is_vdg_build() and is_keyboard_build():
         expected = "D DIR M MAP RAMTEST VDGTEST KEYTEST G L LF B C R U H F"
-    elif is_vdg_build():
+    elif is_sd_build() and is_vdg_build():
         expected = "D DIR M MAP RAMTEST VDGTEST G L LF B C R U H F"
-    elif is_keyboard_build():
+    elif is_sd_build() and is_keyboard_build():
         expected = "D DIR M MAP RAMTEST KEYTEST G L LF B C R U H F"
-    else:
+    elif is_sd_build():
         expected = "D DIR M MAP RAMTEST G L LF B C R U H F"
+    elif is_vdg_build() and is_keyboard_build():
+        expected = "D M MAP RAMTEST VDGTEST KEYTEST G L B C R U H F"
+    elif is_vdg_build():
+        expected = "D M MAP RAMTEST VDGTEST G L B C R U H F"
+    elif is_keyboard_build():
+        expected = "D M MAP RAMTEST KEYTEST G L B C R U H F"
+    else:
+        expected = "D M MAP RAMTEST G L B C R U H F"
     assert expected in stdout, f"missing help command list: {stdout!r}"
     print("[PASS] test_help_command")
 
 
 def is_sbcio_build() -> bool:
+    if os.environ.get("BOARD_IO") in ("none", "sbcio"):
+        return os.environ["BOARD_IO"] == "sbcio"
     return (
         "-sbcio" in BUILD_ROM_PATH.stem
         or "-k6802-vdg" in BUILD_ROM_PATH.stem
@@ -181,6 +191,8 @@ def is_sbcio_build() -> bool:
 
 
 def is_vdg_build() -> bool:
+    if os.environ.get("FEATURE_VDG") in ("0", "1"):
+        return os.environ["FEATURE_VDG"] == "1"
     return (
         "-sbcio-vdg" in BUILD_ROM_PATH.stem
         or "-k6802-vdg" in BUILD_ROM_PATH.stem
@@ -189,10 +201,20 @@ def is_vdg_build() -> bool:
 
 
 def is_k6802_vdg_build() -> bool:
+    if os.environ.get("MEMORY_CONFIG") == "ram64_a000_work" and os.environ.get("FEATURE_VDG") == "1":
+        return os.environ.get("VDG_VRAM_CONFIG", "c000") == "c000"
     return "-k6802-vdg" in BUILD_ROM_PATH.stem or os.environ.get("MONITOR_PROFILE") == "k6802_vdg"
 
 
+def is_sd_build() -> bool:
+    if os.environ.get("FEATURE_SD") in ("0", "1"):
+        return os.environ["FEATURE_SD"] == "1"
+    return is_sbcio_build()
+
+
 def is_keyboard_build() -> bool:
+    if os.environ.get("FEATURE_KEYBOARD") in ("0", "1"):
+        return os.environ["FEATURE_KEYBOARD"] == "1"
     return is_sbcio_build()
 
 
@@ -245,11 +267,12 @@ def test_map_command():
             "RAM 0000-1FFF",
             "USER 0000-1FFF",
             "WORK 1C00-1FFF",
-            "SD 1C00",
             "MON 1E00",
             "MIK 1F00",
             "STK 1F42",
         ]
+        if is_sd_build():
+            expected.insert(4, "SD 1C00")
     expected.append("ROM E000-FFFF")
     for text in expected:
         assert text in stdout, f"missing MAP output {text!r}: {stdout!r}"

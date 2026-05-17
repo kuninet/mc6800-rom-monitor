@@ -18,11 +18,12 @@
 2. [workflow.md](workflow.md): Issue/PR、テスト、レビューの開発運用。
 3. [docs/requirements/monitor_requirements.md](../requirements/monitor_requirements.md): ROM モニタ全体の要件。
 4. [docs/usage/monitor_commands.md](../usage/monitor_commands.md): 現在のコマンド仕様。
-5. [docs/design/memory_map.md](../design/memory_map.md): メモリマップ。
-6. [build_configuration_axes.md](build_configuration_axes.md): ビルド構成軸とprofileプリセットの設計方針。
-7. [docs/design/architecture.md](../design/architecture.md): 全体構成。
-8. [docs/testing/windows_emulator_ci.md](../testing/windows_emulator_ci.md): エミュレータと CI の確認手順。
-9. [docs/requirements/2026-04-25_sdcard_spi_fat_requirements.md](../requirements/2026-04-25_sdcard_spi_fat_requirements.md): SD/FAT 拡張の検討結果。
+5. [docs/usage/build_commands.md](../usage/build_commands.md): profile別、ROM種別別、構成軸別のビルド手順。
+6. [docs/design/memory_map.md](../design/memory_map.md): メモリマップ。
+7. [build_configuration_axes.md](build_configuration_axes.md): ビルド構成軸とprofileプリセットの設計方針。
+8. [docs/design/architecture.md](../design/architecture.md): 全体構成。
+9. [docs/testing/windows_emulator_ci.md](../testing/windows_emulator_ci.md): エミュレータと CI の確認手順。
+10. [docs/requirements/2026-04-25_sdcard_spi_fat_requirements.md](../requirements/2026-04-25_sdcard_spi_fat_requirements.md): SD/FAT 拡張の検討結果。
 
 ## ビルド構成の扱い
 

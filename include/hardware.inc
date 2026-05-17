@@ -4,7 +4,7 @@ ROM_BASE         equ $E000
 ROM_END          equ $FFFF
 MONITOR_BASE     equ $E200
 
-        include "../build/monitor_profile.inc"
+        include "../build/monitor_config.inc"
 
 ACIA_CTRL        equ $8018
 ACIA_DATA        equ $8019
@@ -73,6 +73,7 @@ BRK_SAVE_A       equ BRK_SAVE_B+1
 BRK_SAVE_X       equ BRK_SAVE_A+1
 BRK_SAVE_PC      equ BRK_SAVE_X+2
 FILL_VALUE       equ BRK_SAVE_PC+2
+ if MONITOR_FEATURE_SD
 SD_ERROR         equ FILL_VALUE+1
 SD_LBA0          equ SD_ERROR+1
 SD_LBA1          equ SD_LBA0+1
@@ -149,11 +150,13 @@ FAT_COPY_COUNT   equ FAT_READ_PTR+2
 FAT_TMP          equ FAT_COPY_COUNT+2
 FAT_DIR_COUNT    equ FAT_TMP+1
 FAT_SECTOR_IN_CLUS equ FAT_DIR_COUNT+1
+ endif
 RAMTEST_CMP_SAFE equ $00F0
 RAMTEST_END_SAFE equ $00F2
 RAMTEST_SP_SAFE  equ $00F4
 RAMTEST_STACK_TOP equ $00EF
 
+ if MONITOR_FEATURE_SD
 SD_ERR_NONE      equ 0
 SD_ERR_TIMEOUT   equ 1
 SD_ERR_R1        equ 2
@@ -168,13 +171,16 @@ FAT_ERR_MBR      equ 3
 FAT_ERR_BPB      equ 4
 FAT_ERR_NOT_FOUND equ 5
 FAT_ERR_CHAIN    equ 6
+ endif
 
 LOAD_MODE_NONE   equ 0
 LOAD_MODE_SREC   equ 1
 LOAD_MODE_IHEX   equ 2
 
 LOAD_INPUT_ACIA  equ 0
+ if MONITOR_FEATURE_SD
 LOAD_INPUT_FAT   equ 1
+ endif
 
 ACIA_STAT_RDRF   equ $01
 ACIA_STAT_TDRE   equ $02

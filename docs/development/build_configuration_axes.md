@@ -62,40 +62,76 @@ VDGはSBC-IOとは独立した外部表示装備として扱い、VRAM範囲は 
 | `sbcio_vdg` | `ram64_c000_work` | `sbcio` | `1` | `1` | `1` | `0` | SBC-IO構成でVRAM `$A000-$BFFF` |
 | `k6802_vdg` | `ram64_a000_work` | `sbcio` | `1` | `1` | `1` | `0` | K6802-SBC向けにワークRAM `$A000-$BFFF`、VRAM `$C000-$DFFF` |
 
-`FEATURE_KEYBOARD` は2nd ACIAキーボード入力PoCの構成軸であり、該当実装が未統合の時点では将来予定を含む扱いとする。
+`FEATURE_KEYBOARD` は2nd ACIAキーボード入力PoCの構成軸であり、SBC-IOの2nd ACIA `$8094-$8095` を前提にする。
 既存profile名はユーザー向け入口として残し、`MONITOR_PROFILE=base` などのビルド互換を壊さない。
 
-## 将来のMake変数
+## Make変数
 
-将来的には、profileプリセットに加えて次のような直接指定を正式入口にできるようにする。
+profileプリセットに加えて、構成軸の直接指定を正式入口として使える。
 
 ```sh
 make bin MEMORY_CONFIG=ram64_a000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_VDG=0
 ```
 
-直接指定を実装する場合も、既存 `MONITOR_PROFILE` はプリセット展開として残す。
-直接指定とprofile指定が競合する場合の優先順位、未対応の組み合わせ、出力ファイル名の規則は、実装Issueで明示してから変更する。
+`MONITOR_PROFILE` は既存互換のプリセット入口として残し、指定されたprofileから次の既定値を展開する。
+コマンドラインまたは環境変数で構成軸を指定した場合は、その値でprofile既定値を上書きする。
+
+| 変数 | 値 | 意味 |
+| --- | --- | --- |
+| `MEMORY_CONFIG` | `base8k` / `ram64_c000_work` / `ram64_a000_work` | メモリ配置 |
+| `BOARD_IO` | `none` / `sbcio` | 外部I/O装備 |
+| `FEATURE_SD` | `0` / `1` | SD/FAT機能をROMへ入れるか |
+| `FEATURE_VDG` | `0` / `1` | K68-VDG機能をROMへ入れるか |
+| `FEATURE_KEYBOARD` | `0` / `1` | 2nd ACIAキーボード機能をROMへ入れるか |
+| `FEATURE_I2C` | `0` / `1` | I2C機能をROMへ入れるか。現時点では依存関係だけを検査する |
+| `VDG_VRAM_CONFIG` | `a000` / `c000` | VDG有効時のVRAM配置 |
+| `BUILD_CONFIG_NAME` | 任意の短い名前 | 直接指定ビルドの出力名suffixを明示する |
+
+既存profileの出力名は互換のため維持する。
+直接指定ビルドでは、`BUILD_CONFIG_NAME` があれば `build/mc6800-monitor-<BUILD_CONFIG_NAME>.bin` を生成し、未指定の場合は `MEMORY_CONFIG`、`BOARD_IO`、各 `FEATURE_*`、`VDG_VRAM_CONFIG` から一意なsuffixを生成する。
+
+```sh
+make bin MEMORY_CONFIG=ram64_a000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_VDG=1 FEATURE_KEYBOARD=1 VDG_VRAM_CONFIG=c000 BUILD_CONFIG_NAME=axis-k6802
+```
+
+上の例では `build/mc6800-monitor-axis-k6802.bin` を生成する。
+
+不正な組み合わせはMake時に失敗させる。
+`FEATURE_SD=1`、`FEATURE_KEYBOARD=1`、`FEATURE_I2C=1` は `BOARD_IO=sbcio` を必須とする。
+`FEATURE_VDG=1` は `VDG_VRAM_CONFIG` の明示的な配置を使う。
+
+アセンブル時には、Makefileが `build/monitor_config.inc` を生成し、ROM本体はこの生成ファイルだけをincludeする。
+過去の `include/profiles/*.inc` はprofileプリセットのコピー元としては使わない。
+テスト互換と段階的移行のため、`MONITOR_PROFILE_*` と `MONITOR_FEATURE_*` の既存シンボルは当面生成し続ける。
 
 ## 条件アセンブル方針
 
-機能コードは、可能な限り構成軸に従って条件アセンブルする。
+機能コードは、構成軸に従ってASLの `if` / `else` / `endif` で条件アセンブルする。
 
 - `FEATURE_SD=0` では、`DIR`、`LF`、SD、FAT32関連コードと文字列をROMから除外する。
 - `FEATURE_VDG=0` では、`VDGTEST`、VDG関連コード、VDG用文字列をROMから除外する。
 - `FEATURE_KEYBOARD=0` では、2nd ACIA初期化、`KEYTEST`、関連文字列をROMから除外する。
 - `FEATURE_I2C=0` では、I2Cドライバ、I2Cコマンド、関連文字列をROMから除外する。
 
-ただし、条件アセンブルによるROMサイズ整理は段階的に行う。
-既存コマンドの互換性、エミュレータテスト、実機確認手順を壊さないよう、機能ごとに小さいIssueへ分割する。
+無効な機能はdispatch上で未定義コマンドになり、従来どおり `?` を返す。
+同時に、コマンド本体、内部ルーチン、関連文字列はROMから除外する。
+listingのsymbol tableでも、無効機能の内部ラベルは原則として出ないことを期待する。
+
+I2C本体は未実装であり、現時点では構成軸と `BOARD_IO=sbcio` 依存関係だけを導入する。
 
 ## MAP表示方針
 
-`MAP` はprofile名だけでなく、構成軸の結果を説明できる表示へ拡張する。
-将来の表示では、少なくとも次を確認できるようにする。
+`MAP` はprofile名互換の見出しを維持しつつ、構成軸の結果を表示する。
+少なくとも次を確認できるようにする。
 
 - メモリ構成。
 - 外部I/O装備。
 - 有効な機能。
 - RAM、ワークRAM、SDバッファ、VRAM、主要I/Oアドレス、ROM範囲。
 
-表示形式は実装Issueで決めるが、profile名だけを根拠に機能やメモリ配置を推測しない。
+`FEATURE_SD=0` では `SD xxxx` 行を表示しない。
+`FEATURE_VDG=0` では `VRAM xxxx-yyyy` と `VDG xxxx` 行を表示しない。
+`FEATURE_KEYBOARD=0` では `KEY 8094-8095` 行を表示しない。
+
+後続Issueで、見出しを `MEM` / `IO` / `FEAT` 形式へ拡張できるようにする。
+ただし、profile名だけを根拠に機能やメモリ配置を推測する設計へ戻さない。

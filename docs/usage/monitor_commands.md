@@ -19,15 +19,15 @@
 | `D` | 継続アドレスから 64 バイト分をダンプする |
 | `Dssss` | `ssss` から 64 バイト分をダンプする |
 | `Dssss-eeee` | `ssss` から `eeee` までをダンプする |
-| `DIR` | SDカード上のroot directoryにある8.3通常ファイルを表示する |
+| `DIR` | SDカード上のroot directoryにある8.3通常ファイルを表示する。`FEATURE_SD=1` のROMだけで有効 |
 | `Mssss` | `ssss` からメモリを変更する |
 | `MAP` | 現在のビルドが想定する主要メモリ配置を表示する |
 | `RAMTEST ssss-eeee` | 許可された明示範囲のRAMを破壊テストする |
-| `VDGTEST` | VDG有効profileでK68-VDG画面をクリアし固定文字列を表示する |
-| `KEYTEST` | SBC-IO系profileで2nd ACIAのキーボード受信文字を表示する |
+| `VDGTEST` | `FEATURE_VDG=1` のROMでK68-VDG画面をクリアし固定文字列を表示する |
+| `KEYTEST` | `FEATURE_KEYBOARD=1` のROMで2nd ACIAのキーボード受信文字を表示する |
 | `Gssss` | `ssss` へジャンプして実行する |
 | `L` | S-Record または Intel HEX をロードする |
-| `LF filename` | SDカード上の8.3名ファイルを検索して開く |
+| `LF filename` | SDカード上の8.3名ファイルを検索して開く。`FEATURE_SD=1` のROMだけで有効 |
 | `H` | コマンド一覧を表示する |
 | `Fssss-eeee vv` | `ssss` から `eeee` までを `vv` で埋める |
 | `B` | 現在のブレークポイント状態を表示する |
@@ -113,7 +113,6 @@ MAP BASE
 RAM 0000-1FFF
 USER 0000-1FFF
 WORK 1C00-1FFF
-SD 1C00
 MON 1E00
 MIK 1F00
 STK 1F42
@@ -121,8 +120,10 @@ ROM E000-FFFF
 ]
 ```
 
+`base` profileは `FEATURE_SD=0`、`FEATURE_VDG=0`、`FEATURE_KEYBOARD=0` のため、SD、VDG、KEYの行を表示しない。
+
 SBC-IO拡張ROMでは `MAP SBCIO` と表示され、`WORK C000-DFFF`、`SD C000`、`MON C200`、`MIK C300`、`STK DFFF` などの拡張RAM前提の配置になる。
-SBC-IO系profileでは、2nd ACIAキーボード入力候補として `KEY 8094-8095` も表示する。
+`FEATURE_KEYBOARD=1` のROMでは、2nd ACIAキーボード入力候補として `KEY 8094-8095` も表示する。
 
 K68-VDG表示PoC用の `sbcio_vdg` profileでは、SBC-IO拡張ROMの配置に加えて K68-VDG 用の VRAM と設定レジスタを表示する。
 
@@ -164,7 +165,7 @@ ROM E000-FFFF
 
 ## K68-VDG表示PoC
 
-`VDGTEST` は VDG有効profile専用の表示確認コマンドである。K68-VDG の設定レジスタ `$8110` に VDG mode `$00` を書き込み、画面範囲を `$60` でクリアした後、VRAM先頭から `MC6800 MONITOR K68-VDG` を書く。
+`VDGTEST` は `FEATURE_VDG=1` のROM専用の表示確認コマンドである。K68-VDG の設定レジスタ `$8110` に VDG mode `$00` を書き込み、画面範囲を `$60` でクリアした後、VRAM先頭から `MC6800 MONITOR K68-VDG` を書く。
 `sbcio_vdg` では `$A000-$A1FF` をクリアして `$A000` へ書き、`k6802_vdg` では `$C000-$C1FF` をクリアして `$C000` へ書く。
 
 ```text
@@ -173,11 +174,11 @@ OK
 ]
 ```
 
-`base` / `sbcio` profileでは `VDGTEST` は未対応コマンドとして `?` を返す。
+`FEATURE_VDG=0` のROMでは `VDGTEST` のコマンド本体をROMに入れず、未対応コマンドとして `?` を返す。
 
 ## 2nd ACIAキーボード入力PoC
 
-`KEYTEST` はSBC-IO系profile専用の受信確認コマンドである。
+`KEYTEST` は `FEATURE_KEYBOARD=1` のROM専用の受信確認コマンドである。
 SBC-IOの2nd ACIA `$8094-$8095` へ接続したKKBD-USBなどのUARTキーボードI/Fから1文字を受信し、1st ACIAの保守コンソールへ16進値と表示可能文字を出力する。
 制御文字は表示文字を `.` に置き換える。
 
@@ -187,7 +188,7 @@ KEY 41 A
 ]
 ```
 
-`base` profileでは `KEYTEST` は未対応コマンドとして `?` を返す。
+`FEATURE_KEYBOARD=0` のROMでは `KEYTEST` のコマンド本体をROMに入れず、未対応コマンドとして `?` を返す。
 `KEYTEST` はPoC確認用であり、通常のモニタ入力、MIKBUG互換 `INEEE`、BASIC入力を2nd ACIAへ切り替えない。
 
 ## RAM確認
@@ -254,7 +255,7 @@ OK
 ロード処理はレコードを受信しながら解析する。
 ロード中の進捗表示は速度を優先して行わず、正常終了時は `OK`、異常時は `?S1` から `?S5`、または `?I1` から `?I5` を表示する。
 
-`LF filename` はSDカード上のroot directoryから8.3 short filenameのファイルを検索し、S-RecordまたはIntel HEXとしてロードする。
+`LF filename` は `FEATURE_SD=1` のROMで、SDカード上のroot directoryから8.3 short filenameのファイルを検索し、S-RecordまたはIntel HEXとしてロードする。
 既存の `L` とは別の入口だが、レコード解析とRAM書き込みは同じローダ処理を使う。
 
 ```text
@@ -265,10 +266,11 @@ OK
 
 ファイル名の前後の空白は無視する。subdirectory、LFN、wildcardは対象外である。
 LOAD後の自動実行は行わない。必要に応じて `Gssss` で開始アドレスへジャンプする。
+`FEATURE_SD=0` のROMでは `LF` のコマンド本体をROMに入れず、未対応コマンドとして `?` を返す。
 
 ## SD directory
 
-`DIR` はSDカード上のroot directoryにある8.3通常ファイルを表示する。
+`DIR` は `FEATURE_SD=1` のROMで、SDカード上のroot directoryにある8.3通常ファイルを表示する。
 LFN、削除entry、volume label、subdirectoryは表示しない。
 
 ```text
@@ -280,6 +282,7 @@ MULTI.BIN A 00000400
 ```
 
 サイズは8桁16進で表示する。`DIR` は `D` dumpとは別コマンドであり、従来の `D0100` や `D0100-011F` はそのまま使える。
+`FEATURE_SD=0` のROMでは `DIR` のコマンド本体をROMに入れず、`D` dump以外の未対応入力として `?` を返す。
 
 ## ヘルプ
 
@@ -287,11 +290,19 @@ MULTI.BIN A 00000400
 
 ```text
 ] H
+D M MAP RAMTEST G L B C R U H F
+]
+```
+
+`FEATURE_SD=1` のROMでは `DIR` と `LF` を含めて表示する。
+
+```text
+] H
 D DIR M MAP RAMTEST G L LF B C R U H F
 ]
 ```
 
-`sbcio` profileでは `KEYTEST` を含めて表示する。
+`FEATURE_KEYBOARD=1` のROMでは `KEYTEST` を含めて表示する。
 
 ```text
 ] H
@@ -299,7 +310,7 @@ D DIR M MAP RAMTEST KEYTEST G L LF B C R U H F
 ]
 ```
 
-`sbcio_vdg` / `k6802_vdg` profileでは `VDGTEST` と `KEYTEST` を含めて表示する。
+`FEATURE_VDG=1` かつ `FEATURE_KEYBOARD=1` のROMでは `VDGTEST` と `KEYTEST` を含めて表示する。
 
 ```text
 ] H

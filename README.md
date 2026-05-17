@@ -76,12 +76,14 @@ MIKBUG 全体の完全互換は狙いませんが、電大版 BASIC が利用す
 
 ## ビルド
 
-現在のフェーズ1では GNU make から次の生成物を作れるようにしています。
+GNU make から次の生成物を作れるようにしています。
 
 - `make srec`: Motorola S-record を生成
 - `make ihex`: Intel HEX を生成
 - `make bin`: ROM イメージのバイナリを生成
 - `make`: S-record と Intel HEX をまとめて生成
+
+profile別、ROM種別別、構成軸の直接指定を含む詳しいビルド手順は [docs/usage/build_commands.md](docs/usage/build_commands.md) を参照してください。
 
 SBC6800 前提の現在値:
 

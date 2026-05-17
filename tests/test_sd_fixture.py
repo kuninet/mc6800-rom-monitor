@@ -263,6 +263,8 @@ def _load_symbol_addresses(*names: str) -> dict[str, int]:
 
 
 def _is_sbcio_build() -> bool:
+    if os.environ.get("BOARD_IO") in ("none", "sbcio"):
+        return os.environ["BOARD_IO"] == "sbcio"
     return (
         "-sbcio" in BUILD_ROM_PATH.stem
         or "-k6802-vdg" in BUILD_ROM_PATH.stem
@@ -271,6 +273,8 @@ def _is_sbcio_build() -> bool:
 
 
 def _is_vdg_build() -> bool:
+    if os.environ.get("FEATURE_VDG") in ("0", "1"):
+        return os.environ["FEATURE_VDG"] == "1"
     return (
         "-sbcio-vdg" in BUILD_ROM_PATH.stem
         or "-k6802-vdg" in BUILD_ROM_PATH.stem
@@ -279,7 +283,15 @@ def _is_vdg_build() -> bool:
 
 
 def _is_k6802_vdg_build() -> bool:
+    if os.environ.get("MEMORY_CONFIG") == "ram64_a000_work" and os.environ.get("FEATURE_VDG") == "1":
+        return os.environ.get("VDG_VRAM_CONFIG", "c000") == "c000"
     return "-k6802-vdg" in BUILD_ROM_PATH.stem or os.environ.get("MONITOR_PROFILE") == "k6802_vdg"
+
+
+def _is_sd_build() -> bool:
+    if os.environ.get("FEATURE_SD") in ("0", "1"):
+        return os.environ["FEATURE_SD"] == "1"
+    return _is_sbcio_build()
 
 
 def _run_emu_with_sd(input_text: str, sd_image: bytes, max_cycles: int = 30_000_000) -> tuple[str, str, int]:
@@ -435,6 +447,10 @@ def test_pia_bitbang_reads_known_sector() -> None:
 
 
 def test_rom_sd_read_sector_reads_known_fixture_sector() -> None:
+    if not _is_sd_build():
+        print("[SKIP] test_rom_sd_read_sector_reads_known_fixture_sector")
+        return
+
     image = build_fat32_image(with_mbr=True)
     layout = layout_for_image(with_mbr=True)
     symbols = _load_symbol_addresses(
@@ -477,18 +493,19 @@ def test_rom_sd_read_sector_reads_known_fixture_sector() -> None:
 
 
 def test_rom_profile_memory_layout() -> None:
-    symbols = _load_symbol_addresses(
-        "SD_SECTOR_BUF",
+    names = [
+        "MONITOR_FEATURE_SD",
         "MONITOR_RAM_BASE",
-        "FAT_SECTOR_IN_CLUS",
         "USER_RAM_END",
         "WORK_RAM_START",
         "WORK_RAM_END",
         "MONITOR_FEATURE_VDG",
-        "VDG_CTL",
-        "VDG_VRAM_START",
-        "VDG_VRAM_END",
-    )
+    ]
+    if _is_sd_build():
+        names.extend(["SD_SECTOR_BUF", "FAT_SECTOR_IN_CLUS"])
+    if _is_vdg_build():
+        names.extend(["VDG_CTL", "VDG_VRAM_START", "VDG_VRAM_END"])
+    symbols = _load_symbol_addresses(*names)
     if _is_k6802_vdg_build():
         expected_sector_buf = 0xA000
         expected_monitor_base = 0xA200
@@ -508,10 +525,12 @@ def test_rom_profile_memory_layout() -> None:
         expected_work_start = 0x1C00
         expected_work_end = 0x1FFF
 
-    assert symbols["SD_SECTOR_BUF"] == expected_sector_buf, (
-        f"SD_SECTOR_BUF mismatch: got={symbols['SD_SECTOR_BUF']:04X} "
-        f"expected={expected_sector_buf:04X}"
-    )
+    assert symbols["MONITOR_FEATURE_SD"] == (1 if _is_sd_build() else 0), "SD feature flag mismatch"
+    if _is_sd_build():
+        assert symbols["SD_SECTOR_BUF"] == expected_sector_buf, (
+            f"SD_SECTOR_BUF mismatch: got={symbols['SD_SECTOR_BUF']:04X} "
+            f"expected={expected_sector_buf:04X}"
+        )
     assert symbols["MONITOR_RAM_BASE"] == expected_monitor_base, (
         f"MONITOR_RAM_BASE mismatch: got={symbols['MONITOR_RAM_BASE']:04X} "
         f"expected={expected_monitor_base:04X}"
@@ -528,11 +547,13 @@ def test_rom_profile_memory_layout() -> None:
         f"WORK_RAM_END mismatch: got={symbols['WORK_RAM_END']:04X} "
         f"expected={expected_work_end:04X}"
     )
-    assert symbols["WORK_RAM_START"] <= symbols["SD_SECTOR_BUF"] <= symbols["WORK_RAM_END"]
+    if _is_sd_build():
+        assert symbols["WORK_RAM_START"] <= symbols["SD_SECTOR_BUF"] <= symbols["WORK_RAM_END"]
     assert symbols["WORK_RAM_START"] <= symbols["MONITOR_RAM_BASE"] <= symbols["WORK_RAM_END"]
-    assert symbols["SD_SECTOR_BUF"] + SECTOR_SIZE <= symbols["MONITOR_RAM_BASE"], (
-        "SD sector buffer must not overlap monitor work area"
-    )
+    if _is_sd_build():
+        assert symbols["SD_SECTOR_BUF"] + SECTOR_SIZE <= symbols["MONITOR_RAM_BASE"], (
+            "SD sector buffer must not overlap monitor work area"
+        )
     if _is_vdg_build():
         expected_vram_start = 0xC000 if _is_k6802_vdg_build() else 0xA000
         expected_vram_end = 0xDFFF if _is_k6802_vdg_build() else 0xBFFF
@@ -554,33 +575,31 @@ def test_rom_profile_memory_layout() -> None:
         )
     else:
         assert symbols["MONITOR_FEATURE_VDG"] == 0, "non-VDG profiles must keep VDG disabled"
-    if _is_sbcio_build():
+    if _is_sd_build():
         assert symbols["FAT_SECTOR_IN_CLUS"] <= symbols["WORK_RAM_END"], (
-            "SBC-IO work variables must stay under WORK_RAM_END"
-        )
-    else:
-        assert symbols["FAT_SECTOR_IN_CLUS"] <= symbols["WORK_RAM_END"], (
-            "base work variables must stay inside 8KB RAM"
+            "SD/FAT work variables must stay under WORK_RAM_END"
         )
     print("[PASS] test_rom_profile_memory_layout")
 
 
 def test_rom_map_command_matches_profile_symbols() -> None:
-    symbols = _load_symbol_addresses(
+    names = [
         "RAM_START",
         "RAM_END",
         "USER_RAM_END",
         "WORK_RAM_START",
         "WORK_RAM_END",
-        "SD_SECTOR_BUF",
         "MONITOR_RAM_BASE",
         "MIKBUG_VAR_BASE",
         "STACK_TOP",
         "ROM_BASE",
         "ROM_END",
-        "VDG_VRAM_START",
-        "VDG_VRAM_END",
-    )
+    ]
+    if _is_sd_build():
+        names.append("SD_SECTOR_BUF")
+    if _is_vdg_build():
+        names.extend(["VDG_VRAM_START", "VDG_VRAM_END"])
+    symbols = _load_symbol_addresses(*names)
     stdout, stderr, rc = _run_emu_with_sd("MAP\r\r", build_fat32_image(with_mbr=True))
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
     if _is_k6802_vdg_build():
@@ -596,18 +615,33 @@ def test_rom_map_command_matches_profile_symbols() -> None:
         f"RAM {symbols['RAM_START']:04X}-{symbols['RAM_END']:04X}",
         f"USER {symbols['RAM_START']:04X}-{symbols['USER_RAM_END']:04X}",
         f"WORK {symbols['WORK_RAM_START']:04X}-{symbols['WORK_RAM_END']:04X}",
-        f"SD {symbols['SD_SECTOR_BUF']:04X}",
         f"MON {symbols['MONITOR_RAM_BASE']:04X}",
         f"MIK {symbols['MIKBUG_VAR_BASE']:04X}",
         f"STK {symbols['STACK_TOP']:04X}",
         f"ROM {symbols['ROM_BASE']:04X}-{symbols['ROM_END']:04X}",
     ]
+    if _is_sd_build():
+        expected_lines.insert(4, f"SD {symbols['SD_SECTOR_BUF']:04X}")
     if _is_vdg_build():
         expected_lines.insert(-1, f"VRAM {symbols['VDG_VRAM_START']:04X}-{symbols['VDG_VRAM_END']:04X}")
         expected_lines.insert(-1, "VDG 8110")
     for line in expected_lines:
         assert line in stdout, f"missing MAP line {line!r}: {stdout!r}"
     print("[PASS] test_rom_map_command_matches_profile_symbols")
+
+
+def test_rom_sd_commands_disabled_without_feature() -> None:
+    if _is_sd_build():
+        print("[SKIP] test_rom_sd_commands_disabled_without_feature")
+        return
+
+    stdout, stderr, rc = _run_emu_with_sd("DIR\rLF TEST.S\rMAP\r\r", build_fat32_image(with_mbr=True))
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert stdout.count("?") >= 2, f"SD commands should be rejected when FEATURE_SD=0: {stdout!r}"
+    assert "SD 1C00" not in stdout and "SD C000" not in stdout and "SD A000" not in stdout, (
+        f"MAP should not show SD line when FEATURE_SD=0: {stdout!r}"
+    )
+    print("[PASS] test_rom_sd_commands_disabled_without_feature")
 
 
 def assert_rom_fat32_mount_layout(with_mbr: bool) -> None:
@@ -908,26 +942,31 @@ def main() -> None:
         test_sdcard_command_sequence_reads_known_sector,
         test_sdcard_cs_release_discards_pending_response,
         test_pia_bitbang_reads_known_sector,
-        test_rom_sd_read_sector_reads_known_fixture_sector,
         test_rom_profile_memory_layout,
         test_rom_map_command_matches_profile_symbols,
-        test_rom_fat32_mount_reads_mbr_bpb_layout,
-        test_rom_fat32_mount_reads_superfloppy_bpb_layout,
-        test_rom_fat32_find_and_read_multicluster_file,
-        test_rom_fat32_find_and_read_multisector_cluster_file,
-        test_rom_fat32_find_and_read_multisector_cluster_chain_file,
-        test_rom_fat32_find_respects_file_size,
-        test_rom_fat32_find_chained_root_entry,
-        test_rom_dir_command_lists_root_files,
-        test_rom_dir_keeps_dump_command,
-        test_rom_lf_command_opens_83_files_only,
-        test_rom_lf_file_eof_does_not_wait_for_acia,
-        test_rom_lf_reads_small_file_from_multisector_cluster,
-        test_rom_lf_reads_file_across_sector_inside_cluster,
-        test_rom_lf_reads_file_across_cluster_boundary_multisector_cluster,
-        test_sbcio_sd_fat_ignores_old_low_ram_work_area,
-        test_sbcio_ramtest_preserves_sd_fat_work_area,
     ]
+    if _is_sd_build():
+        tests.extend([
+            test_rom_sd_read_sector_reads_known_fixture_sector,
+            test_rom_fat32_mount_reads_mbr_bpb_layout,
+            test_rom_fat32_mount_reads_superfloppy_bpb_layout,
+            test_rom_fat32_find_and_read_multicluster_file,
+            test_rom_fat32_find_and_read_multisector_cluster_file,
+            test_rom_fat32_find_and_read_multisector_cluster_chain_file,
+            test_rom_fat32_find_respects_file_size,
+            test_rom_fat32_find_chained_root_entry,
+            test_rom_dir_command_lists_root_files,
+            test_rom_dir_keeps_dump_command,
+            test_rom_lf_command_opens_83_files_only,
+            test_rom_lf_file_eof_does_not_wait_for_acia,
+            test_rom_lf_reads_small_file_from_multisector_cluster,
+            test_rom_lf_reads_file_across_sector_inside_cluster,
+            test_rom_lf_reads_file_across_cluster_boundary_multisector_cluster,
+            test_sbcio_sd_fat_ignores_old_low_ram_work_area,
+            test_sbcio_ramtest_preserves_sd_fat_work_area,
+        ])
+    else:
+        tests.append(test_rom_sd_commands_disabled_without_feature)
 
     passed = 0
     failed = 0
