@@ -19,9 +19,18 @@
 3. [docs/requirements/monitor_requirements.md](../requirements/monitor_requirements.md): ROM モニタ全体の要件。
 4. [docs/usage/monitor_commands.md](../usage/monitor_commands.md): 現在のコマンド仕様。
 5. [docs/design/memory_map.md](../design/memory_map.md): メモリマップ。
-6. [docs/design/architecture.md](../design/architecture.md): 全体構成。
-7. [docs/testing/windows_emulator_ci.md](../testing/windows_emulator_ci.md): エミュレータと CI の確認手順。
-8. [docs/requirements/2026-04-25_sdcard_spi_fat_requirements.md](../requirements/2026-04-25_sdcard_spi_fat_requirements.md): SD/FAT 拡張の検討結果。
+6. [build_configuration_axes.md](build_configuration_axes.md): ビルド構成軸とprofileプリセットの設計方針。
+7. [docs/design/architecture.md](../design/architecture.md): 全体構成。
+8. [docs/testing/windows_emulator_ci.md](../testing/windows_emulator_ci.md): エミュレータと CI の確認手順。
+9. [docs/requirements/2026-04-25_sdcard_spi_fat_requirements.md](../requirements/2026-04-25_sdcard_spi_fat_requirements.md): SD/FAT 拡張の検討結果。
+
+## ビルド構成の扱い
+
+今後の機能追加では、`MONITOR_PROFILE` だけで設計を閉じない。
+`MONITOR_PROFILE` は互換用・ユーザー向けの完成品プリセットとして扱い、実際の設計判断は [build_configuration_axes.md](build_configuration_axes.md) の `MEMORY_CONFIG`、`BOARD_IO`、`FEATURE_*` の組み合わせで整理する。
+
+SD、VDG、2nd ACIAキーボード、I2Cなどの機能追加Issueでは、計画時にメモリ配置、外部I/F装備、機能フラグ、依存関係、条件アセンブル対象を確認する。
+profile名だけを根拠に、SD/FAT、VDG、I2C、キーボード機能の有無やメモリ範囲を決めない。
 
 ## テストとCI
 

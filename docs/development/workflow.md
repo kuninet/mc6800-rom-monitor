@@ -47,6 +47,20 @@ Issue は、実装・レビュー・テストが独立して判断できる単�
 - PoC の評価、既存実装の確認、修正しない判断など、後続作業で誤解されやすい内容は計画文書に明記する。
 - 小さな自明修正では計画文書を省略してよいが、SD/FAT関連やデバッグ機能のように後続Issueへ影響する作業では原則として残す。
 
+## 機能追加時のビルド構成確認
+
+SD、VDG、2nd ACIAキーボード、I2Cなど、メモリ配置や外部I/F装備に依存する機能を追加または変更する場合は、計画時に [build_configuration_axes.md](build_configuration_axes.md) を参照する。
+`MONITOR_PROFILE` は完成品プリセットとして扱い、profile名だけで設計を閉じない。
+
+Issue計画には、必要に応じて次を明記する。
+
+- `MEMORY_CONFIG` と、RAM、ワークRAM、スタック、SD/FATワーク、VRAMの配置。
+- `BOARD_IO` と、必要なI/Oアドレスや外部基板。
+- `FEATURE_SD`、`FEATURE_VDG`、`FEATURE_KEYBOARD`、`FEATURE_I2C` などの有効/無効。
+- 機能間の依存関係。特にSBC-IOが必要な機能と、SBC-IOとは独立した機能を分ける。
+- 非対応profileで実行時に `?` を返すだけでよいか、条件アセンブルでROMから除外するか。
+- `MAP`、`H`、smoke test、SD fixture test、実機確認手順への影響。
+
 ## PR の作り方
 
 PR は対応 Issue 単位で作る。PR 本文には次を必ず書く。
