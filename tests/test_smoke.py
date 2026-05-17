@@ -12,9 +12,19 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 EMU_PATH = PROJECT_ROOT / "emu" / "sbc6800_emu.py"
-DEFAULT_BUILD_ROM_PATH = PROJECT_ROOT / "build" / "mc6800-monitor.bin"
 FIXTURE_ROM_PATH = PROJECT_ROOT / "tests" / "fixtures" / "mc6800-monitor.bin"
 DATAPACK_DIR = PROJECT_ROOT / "third_party" / "sbc6800_datapack"
+
+
+def _default_build_rom_path() -> Path:
+    suffix_by_profile = {
+        "base": "",
+        "sbcio": "-sbcio",
+        "sbcio_vdg": "-sbcio-vdg",
+        "k6802_vdg": "-k6802-vdg",
+    }
+    suffix = suffix_by_profile.get(os.environ.get("MONITOR_PROFILE", "base"), "")
+    return PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin"
 
 
 def _path_from_env(name: str, default: Path) -> Path:
@@ -27,7 +37,7 @@ def _path_from_env(name: str, default: Path) -> Path:
     return path
 
 
-BUILD_ROM_PATH = _path_from_env("MONITOR_ROM_PATH", DEFAULT_BUILD_ROM_PATH)
+BUILD_ROM_PATH = _path_from_env("MONITOR_ROM_PATH", _default_build_rom_path())
 
 
 def rom_path() -> Path:
@@ -140,18 +150,64 @@ def test_error_display():
 
 def test_help_command():
     stdout, stderr, rc = run_emu("H\r\r")
-    assert "D DIR M MAP RAMTEST G L LF B C R U H F" in stdout, f"missing help command list: {stdout!r}"
+    if is_vdg_build():
+        expected = "D DIR M MAP RAMTEST VDGTEST G L LF B C R U H F"
+    else:
+        expected = "D DIR M MAP RAMTEST G L LF B C R U H F"
+    assert expected in stdout, f"missing help command list: {stdout!r}"
     print("[PASS] test_help_command")
 
 
 def is_sbcio_build() -> bool:
-    return "-sbcio" in BUILD_ROM_PATH.stem or os.environ.get("MONITOR_PROFILE") == "sbcio"
+    return (
+        "-sbcio" in BUILD_ROM_PATH.stem
+        or "-k6802-vdg" in BUILD_ROM_PATH.stem
+        or os.environ.get("MONITOR_PROFILE") in ("sbcio", "sbcio_vdg", "k6802_vdg")
+    )
+
+
+def is_vdg_build() -> bool:
+    return (
+        "-sbcio-vdg" in BUILD_ROM_PATH.stem
+        or "-k6802-vdg" in BUILD_ROM_PATH.stem
+        or os.environ.get("MONITOR_PROFILE") in ("sbcio_vdg", "k6802_vdg")
+    )
+
+
+def is_k6802_vdg_build() -> bool:
+    return "-k6802-vdg" in BUILD_ROM_PATH.stem or os.environ.get("MONITOR_PROFILE") == "k6802_vdg"
 
 
 def test_map_command():
     stdout, stderr, rc = run_emu("F0100-0103 5A\rMAP\rD0100-0103\r\r", max_cycles=5_000_000)
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
-    if is_sbcio_build():
+    if is_k6802_vdg_build():
+        expected = [
+            "MAP K6802 VDG",
+            "RAM 0000-7FFF",
+            "USER 0000-7FFF",
+            "WORK A000-BFFF",
+            "SD A000",
+            "MON A200",
+            "MIK A300",
+            "STK BFFF",
+            "VRAM C000-DFFF",
+            "VDG 8110",
+        ]
+    elif is_vdg_build():
+        expected = [
+            "MAP SBCIO VDG",
+            "RAM 0000-7FFF",
+            "USER 0000-7FFF",
+            "WORK C000-DFFF",
+            "SD C000",
+            "MON C200",
+            "MIK C300",
+            "STK DFFF",
+            "VRAM A000-BFFF",
+            "VDG 8110",
+        ]
+    elif is_sbcio_build():
         expected = [
             "MAP SBCIO",
             "RAM 0000-7FFF",
@@ -178,6 +234,29 @@ def test_map_command():
         assert text in stdout, f"missing MAP output {text!r}: {stdout!r}"
     assert "0100 5A 5A 5A 5A" in stdout, f"MAP should not modify user RAM: {stdout!r}"
     print("[PASS] test_map_command")
+
+
+def test_vdgtest_command():
+    vram_start = "C000" if is_k6802_vdg_build() else "A000"
+    vram_dump_end = "C017" if is_k6802_vdg_build() else "A017"
+    vram_next = "C010" if is_k6802_vdg_build() else "A010"
+    stdout, stderr, rc = run_emu(
+        f"F8110-8110 5A\rVDGTEST\rD8110-8110\rD{vram_start}-{vram_dump_end}\r\r",
+        max_cycles=10_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    if is_vdg_build():
+        assert "OK" in stdout, f"VDGTEST should report OK: {stdout!r}"
+        assert "8110 00" in stdout, f"VDGTEST should write VDG mode to 8110: {stdout!r}"
+        assert f"{vram_start} 4D 43 36 38 30 30 20 4D 4F 4E 49 54 4F 52 20 4B" in stdout, (
+            f"VDGTEST should write message at {vram_start}: {stdout!r}"
+        )
+        assert f"{vram_next} 36 38 2D 56 44 47 60 60" in stdout, (
+            f"VDGTEST should leave cleared screen bytes after message: {stdout!r}"
+        )
+    else:
+        assert "?" in stdout, f"non-VDG builds should reject VDGTEST: {stdout!r}"
+    print("[PASS] test_vdgtest_command")
 
 
 def test_ramtest_command():
@@ -214,7 +293,21 @@ def test_ramtest_command():
     )
     stdout, stderr, rc = run_emu(input_text, max_cycles=80_000_000)
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
-    if is_sbcio_build():
+    if is_k6802_vdg_build():
+        assert "RAMTEST 0100-1BFF" in stdout, f"missing low RAMTEST range echo: {stdout!r}"
+        assert "RAMTEST 0100-01FF" in stdout, f"missing low subrange echo: {stdout!r}"
+        assert "RAMTEST 1BFF-2000" in stdout, f"missing low boundary-crossing RAM echo: {stdout!r}"
+        assert "RAMTEST 0100-7FFF" in stdout, f"missing low full RAM range echo: {stdout!r}"
+        assert "RAMTEST 2000-7FFF" in stdout, f"missing extended RAMTEST range echo: {stdout!r}"
+        assert "RAMTEST 2000-3FFF" in stdout, f"missing extended subrange echo: {stdout!r}"
+        assert "RAMTEST 4000-7FFF" in stdout, f"missing upper extended subrange echo: {stdout!r}"
+        assert "RAMTEST A000-BFFF" in stdout, f"missing K6802 work RAMTEST range echo: {stdout!r}"
+        assert "RAMTEST C000-DFFF\nOK" not in stdout, f"K6802 VRAM range must be rejected: {stdout!r}"
+        assert "RAMTEST C200-C2FF\nOK" not in stdout, f"K6802 VRAM subrange must be rejected: {stdout!r}"
+        assert stdout.count("OK") >= 8, f"K6802 RAMTEST ranges should pass in emulator: {stdout!r}"
+        assert "NG" not in stdout, f"K6802 RAMTEST should not report NG: {stdout!r}"
+        assert stdout.count("?") >= 15, f"invalid RAMTEST forms and VRAM ranges should be rejected: {stdout!r}"
+    elif is_sbcio_build():
         assert "RAMTEST 0100-1BFF" in stdout, f"missing low RAMTEST range echo: {stdout!r}"
         assert "RAMTEST 0100-01FF" in stdout, f"missing low subrange echo: {stdout!r}"
         assert "RAMTEST 1BFF-2000" in stdout, f"missing low boundary-crossing RAM echo: {stdout!r}"
@@ -319,12 +412,13 @@ def test_breakpoint_resume_restores_user_sp():
 
 
 def test_ramtest_does_not_break_resume_state():
+    work_range = "A000-BFFF" if is_k6802_vdg_build() else "C000-DFFF"
     input_text = (
         "M0100\r"
         "86\r42\rB7\r01\r20\r86\r99\rB7\r01\r21\r3F\r.\r"
         "B0105\r"
         "G0100\r"
-        "RAMTEST C000-DFFF\r"
+        f"RAMTEST {work_range}\r"
         "R\r"
         "D0120-0121\r"
         "\r"
@@ -333,7 +427,7 @@ def test_ramtest_does_not_break_resume_state():
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
     assert "BRK 0105" in stdout, f"missing breakpoint hit: {stdout!r}"
     if is_sbcio_build():
-        assert "RAMTEST C000-DFFF" in stdout and "OK" in stdout, f"SBCIO RAMTEST should run: {stdout!r}"
+        assert f"RAMTEST {work_range}" in stdout and "OK" in stdout, f"SBCIO RAMTEST should run: {stdout!r}"
     else:
         assert "OK" not in stdout, f"base should reject C000-DFFF RAMTEST: {stdout!r}"
     assert "0120 42 99" in stdout, f"resume state was broken by RAMTEST handling: {stdout!r}"
@@ -408,6 +502,7 @@ def main():
         test_error_display,
         test_help_command,
         test_map_command,
+        test_vdgtest_command,
         test_ramtest_command,
         test_breakpoint_query,
         test_breakpoint_resume_and_clear,
