@@ -43,6 +43,10 @@ OUTEEE:
 MONITOR_ENTRY:
         lds     #STACK_TOP
         jsr     ACIA_INIT
+        ldaa    #MONITOR_FEATURE_KEYBOARD
+        beq     MONITOR_ENTRY_NO_KEYBOARD
+        jsr     ACIA2_INIT
+MONITOR_ENTRY_NO_KEYBOARD:
         jmp     MAIN_LOOP
 
 RESET:
@@ -52,6 +56,10 @@ RESET:
         clr     BP_ACTIVE
         clr     BRK_ACTIVE
         jsr     ACIA_INIT
+        ldaa    #MONITOR_FEATURE_KEYBOARD
+        beq     RESET_NO_KEYBOARD
+        jsr     ACIA2_INIT
+RESET_NO_KEYBOARD:
         ldx     #TXT_WELCOME
         jsr     PDATA1
         ldaa    #CHR_CR
@@ -117,8 +125,12 @@ CHK_CMD_FILL:
         jmp     CMD_FILL
 CHK_CMD_VDGTEST:
         cmpa    #'V'
-        bne     MAIN_LOOP_ERROR
+        bne     CHK_CMD_KEYTEST
         jmp     CMD_VDGTEST
+CHK_CMD_KEYTEST:
+        cmpa    #'K'
+        bne     MAIN_LOOP_ERROR
+        jmp     CMD_KEYTEST
 
 MAIN_LOOP_ERROR:
         jsr     SHOW_ERROR
@@ -895,8 +907,18 @@ CMD_HELP:
         cmpb    #1
         bne     CMD_HELP_ERR
         ldaa    #MONITOR_FEATURE_VDG
-        beq     CMD_HELP_BASE
+        beq     CMD_HELP_NO_VDG
+        ldaa    #MONITOR_FEATURE_KEYBOARD
+        beq     CMD_HELP_VDG_ONLY
+        ldx     #TXT_HELP_VDG_KEYBOARD
+        bra     CMD_HELP_PRINT
+CMD_HELP_VDG_ONLY:
         ldx     #TXT_HELP_VDG
+        bra     CMD_HELP_PRINT
+CMD_HELP_NO_VDG:
+        ldaa    #MONITOR_FEATURE_KEYBOARD
+        beq     CMD_HELP_BASE
+        ldx     #TXT_HELP_KEYBOARD
         bra     CMD_HELP_PRINT
 CMD_HELP_BASE:
         ldx     #TXT_HELP
@@ -932,6 +954,8 @@ CMD_MAP:
         ldx     #TXT_MAP_K6802_VRAM
         jsr     MAP_PRINT_LINE
         ldx     #TXT_MAP_VDG_CTL
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_KEYBOARD
         jsr     MAP_PRINT_LINE
         jmp     CMD_MAP_ROM
 CMD_MAP_SBCIO_VDG_PROFILE:
@@ -976,10 +1000,15 @@ CMD_MAP_COMMON:
         ldx     #TXT_MAP_SBCIO_STK
         jsr     MAP_PRINT_LINE
         ldaa    #MONITOR_FEATURE_VDG
-        beq     CMD_MAP_ROM
+        beq     CMD_MAP_KEYBOARD
         ldx     #TXT_MAP_VDG_VRAM
         jsr     MAP_PRINT_LINE
         ldx     #TXT_MAP_VDG_CTL
+        jsr     MAP_PRINT_LINE
+CMD_MAP_KEYBOARD:
+        ldaa    #MONITOR_FEATURE_KEYBOARD
+        beq     CMD_MAP_ROM
+        ldx     #TXT_MAP_KEYBOARD
         jsr     MAP_PRINT_LINE
         bra     CMD_MAP_ROM
 CMD_MAP_COMMON_BASE:
@@ -1235,6 +1264,59 @@ CMD_VDGTEST_OK:
         jsr     MAP_PRINT_LINE
         jmp     MAIN_LOOP
 CMD_VDGTEST_ERR:
+        jmp     MAIN_LOOP_ERROR
+
+CMD_KEYTEST:
+        ldaa    #MONITOR_FEATURE_KEYBOARD
+        beq     CMD_KEYTEST_ERR
+        ldab    LINE_LEN
+        cmpb    #7
+        bne     CMD_KEYTEST_ERR
+        ldx     #LINE_BUF
+        ldaa    0,x
+        cmpa    #'K'
+        bne     CMD_KEYTEST_ERR
+        ldaa    1,x
+        cmpa    #'E'
+        bne     CMD_KEYTEST_ERR
+        ldaa    2,x
+        cmpa    #'Y'
+        bne     CMD_KEYTEST_ERR
+        ldaa    3,x
+        cmpa    #'T'
+        bne     CMD_KEYTEST_ERR
+        ldaa    4,x
+        cmpa    #'E'
+        bne     CMD_KEYTEST_ERR
+        ldaa    5,x
+        cmpa    #'S'
+        bne     CMD_KEYTEST_ERR
+        ldaa    6,x
+        cmpa    #'T'
+        bne     CMD_KEYTEST_ERR
+        jsr     ACIA2_GETC
+        psha
+        ldx     #TXT_KEY_PREFIX
+        jsr     PDATA1
+        pula
+        psha
+        jsr     PRINT_HEX8
+        ldaa    #CHR_SPACE
+        jsr     MON_OUTEEE
+        pula
+        anda    #$7F
+        cmpa    #CHR_SPACE
+        blo     CMD_KEYTEST_DOT
+        cmpa    #CHR_DEL
+        bhs     CMD_KEYTEST_DOT
+        bra     CMD_KEYTEST_PRINT
+CMD_KEYTEST_DOT:
+        ldaa    #'.'
+CMD_KEYTEST_PRINT:
+        jsr     MON_OUTEEE
+        jsr     PRINT_CRLF
+        jmp     MAIN_LOOP
+CMD_KEYTEST_ERR:
         jmp     MAIN_LOOP_ERROR
 
 CMD_LOAD:
@@ -2080,6 +2162,10 @@ TXT_HELP:       fcc     "D DIR M MAP RAMTEST G L LF B C R U H F"
                 fcb     $04
 TXT_HELP_VDG:   fcc     "D DIR M MAP RAMTEST VDGTEST G L LF B C R U H F"
                 fcb     $04
+TXT_HELP_KEYBOARD: fcc "D DIR M MAP RAMTEST KEYTEST G L LF B C R U H F"
+                   fcb $04
+TXT_HELP_VDG_KEYBOARD: fcc "D DIR M MAP RAMTEST VDGTEST KEYTEST G L LF B C R U H F"
+                       fcb $04
 TXT_OK:         fcc     "OK"
                 fcb     $04
 TXT_RAMTEST_PREFIX: fcc     "RAMTEST "
@@ -2138,10 +2224,14 @@ TXT_MAP_K6802_VRAM: fcc     "VRAM C000-DFFF"
                     fcb     $04
 TXT_MAP_VDG_CTL:    fcc     "VDG 8110"
                     fcb     $04
+TXT_MAP_KEYBOARD:   fcc     "KEY 8094-8095"
+                    fcb     $04
 TXT_MAP_ROM:        fcc     "ROM E000-FFFF"
                     fcb     $04
 TXT_VDGTEST_MESSAGE: fcc    "MC6800 MONITOR K68-VDG"
                      fcb    $04
+TXT_KEY_PREFIX: fcc     "KEY "
+                fcb     $04
 TXT_BP:         fcc     "BP "
                 fcb     $04
 TXT_NONE:       fcc     "NONE"

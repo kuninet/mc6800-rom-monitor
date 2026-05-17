@@ -48,24 +48,32 @@ def rom_path() -> Path:
     return FIXTURE_ROM_PATH
 
 
-def run_emu(input_text: str, max_cycles: int = 5_000_000, timeout: int = 10):
+def run_emu(input_text: str, max_cycles: int = 5_000_000, timeout: int = 10, key_input: str | None = None):
     input_bytes = input_text.encode("ascii")
 
     with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
         f.write(input_bytes)
         input_file = f.name
+    key_input_file = None
+    if key_input is not None:
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            f.write(key_input.encode("ascii"))
+            key_input_file = f.name
 
     try:
+        cmd = [
+            sys.executable,
+            str(EMU_PATH),
+            str(rom_path()),
+            "--input",
+            input_file,
+            "--max-cycles",
+            str(max_cycles),
+        ]
+        if key_input_file is not None:
+            cmd.extend(["--key-input", key_input_file])
         result = subprocess.run(
-            [
-                sys.executable,
-                str(EMU_PATH),
-                str(rom_path()),
-                "--input",
-                input_file,
-                "--max-cycles",
-                str(max_cycles),
-            ],
+            cmd,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -78,6 +86,8 @@ def run_emu(input_text: str, max_cycles: int = 5_000_000, timeout: int = 10):
         return exc.stdout or "", (exc.stderr or "") + "[TIMEOUT]", -1
     finally:
         os.unlink(input_file)
+        if key_input_file is not None:
+            os.unlink(key_input_file)
 
 
 def datapack_srec_script(filename: str, entry: str = "0100") -> str:
@@ -150,8 +160,12 @@ def test_error_display():
 
 def test_help_command():
     stdout, stderr, rc = run_emu("H\r\r")
-    if is_vdg_build():
+    if is_vdg_build() and is_keyboard_build():
+        expected = "D DIR M MAP RAMTEST VDGTEST KEYTEST G L LF B C R U H F"
+    elif is_vdg_build():
         expected = "D DIR M MAP RAMTEST VDGTEST G L LF B C R U H F"
+    elif is_keyboard_build():
+        expected = "D DIR M MAP RAMTEST KEYTEST G L LF B C R U H F"
     else:
         expected = "D DIR M MAP RAMTEST G L LF B C R U H F"
     assert expected in stdout, f"missing help command list: {stdout!r}"
@@ -178,6 +192,10 @@ def is_k6802_vdg_build() -> bool:
     return "-k6802-vdg" in BUILD_ROM_PATH.stem or os.environ.get("MONITOR_PROFILE") == "k6802_vdg"
 
 
+def is_keyboard_build() -> bool:
+    return is_sbcio_build()
+
+
 def test_map_command():
     stdout, stderr, rc = run_emu("F0100-0103 5A\rMAP\rD0100-0103\r\r", max_cycles=5_000_000)
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
@@ -193,6 +211,7 @@ def test_map_command():
             "STK BFFF",
             "VRAM C000-DFFF",
             "VDG 8110",
+            "KEY 8094-8095",
         ]
     elif is_vdg_build():
         expected = [
@@ -206,6 +225,7 @@ def test_map_command():
             "STK DFFF",
             "VRAM A000-BFFF",
             "VDG 8110",
+            "KEY 8094-8095",
         ]
     elif is_sbcio_build():
         expected = [
@@ -217,6 +237,7 @@ def test_map_command():
             "MON C200",
             "MIK C300",
             "STK DFFF",
+            "KEY 8094-8095",
         ]
     else:
         expected = [
@@ -257,6 +278,21 @@ def test_vdgtest_command():
     else:
         assert "?" in stdout, f"non-VDG builds should reject VDGTEST: {stdout!r}"
     print("[PASS] test_vdgtest_command")
+
+
+def test_keytest_command():
+    stdout, stderr, rc = run_emu("KEYTEST\r\r", key_input="A", max_cycles=10_000_000)
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    if is_keyboard_build():
+        assert "KEY 41 A" in stdout, f"KEYTEST should report keyboard byte: {stdout!r}"
+    else:
+        assert "?" in stdout, f"base should reject KEYTEST: {stdout!r}"
+
+    stdout, stderr, rc = run_emu("KEYTEST\r\r", key_input="\r", max_cycles=10_000_000)
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    if is_keyboard_build():
+        assert "KEY 0D ." in stdout, f"KEYTEST should show control byte as dot: {stdout!r}"
+    print("[PASS] test_keytest_command")
 
 
 def test_ramtest_command():
@@ -503,6 +539,7 @@ def main():
         test_help_command,
         test_map_command,
         test_vdgtest_command,
+        test_keytest_command,
         test_ramtest_command,
         test_breakpoint_query,
         test_breakpoint_resume_and_clear,

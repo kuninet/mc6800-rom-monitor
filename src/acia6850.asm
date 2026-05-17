@@ -5,6 +5,13 @@ ACIA_INIT:
         staa    ACIA_CTRL
         rts
 
+ACIA2_INIT:
+        ldaa    #ACIA_CTRL_RESET
+        staa    ACIA2_CTRL
+        ldaa    #ACIA_CTRL_INIT
+        staa    ACIA2_CTRL
+        rts
+
 ACIA_WAIT_TX:
         ldaa    ACIA_CTRL
         bita    #ACIA_STAT_TDRE
@@ -27,6 +34,17 @@ ACIA_PUTC:
 ACIA_GETC:
         bsr     ACIA_WAIT_RX
         ldaa    ACIA_DATA
+        rts
+
+ACIA2_WAIT_RX:
+        ldaa    ACIA2_CTRL
+        bita    #ACIA_STAT_RDRF
+        beq     ACIA2_WAIT_RX
+        rts
+
+ACIA2_GETC:
+        bsr     ACIA2_WAIT_RX
+        ldaa    ACIA2_DATA
         rts
 
 MIKBUG_OUTEEE_IMPL:
