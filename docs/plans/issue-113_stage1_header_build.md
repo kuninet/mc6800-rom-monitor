@@ -38,10 +38,10 @@ jump tableはMC6800の3byte `jmp` 命令列にする。
 
 ## メモリ配置
 
-| profile | `S1_BASE` | `S1_LIMIT` | `SDFS_LOAD_BASE` |
-| --- | --- | --- | --- |
-| `sbcio_vdg` | `$C400` | `$CBFF` | `$CC00` |
-| `k6802_vdg` | `$A400` | `$ABFF` | `$AC00` |
+| profile | `S1_BASE` | `S1_LIMIT` | `SDFS_LOAD_BASE` | `SDFS_LOAD_LIMIT` |
+| --- | --- | --- | --- | --- |
+| `sbcio_vdg` | `$C400` | `$CFFF` | `$D000` | `$DEFF` |
+| `k6802_vdg` | `$A400` | `$AFFF` | `$B000` | `$BEFF` |
 
 `base` profileはstage1非対応とする。
 

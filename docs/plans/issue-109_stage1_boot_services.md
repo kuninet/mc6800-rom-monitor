@@ -59,12 +59,12 @@ v1のAPIは boot services に限定する。汎用DOS API、複数open、seek、
 
 stage1配置はprofile別に分ける。
 
-| profile | sector buffer | monitor / stage1 work予約 | stage1候補 | SDFS/68候補 | VDG VRAM |
+| profile | sector buffer | monitor / stage1 work予約 | stage1候補 | SDFS/68候補 | stack余白 | VDG VRAM |
 | --- | --- | --- | --- | --- | --- |
-| `sbcio_vdg` | `$C000-$C1FF` | `$C200-$C3FF` | `$C400-$CBFF` | `$CC00` 以降 | `$A000-$BFFF` |
-| `k6802_vdg` | `$A000-$A1FF` | `$A200-$A3FF` | `$A400-$ABFF` | `$AC00` 以降 | `$C000-$DFFF` |
+| `sbcio_vdg` | `$C000-$C1FF` | `$C200-$C3FF` | `$C400-$CFFF` | `$D000-$DEFF` | `$DF00-$DFFF` | `$A000-$BFFF` |
+| `k6802_vdg` | `$A000-$A1FF` | `$A200-$A3FF` | `$A400-$AFFF` | `$B000-$BEFF` | `$BF00-$BFFF` | `$C000-$DFFF` |
 
-実装Issueでは `S1_BASE`、`S1_LIMIT`、`SDFS_LOAD_BASE` をprofile別定数として追加し、stack、VRAM、monitor workと衝突しないことをlistingとテストで確認する。
+実装Issueでは `S1_BASE`、`S1_LIMIT`、`SDFS_LOAD_BASE`、`SDFS_LOAD_LIMIT` をprofile別定数として追加し、stack、VRAM、monitor workと衝突しないことをlistingとテストで確認する。`$DF00-$DFFF` / `$BF00-$BFFF` は当面stack余白として扱う。
 
 ## Issueへの影響
 

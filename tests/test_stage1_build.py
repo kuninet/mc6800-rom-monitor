@@ -28,14 +28,16 @@ EXPECTED = {
     "sbcio_vdg": {
         "suffix": "-sbcio-vdg",
         "S1_BASE": 0xC400,
-        "S1_LIMIT": 0xCBFF,
-        "SDFS_LOAD_BASE": 0xCC00,
+        "S1_LIMIT": 0xCFFF,
+        "SDFS_LOAD_BASE": 0xD000,
+        "SDFS_LOAD_LIMIT": 0xDEFF,
     },
     "k6802_vdg": {
         "suffix": "-k6802-vdg",
         "S1_BASE": 0xA400,
-        "S1_LIMIT": 0xABFF,
-        "SDFS_LOAD_BASE": 0xAC00,
+        "S1_LIMIT": 0xAFFF,
+        "SDFS_LOAD_BASE": 0xB000,
+        "SDFS_LOAD_LIMIT": 0xBEFF,
     },
 }
 
@@ -59,6 +61,7 @@ def test_stage1_profiles_build_and_match_layout() -> None:
             "S1_BASE",
             "S1_LIMIT",
             "SDFS_LOAD_BASE",
+            "SDFS_LOAD_LIMIT",
             "S1_INIT",
             "S1_READ_SECTOR",
             "S1_MOUNT",
@@ -71,6 +74,9 @@ def test_stage1_profiles_build_and_match_layout() -> None:
         assert symbols["S1_LIMIT"] == expected["S1_LIMIT"], f"{profile} S1_LIMIT mismatch"
         assert symbols["SDFS_LOAD_BASE"] == expected["SDFS_LOAD_BASE"], (
             f"{profile} SDFS_LOAD_BASE mismatch"
+        )
+        assert symbols["SDFS_LOAD_LIMIT"] == expected["SDFS_LOAD_LIMIT"], (
+            f"{profile} SDFS_LOAD_LIMIT mismatch"
         )
         assert len(data) <= symbols["S1_LIMIT"] - symbols["S1_BASE"] + 1
         _assert_stage1_header(data)

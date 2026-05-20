@@ -82,6 +82,8 @@ MONITOR_PROFILE=k6802_vdg make stage1
 | `sbcio_vdg` | `build/stage1-sbcio-vdg.bin` |
 | `k6802_vdg` | `build/stage1-k6802-vdg.bin` |
 
+stage1 v1の配置は、`sbcio_vdg` が `$C400-$CFFF`、`k6802_vdg` が `$A400-$AFFF` である。SDFS/68本体の初期ロード領域はそれぞれ `$D000-$DEFF`、`$B000-$BEFF` とする。
+
 ## ROM_KIND
 
 `rombin`、`program`、`verify`、`readback` では `ROM_KIND` でROM種別を指定する。
