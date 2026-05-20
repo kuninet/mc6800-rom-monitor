@@ -19,6 +19,8 @@
 | `SDFS.BIN` | DIR/LF などの SD/FAT 操作と、必要に応じた `AUTOEXEC.S` 処理を持つ第2段 |
 | `AUTOEXEC.S` | RTC、VDG、キーボード、BASIC 起動などを行う任意の起動スクリプト |
 
+ROM容量は8KB互換を前提にすると既に余裕が小さいため、I2C、RTC、EEPROM、OLED/LCD、AUTOEXEC 処理をROMへ常駐させて肥大化させない。これらの周辺機能は、まずRAMロード可能なPoCとして煮詰め、最終的には `SDFS.BIN` または将来の M6800 DOS 相当の第2段機能へ寄せる。
+
 ## 方式比較
 
 | 方式 | 位置づけ | 採用条件 |
@@ -29,7 +31,7 @@
 
 ## 採用保留条件
 
-- ROM 容量が FAT read-only、VDG、キーボード、RTC 対応で逼迫するまでは、reserved sector bootstrap 実装を急がない。
+- ROM 容量が FAT read-only、VDG、キーボード、RTC 対応で逼迫するまでは、reserved sector bootstrap 実装を急がない。ただし I2C/RTC/OLED などの周辺機能は、ROM常駐ではなく `SDFS.BIN` 側へ逃がす前提でIssueを切る。
 - `AUTOEXEC.S` は ROM 側 `BOOT` や第1段bootstrapの責務に含めない。
 - `CONFIG.SYS`、subdirectory、FAT write、SD イメージ作成ツールは #82 の設計整理では対象外にする。
 - 実装に入る場合は、`BOOT` で `SDFS.BIN` を起動する Issue と、`SDFS.BIN` 側で `AUTOEXEC.S` を処理する Issue を分ける。

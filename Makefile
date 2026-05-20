@@ -138,6 +138,7 @@ IHEX := $(OUTDIR)/$(TARGET).hex
 CONFIG_INC := $(OUTDIR)/monitor_config.inc
 ROM_KIND ?= 27C64
 ROM_FILL ?= 0xFF
+ROM_CODE_LIMIT ?= 8192
 
 ifeq ($(ROM_KIND),27C64)
 ROM_CHIP_SIZE := 0x2000
@@ -189,9 +190,9 @@ endif
 
 ASL_INCLUDE := $(CURDIR)/$(OUTDIR)$(ASL_PATHSEP)$(CURDIR)/include$(ASL_PATHSEP)$(CURDIR)/src
 
-.PHONY: all clean bin srec ihex rombin rombin-27c64 rombin-27c128 rombin-27c256 rombin-28c256 rombin-w27c512 program verify readback program-27c64 program-27c128 program-27c256 program-28c256 program-w27c512 program-upd28c256 FORCE
+.PHONY: all clean bin check-rom-size srec ihex rombin rombin-27c64 rombin-27c128 rombin-27c256 rombin-28c256 rombin-w27c512 program verify readback program-27c64 program-27c128 program-27c256 program-28c256 program-w27c512 program-upd28c256 FORCE
 
-all: srec ihex
+all: check-rom-size srec ihex
 
 $(OUTDIR):
 	$(MKDIR_P)
@@ -202,10 +203,13 @@ $(CONFIG_INC): FORCE tools/generate_monitor_config.py | $(OUTDIR)
 $(OBJ): FORCE $(TOPSRC) include/hardware.inc include/mikbug.inc $(CONFIG_INC) src/acia6850.asm src/sdcard.asm src/fat32.asm | $(OUTDIR)
 	"$(ASL)" -q -L -olist $(LST) -o $(OBJ) -i $(ASL_INCLUDE_ARG) $(TOPSRC)
 
-bin: $(BIN)
+bin: check-rom-size
 
 $(BIN): $(OBJ)
 	"$(P2BIN)" $(OBJ) $(BIN) -q
+
+check-rom-size: $(BIN)
+	"$(PYTHON)" -c "from pathlib import Path; import sys; p=Path('$(BIN)'); size=p.stat().st_size; limit=int('$(ROM_CODE_LIMIT)', 0); print(f'{p}: {size}/{limit} bytes'); sys.exit(0 if limit <= 0 or size <= limit else 1)"
 
 srec: $(SREC)
 
@@ -217,7 +221,7 @@ ihex: $(IHEX)
 $(IHEX): $(OBJ)
 	"$(P2HEX)" $(OBJ) $(IHEX) -q -F Intel -i 1
 
-rombin: $(ROMBIN)
+rombin: check-rom-size $(ROMBIN)
 
 $(ROMBIN): $(OBJ)
 	"$(P2BIN)" $(OBJ) $(ROMBIN) -q -r $(ROM_RANGE_START)-$(ROM_RANGE_END) -l $(ROM_FILL)
@@ -237,10 +241,10 @@ rombin-28c256:
 rombin-w27c512:
 	$(MAKE) rombin ROM_KIND=W27C512
 
-program: $(ROMBIN)
+program: check-rom-size $(ROMBIN)
 	$(MINIPRO) -p "$(MINIPRO_DEVICE)" -w $(ROMBIN)
 
-verify: $(ROMBIN)
+verify: check-rom-size $(ROMBIN)
 	$(MINIPRO) -p "$(MINIPRO_DEVICE)" -m $(ROMBIN)
 
 readback:
