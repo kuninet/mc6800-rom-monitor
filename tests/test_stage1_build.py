@@ -16,6 +16,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "tests"))
 from sd_fixtures import (  # noqa: E402
     MULTI_CLUSTER_1,
     MULTI_CLUSTER_1_PREFIX,
+    TEST_S_CONTENT,
     build_fat32_image,
     layout_for_image,
 )
@@ -173,6 +174,34 @@ def test_stage1_find_83_service_rejects_missing_name() -> None:
     print("[PASS] test_stage1_find_83_service_rejects_missing_name")
 
 
+def test_stage1_load_file_83_service_loads_one_sector_file() -> None:
+    result, data = _run_stage1_load_harness(
+        build_fat32_image(with_mbr=True),
+        b"TEST    S  ",
+        len(TEST_S_CONTENT),
+    )
+    assert result == 0x42, f"S1_LOAD_FILE_83 failed to load TEST.S: {result:02X}"
+    assert bytes(data[:len(TEST_S_CONTENT)]) == TEST_S_CONTENT
+    print("[PASS] test_stage1_load_file_83_service_loads_one_sector_file")
+
+
+def test_stage1_load_file_83_service_rejects_unsupported_files() -> None:
+    result, _data = _run_stage1_load_harness(
+        build_fat32_image(with_mbr=True),
+        b"MULTI   BIN",
+        16,
+    )
+    assert result == 0xE1, f"S1_LOAD_FILE_83 accepted >512 byte file: {result:02X}"
+
+    result, _data = _run_stage1_load_harness(
+        build_fat32_image(with_mbr=True),
+        b"NOPE    BIN",
+        16,
+    )
+    assert result == 0xE1, f"S1_LOAD_FILE_83 accepted missing file: {result:02X}"
+    print("[PASS] test_stage1_load_file_83_service_rejects_unsupported_files")
+
+
 def _assert_stage1_header(data: bytes) -> None:
     assert data[0:7] == b"S1API68"
     assert data[7] == 1, "API version mismatch"
@@ -312,6 +341,71 @@ def _run_stage1_find_harness(sd_image: bytes, fat_name: bytes) -> int:
     return int(match.group(1), 16)
 
 
+def _run_stage1_load_harness(
+    sd_image: bytes,
+    fat_name: bytes,
+    dump_size: int,
+) -> tuple[int, list[int]]:
+    if len(fat_name) != 11:
+        raise AssertionError("FAT name must be exactly 11 bytes")
+    if dump_size <= 0:
+        raise AssertionError("dump_size must be positive")
+
+    profile = "sbcio_vdg"
+    _run_make(profile)
+    _run_make(profile, target="bin")
+    expected = EXPECTED[profile]
+    suffix = expected["suffix"]
+    stage1_data = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+    symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"stage1{suffix}.lst",
+        "S1_BASE",
+        "SDFS_LOAD_BASE",
+    )
+    dest = symbols["SDFS_LOAD_BASE"]
+    result_addr = dest + 0x0200
+    harness_addr = 0x0100
+    name_addr = harness_addr + 30
+    harness = [
+        0xBD, ((symbols["S1_BASE"] + 16) >> 8) & 0xFF, (symbols["S1_BASE"] + 16) & 0xFF,
+        0x25, 0x13,
+        0xBD, ((symbols["S1_BASE"] + 22) >> 8) & 0xFF, (symbols["S1_BASE"] + 22) & 0xFF,
+        0x25, 0x0E,
+        0xCE, (name_addr >> 8) & 0xFF, name_addr & 0xFF,
+        0xBD, ((symbols["S1_BASE"] + 28) >> 8) & 0xFF, (symbols["S1_BASE"] + 28) & 0xFF,
+        0x25, 0x06,
+        0x86, 0x42,
+        0xB7, (result_addr >> 8) & 0xFF, result_addr & 0xFF,
+        0x3F,
+        0x86, 0xE1,
+        0xB7, (result_addr >> 8) & 0xFF, result_addr & 0xFF,
+        0x3F,
+        *fat_name,
+    ]
+    input_text = (
+        f"M{symbols['S1_BASE']:04X}\r"
+        f"{_hex_bytes(list(stage1_data))}\r.\r"
+        f"M{harness_addr:04X}\r"
+        f"{_hex_bytes(harness)}\r.\r"
+        f"G{harness_addr:04X}\r"
+        f"D{result_addr:04X}-{result_addr:04X}\r"
+        f"D{dest:04X}-{dest + dump_size - 1:04X}\r"
+        "\r"
+    )
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
+        input_text=input_text,
+        sd_image=sd_image,
+        max_cycles=100_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    result_line = _dump_line(stdout, result_addr)
+    match = re.search(rf"{result_addr:04X}\s+([0-9A-Fa-f]{{2}})", result_line)
+    if not match:
+        raise AssertionError(f"missing load result byte: {result_line!r}\nstdout={stdout!r}")
+    return int(match.group(1), 16), _parse_dump_bytes(stdout, dest)
+
+
 def _run_emu_with_sd(
     *,
     rom_path: Path,
@@ -365,6 +459,28 @@ def _dump_line(stdout: str, address: int) -> str:
     raise AssertionError(f"missing dump line {marker}: {stdout!r}")
 
 
+def _parse_dump_bytes(stdout: str, address: int) -> list[int]:
+    values: list[int] = []
+    current = address
+    while True:
+        try:
+            line = _dump_line(stdout, current)
+        except AssertionError:
+            break
+        fields = line.split()
+        line_values: list[int] = []
+        for field in fields[1:17]:
+            try:
+                line_values.append(int(field, 16))
+            except ValueError:
+                break
+        if not line_values:
+            break
+        values.extend(line_values)
+        current += len(line_values)
+    return values
+
+
 def _load_symbols(path: Path, *names: str) -> dict[str, int]:
     text = path.read_text(encoding="utf-8", errors="replace")
     result: dict[str, int] = {}
@@ -396,6 +512,8 @@ def main() -> None:
         test_stage1_mount_service_rejects_invalid_fat32,
         test_stage1_find_83_service_finds_root_entries,
         test_stage1_find_83_service_rejects_missing_name,
+        test_stage1_load_file_83_service_loads_one_sector_file,
+        test_stage1_load_file_83_service_rejects_unsupported_files,
     ]
     passed = 0
     failed = 0

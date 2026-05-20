@@ -39,6 +39,7 @@
 - [plans/issue-115_stage1_sd_read.md](plans/issue-115_stage1_sd_read.md): SDFS/68 stage1 SD raw sector read boot services
 - [plans/issue-117_stage1_fat_mount.md](plans/issue-117_stage1_fat_mount.md): SDFS/68 stage1 FAT32 mount boot service
 - [plans/issue-119_stage1_find_83.md](plans/issue-119_stage1_find_83.md): SDFS/68 stage1 root 8.3 find boot service
+- [plans/issue-121_stage1_load_file_1sector.md](plans/issue-121_stage1_load_file_1sector.md): SDFS/68 stage1 1-sector file load boot service
 - [testing/sbc6800_bringup.md](testing/sbc6800_bringup.md)
 - [testing/sbc_io_sd_bringup.md](testing/sbc_io_sd_bringup.md): SBC-IO と microSD SPI モジュールで SD/FAT を実機確認する手順
 - [testing/sbc6800_datapack.md](testing/sbc6800_datapack.md): SBC6800 データパックの扱いと互換確認

@@ -171,6 +171,7 @@ FAT_ERR_MBR      equ 3
 FAT_ERR_BPB      equ 4
 FAT_ERR_NOT_FOUND equ 5
 FAT_ERR_CHAIN    equ 6
+FAT_ERR_SIZE     equ 7
  endif
 
 LOAD_MODE_NONE   equ 0
