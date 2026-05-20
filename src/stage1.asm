@@ -47,8 +47,47 @@ S1_FIND_83:
         jmp     FAT32_FIND_83
 
 S1_LOAD_FILE_83:
-        ldaa    #S1_ERR_UNIMPL
-        sec
+        jsr     FAT32_FIND_83
+        bcc     S1_LOAD_CHECK_SIZE
+        rts
+S1_LOAD_CHECK_SIZE:
+        ldaa    FAT_FILE_SIZE0
+        oraa    FAT_FILE_SIZE1
+        bne     S1_LOAD_SIZE_FAIL
+        ldaa    FAT_FILE_SIZE2
+        cmpa    #$02
+        bhi     S1_LOAD_SIZE_FAIL
+        bne     S1_LOAD_NONZERO
+        ldaa    FAT_FILE_SIZE3
+        bne     S1_LOAD_SIZE_FAIL
+S1_LOAD_NONZERO:
+        ldaa    FAT_FILE_SIZE2
+        oraa    FAT_FILE_SIZE3
+        beq     S1_LOAD_SIZE_FAIL
+        jsr     S1_COPY_FILE_TO_CUR
+        jsr     FAT_CLUSTER_TO_SD_LBA
+        ldx     #SDFS_LOAD_BASE
+        jsr     SD_READ_SECTOR
+        bcc     S1_LOAD_OK
+        ldaa    #FAT_ERR_SD
+        jmp     FAT_FAIL_A
+S1_LOAD_OK:
+        clr     FAT_ERROR
+        clc
+        rts
+S1_LOAD_SIZE_FAIL:
+        ldaa    #FAT_ERR_SIZE
+        jmp     FAT_FAIL_A
+
+S1_COPY_FILE_TO_CUR:
+        ldaa    FAT_FILE_CLUS0
+        staa    FAT_CUR_CLUS0
+        ldaa    FAT_FILE_CLUS1
+        staa    FAT_CUR_CLUS1
+        ldaa    FAT_FILE_CLUS2
+        staa    FAT_CUR_CLUS2
+        ldaa    FAT_FILE_CLUS3
+        staa    FAT_CUR_CLUS3
         rts
 
 S1_GET_ERROR:
