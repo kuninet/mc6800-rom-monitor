@@ -149,6 +149,30 @@ def test_stage1_mount_service_rejects_invalid_fat32() -> None:
     print("[PASS] test_stage1_mount_service_rejects_invalid_fat32")
 
 
+def test_stage1_find_83_service_finds_root_entries() -> None:
+    value = _run_stage1_find_harness(
+        build_fat32_image(with_mbr=True),
+        b"TEST    S  ",
+    )
+    assert value == 0x42, f"S1_FIND_83 failed to find TEST.S: {value:02X}"
+
+    value = _run_stage1_find_harness(
+        build_fat32_image(with_mbr=True, root_chain=True),
+        b"LATE    BIN",
+    )
+    assert value == 0x42, f"S1_FIND_83 failed to find chained root entry: {value:02X}"
+    print("[PASS] test_stage1_find_83_service_finds_root_entries")
+
+
+def test_stage1_find_83_service_rejects_missing_name() -> None:
+    value = _run_stage1_find_harness(
+        build_fat32_image(with_mbr=True),
+        b"NOPE    BIN",
+    )
+    assert value == 0xE1, f"S1_FIND_83 unexpectedly found missing file: {value:02X}"
+    print("[PASS] test_stage1_find_83_service_rejects_missing_name")
+
+
 def _assert_stage1_header(data: bytes) -> None:
     assert data[0:7] == b"S1API68"
     assert data[7] == 1, "API version mismatch"
@@ -229,6 +253,62 @@ def _run_stage1_mount_harness(sd_image: bytes) -> int:
     match = re.search(rf"{dest:04X}\s+([0-9A-Fa-f]{{2}})", line)
     if not match:
         raise AssertionError(f"missing mount result byte: {line!r}\nstdout={stdout!r}")
+    return int(match.group(1), 16)
+
+
+def _run_stage1_find_harness(sd_image: bytes, fat_name: bytes) -> int:
+    if len(fat_name) != 11:
+        raise AssertionError("FAT name must be exactly 11 bytes")
+
+    profile = "sbcio_vdg"
+    _run_make(profile)
+    _run_make(profile, target="bin")
+    expected = EXPECTED[profile]
+    suffix = expected["suffix"]
+    stage1_data = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+    symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"stage1{suffix}.lst",
+        "S1_BASE",
+        "SDFS_LOAD_BASE",
+    )
+    dest = symbols["SDFS_LOAD_BASE"]
+    harness_addr = 0x0100
+    name_addr = harness_addr + 30
+    harness = [
+        0xBD, ((symbols["S1_BASE"] + 16) >> 8) & 0xFF, (symbols["S1_BASE"] + 16) & 0xFF,
+        0x25, 0x13,
+        0xBD, ((symbols["S1_BASE"] + 22) >> 8) & 0xFF, (symbols["S1_BASE"] + 22) & 0xFF,
+        0x25, 0x0E,
+        0xCE, (name_addr >> 8) & 0xFF, name_addr & 0xFF,
+        0xBD, ((symbols["S1_BASE"] + 25) >> 8) & 0xFF, (symbols["S1_BASE"] + 25) & 0xFF,
+        0x25, 0x06,
+        0x86, 0x42,
+        0xB7, (dest >> 8) & 0xFF, dest & 0xFF,
+        0x3F,
+        0x86, 0xE1,
+        0xB7, (dest >> 8) & 0xFF, dest & 0xFF,
+        0x3F,
+        *fat_name,
+    ]
+    input_text = (
+        f"M{symbols['S1_BASE']:04X}\r"
+        f"{_hex_bytes(list(stage1_data))}\r.\r"
+        f"M{harness_addr:04X}\r"
+        f"{_hex_bytes(harness)}\r.\r"
+        f"G{harness_addr:04X}\r"
+        f"D{dest:04X}-{dest:04X}\r"
+        "\r"
+    )
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
+        input_text=input_text,
+        sd_image=sd_image,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    line = _dump_line(stdout, dest)
+    match = re.search(rf"{dest:04X}\s+([0-9A-Fa-f]{{2}})", line)
+    if not match:
+        raise AssertionError(f"missing find result byte: {line!r}\nstdout={stdout!r}")
     return int(match.group(1), 16)
 
 
@@ -314,6 +394,8 @@ def main() -> None:
         test_stage1_read_sector_service_reads_known_fixture_sector,
         test_stage1_mount_service_accepts_fat32_fixtures,
         test_stage1_mount_service_rejects_invalid_fat32,
+        test_stage1_find_83_service_finds_root_entries,
+        test_stage1_find_83_service_rejects_missing_name,
     ]
     passed = 0
     failed = 0

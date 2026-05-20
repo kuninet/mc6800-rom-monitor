@@ -333,7 +333,7 @@ FAT_FAIL_A:
         sec
         rts
 
- if FAT32_INCLUDE_FILE_API
+ if FAT32_INCLUDE_FIND_API
 FAT32_FIND_83:
         jsr     FAT_COPY_FIND_NAME
         jsr     FAT_COPY_ROOT_TO_CUR
@@ -392,6 +392,7 @@ FAT_FIND_NOT_FOUND:
         ldaa    #FAT_ERR_NOT_FOUND
         jmp     FAT_FAIL_A
 
+ if FAT32_INCLUDE_FILE_API
 FAT32_READ_FILE:
         stx     FAT_READ_PTR
         jsr     FAT_COPY_FILE_TO_CUR
@@ -490,6 +491,7 @@ FAT_STREAM_LOAD_OK:
         stx     FAT_ENTRY_PTR
         clc
         rts
+ endif
 
 FAT_COPY_FIND_NAME:
         ldaa    0,x
@@ -527,6 +529,7 @@ FAT_COPY_ROOT_TO_CUR:
         staa    FAT_CUR_CLUS3
         rts
 
+ if FAT32_INCLUDE_FILE_API
 FAT_COPY_FILE_TO_CUR:
         ldaa    FAT_FILE_CLUS0
         staa    FAT_CUR_CLUS0
@@ -537,6 +540,7 @@ FAT_COPY_FILE_TO_CUR:
         ldaa    FAT_FILE_CLUS3
         staa    FAT_CUR_CLUS3
         rts
+ endif
 
 FAT_COPY_NEXT_TO_CUR:
         ldaa    FAT_NEXT_CLUS0
@@ -549,6 +553,7 @@ FAT_COPY_NEXT_TO_CUR:
         staa    FAT_CUR_CLUS3
         rts
 
+ if FAT32_INCLUDE_FILE_API
 FAT_COPY_FILE_SIZE_TO_REM:
         ldaa    FAT_FILE_SIZE0
         staa    FAT_BYTES_REM0
@@ -559,6 +564,7 @@ FAT_COPY_FILE_SIZE_TO_REM:
         ldaa    FAT_FILE_SIZE3
         staa    FAT_BYTES_REM3
         rts
+ endif
 
 FAT_COMPARE_ENTRY_NAME:
         ldx     FAT_ENTRY_PTR
@@ -656,6 +662,7 @@ FAT_CLUSTER_ADD_SECTOR_LOOP:
 FAT_CLUSTER_ADD_DONE:
         rts
 
+ if FAT32_INCLUDE_FILE_API
 FAT_SECTOR_TO_SD_LBA:
         jsr     FAT_CLUSTER_TO_SD_LBA
         ldab    FAT_SECTOR_IN_CLUS
@@ -666,6 +673,7 @@ FAT_SECTOR_TO_SD_LBA_LOOP:
         bne     FAT_SECTOR_TO_SD_LBA_LOOP
 FAT_SECTOR_TO_SD_LBA_DONE:
         rts
+ endif
 
 FAT_INC_SD_LBA:
         inc     SD_LBA3
@@ -733,6 +741,7 @@ FAT_NEXT_NOT_EOC:
         clc
         rts
 
+ if FAT32_INCLUDE_FILE_API
 FAT_ADVANCE_FILE_SECTOR:
         inc     FAT_SECTOR_IN_CLUS
         ldaa    FAT_SECTOR_IN_CLUS
@@ -842,4 +851,5 @@ FAT_DEC_REM_B2:
 FAT_DEC_REM_LO:
         dec     FAT_BYTES_REM3
         rts
+ endif
  endif
