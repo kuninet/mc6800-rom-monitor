@@ -6,12 +6,13 @@
 - Issue #89: https://github.com/kuninet/mc6800-rom-monitor/issues/89
 - Issue #81: https://github.com/kuninet/mc6800-rom-monitor/issues/81
 - Issue #85: https://github.com/kuninet/mc6800-rom-monitor/issues/85
+- Issue #107: https://github.com/kuninet/mc6800-rom-monitor/issues/107
 
 ## 方針
 
 第2段システムの名称は **SDFS/68** とし、SD カード上の実ファイル名は既存方針どおり `SDFS.BIN` とする。`BOOT` は root の `AUTOEXEC.S` を直接 LOAD するコマンドではなく、root directory の通常ファイル `SDFS.BIN` を RAM へ読み込んで起動する入口として扱う。
 
-初期方式は **root directory の通常ファイル `SDFS.BIN` 起動**を本線にする。FAT32 reserved sector bootstrap は、ROM をさらに小さくしたい段階の将来候補として文書に残すだけにする。
+初期方式は **root directory の通常ファイル `SDFS.BIN` 起動**を本線として整理した。ただし、8KB ROM内でKKBD-USB入力とVDG出力を重視する場合はFAT処理をROMに残す負担が大きいため、#107 で固定セクタ版SDFS/68 loaderのROM削減効果を評価する。
 
 `AUTOEXEC.S` は SDFS/68 が起動後に任意で処理する起動スクリプト相当とし、ROM 側 `BOOT` の直接責務には含めない。
 
@@ -33,6 +34,7 @@ ROM容量は8KB互換を前提にすると既に余裕が小さいため、I2C�
 | --- | --- | --- |
 | root 通常ファイル `SDFS.BIN` 起動 | 初期本線 | PC で通常ファイルとして配置でき、既存 FAT32 read-only 実装を活かせること |
 | FAT32 reserved sector bootstrap | 将来の ROM 削減案 | 専用 SD 作成手順、signature 検査、復旧手順を用意できること |
+| 固定物理LBA `SDFS.BIN` boot area | ROM 削減案 | `mk-sdfs` 生成イメージを前提に、ROMからFATを外す価値があること |
 | 外部 MCU 経由 | 将来の性能改善案 | SD/FAT 処理を外部 firmware に逃がす価値が実装コストを上回ること |
 
 ## ROM側 `BOOT` の境界
@@ -120,6 +122,7 @@ v1 の優先機能は HEX / S-record ロードとする。既存 ROM の `DIR` /
 | #103 `mk-sdfs` | Python製のシステムSDイメージ生成ツールを追加する | 直接SD書き込みは対象外 |
 | #104 SDFS/68 data API | 画像/バイナリデータ direct read 用APIを設計する | VDG向けデータ利用を想定 |
 | #105 SDFS/68 dirs | サブディレクトリ対応 | v2 以降 |
+| #107 固定セクタBOOT評価 | ROMからFATを外す場合の削減効果と運用負荷を評価する | #101 実装前の判断材料 |
 | ROM削減 | SDFS/68 v1 が安定した後、ROM側 `DIR` / `LF` の削減を検討する | 互換性を確認してから |
 
 ## 検証方針
