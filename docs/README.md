@@ -32,6 +32,7 @@
 - [design/memory_map.md](design/memory_map.md)
 - [design/architecture.md](design/architecture.md)
 - [plans/implementation_plan.md](plans/implementation_plan.md)
+- [plans/issue-107_fixed_sector_boot_eval.md](plans/issue-107_fixed_sector_boot_eval.md): 固定セクタ版SDFS/68 loaderのROM削減評価
 - [testing/sbc6800_bringup.md](testing/sbc6800_bringup.md)
 - [testing/sbc_io_sd_bringup.md](testing/sbc_io_sd_bringup.md): SBC-IO と microSD SPI モジュールで SD/FAT を実機確認する手順
 - [testing/sbc6800_datapack.md](testing/sbc6800_datapack.md): SBC6800 データパックの扱いと互換確認
