@@ -6,6 +6,7 @@
 - Issue #82: https://github.com/kuninet/mc6800-rom-monitor/issues/82
 - Issue #101: https://github.com/kuninet/mc6800-rom-monitor/issues/101
 - Issue #103: https://github.com/kuninet/mc6800-rom-monitor/issues/103
+- Issue #109: https://github.com/kuninet/mc6800-rom-monitor/issues/109
 
 ## 結論
 
@@ -13,7 +14,7 @@
 
 現行の `FEATURE_SD=1` は、SD sector read だけでなく FAT32 mount、root directory scan、cluster chain、`DIR`、`LF` までROMに含める。listing で見ると、KBD+VDGのみ構成から KBD+VDG+現行SD/FAT構成への増分は約 **2.9KB** ある。8KB ROMでこの増分は大きく、VDGコンソールやKKBD-USB入力の常駐余地を圧迫する。
 
-今後の方針は、ROM側を **raw SD sector boot + SDFS/68 header確認 + fallback** に寄せ、FAT操作はSDFS/68側へ逃がすのがよい。
+今後の方針は、ROM側を **raw SD sector boot + stage1 header確認 + fallback** に寄せ、FAT操作は固定LBAから読んだstage1とSDFS/68側へ逃がすのがよい。
 
 ## 試算
 
@@ -36,7 +37,7 @@
 
 raw固定セクタBOOTは、SD初期化とsector readの下回りを残すため、SD部分をゼロにはできない。ただし FAT32処理、root検索、cluster chain、`DIR`、`LF` をROMから外せるため、現行SD/FAT構成から **おおむね2KB前後** のROM削減余地がある。
 
-実際の固定セクタBOOTでは、連続sector load、SDFS/68 header確認、entry range確認、fallback表示が追加されるため、raw SD readだけとの差分は増える。それでもFAT版BOOTより小さくなる見込みが高い。
+実際の固定セクタBOOTでは、連続sector load、stage1 header確認、entry range確認、fallback表示が追加されるため、raw SD readだけとの差分は増える。それでもFAT版BOOTより小さくなる見込みが高い。
 
 ## 方式比較
 
@@ -48,24 +49,24 @@ raw固定セクタBOOTは、SD初期化とsector readの下回りを残すため
 
 ## 推奨仕様
 
-固定セクタ版の初期候補は **固定物理LBA版** とする。
+固定セクタ版の初期候補は **固定物理LBA版 stage1 loader** とする。
 
-- `mk-sdfs` 生成イメージでは、MBR partitionの外側にSDFS/68 boot areaを置く。
+- `mk-sdfs` 生成イメージでは、MBR partitionの外側にstage1 boot areaを置く。
 - 初期候補は physical LBA `16` 以降とする。
-- ROMはFATを見ず、固定LBAからheader sectorを読み、signatureとsizeを確認してからpayloadを連続sectorとしてRAMへ読む。
-- root directory には確認用として同じ `SDFS.BIN` を置く。
-- `mk-sdfs` は root `SDFS.BIN` と固定boot areaの内容が一致するように生成する。
+- ROMはFATを見ず、固定LBAからstage1 header sectorを読み、signatureとsizeを確認してからstage1を連続sectorとしてRAMへ読む。
+- root directory にはSDFS/68本体として `SDFS.BIN` を置く。
+- fixed boot area のstage1とroot `SDFS.BIN` は同一内容にしない。
 - 手動コピーだけでは固定boot areaは更新されないため、起動用SDは `mk-sdfs` で作る運用にする。
 
-SDFS/68 headerは #82 の案を維持し、固定セクタBOOTでは少なくとも次を確認する。
+stage1 headerは #109 の案に従い、固定セクタBOOTでは少なくとも次を確認する。
 
-- signature: `SDFS68`
-- header version
-- entry address
-- payload size
-- payloadがSDFS/68ロード領域内に収まること
+- signature: `S1API68`
+- API version
+- API count
+- stage1 entry
+- stage1がprofile別ロード領域内に収まること
 
-checksumはv1では必須にしない。必要ならSDFS/68 v2以降で追加する。
+SDFS/68 header確認はstage1側で行う。checksumはv1では必須にしない。必要ならSDFS/68 v2以降で追加する。
 
 ## ROM責務
 
@@ -76,8 +77,8 @@ ROMに残す:
 - VDG最小出力または診断。
 - monitor core。
 - SD初期化とraw sector read。
-- 固定LBAからSDFS/68をRAMへロードする最小 `BOOT`。
-- SDFS/68 signature / size / entry確認。
+- 固定LBAからstage1をRAMへロードする最小 `BOOT`。
+- stage1 signature / size / entry確認。
 
 ROMから外す:
 
@@ -102,7 +103,7 @@ ROMから外す:
 - entry address不正。
 - payload途中read失敗。
 
-FATが壊れていても、固定boot areaが読めてheaderが正しければSDFS/68起動を試みる。SDFS/68起動後にFAT mountへ失敗した場合は、SDFS/68側の対話モードまたはROM fallback方針で扱う。
+FATが壊れていても、固定boot areaが読めてstage1 headerが正しければstage1起動を試みる。stage1起動後にFAT mountへ失敗した場合は、stage1の短いエラー表示後に既存monitorへ戻るか、SDFS/68実装Issueで定めるfallback方針で扱う。
 
 ## 後続方針
 
@@ -110,9 +111,10 @@ FATが壊れていても、固定boot areaが読めてheaderが正しければSD
 
 推奨する後続分割:
 
-- 固定セクタBOOT実装: ROM側に `BOOT` を追加し、physical LBA `16` からSDFS/68をロードする。
-- `mk-sdfs` 固定boot area対応: root `SDFS.BIN` と固定boot areaを同期してイメージ生成する。
-- SDFS/68 v1: 起動後にFATをmountし、HEX/S-recordロードを提供する。
+- 固定セクタBOOT実装: ROM側に `BOOT` を追加し、physical LBA `16` からstage1をロードする。
+- stage1 boot services実装: stage1がFAT rootの `SDFS.BIN` をロードし、header + jump tableを公開する。
+- `mk-sdfs` 固定boot area対応: fixed boot areaへstage1を置き、rootへ `SDFS.BIN` を配置する。
+- SDFS/68 v1: stage1 boot servicesを使い、HEX/S-recordロードを提供する。
 - ROM削減: SDFS/68 v1が成立した後、ROM側 `DIR` / `LF` を削る。
 
 ## 検証方針
@@ -124,4 +126,4 @@ FATが壊れていても、固定boot areaが読めてheaderが正しければSD
 - `REQUIRE_BUILD_ROM=1 python3 tests/test_smoke.py`
 - `REQUIRE_BUILD_ROM=1 python3 tests/test_sd_fixture.py`
 
-固定セクタBOOT実装Issueでは、SD fixtureに固定boot areaを持つイメージを追加し、正常起動、signature不一致、size不正、途中read失敗を確認する。
+固定セクタBOOT実装Issueでは、SD fixtureにstage1 boot areaを持つイメージを追加し、正常起動、signature不一致、size不正、途中read失敗を確認する。

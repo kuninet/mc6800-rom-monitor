@@ -2,12 +2,13 @@
 
 この文書は、SDFS/68 用のシステムSDカードを作るための初期方針をまとめる。
 
-SDFS/68 は、ROM モニタの `BOOT` から起動する第2段システムである。SDカード上の実ファイル名は root directory の `SDFS.BIN` とする。
+SDFS/68 は、ROM モニタの `BOOT` から起動する第2段システムである。ROM は固定LBAからstage1 loaderを読み、stage1がFAT root の `SDFS.BIN` を読み込む。
 
 ## 基本方針
 
-- 初期方式は root directory の通常ファイル `SDFS.BIN` 起動とする。
-- FAT32 reserved sector bootstrap は将来候補として残すが、初期ツールでは扱わない。
+- 初期方式は fixed boot area のstage1 loader起動とする。
+- SDFS/68本体は root directory の通常ファイル `SDFS.BIN` とする。
+- ROMはFATを読まず、stage1がFAT32 read-only最小実装で `SDFS.BIN` を読む。
 - 初期 SDFS/68 は read-only とし、FAT write や SAVE は別Issueで扱う。
 - 8.3 short filename を前提にする。LFN とサブディレクトリは後続段階で扱う。
 
@@ -19,6 +20,7 @@ SDFS/68 は、ROM モニタの `BOOT` から起動する第2段システムで�
 
 入力候補:
 
+- stage1 loader binary
 - `SDFS.BIN`
 - S-Record ファイル (`.S`)
 - Intel HEX ファイル (`.HEX`)
@@ -28,6 +30,7 @@ SDFS/68 は、ROM モニタの `BOOT` から起動する第2段システムで�
 出力:
 
 - FAT32 形式の SDイメージファイル。
+- 固定LBA boot area にstage1 loaderを配置する。
 - root directory に `SDFS.BIN` と指定ファイルを配置する。
 - テスト用には小さい決定的イメージを生成できるようにする。
 
@@ -49,7 +52,8 @@ v1 の root directory は次を想定する。
 
 | ファイル | 用途 |
 | --- | --- |
-| `SDFS.BIN` | SDFS/68 本体 |
+| fixed boot area | stage1 loader。ROMが固定LBAから読む |
+| `SDFS.BIN` | SDFS/68 本体。stage1がFAT rootから読む |
 | `HELLO.S` | S-Record LOAD 確認用 |
 | `HELLO.HEX` | Intel HEX LOAD 確認用 |
 | `AUTOEXEC.S` | v2 以降の任意起動スクリプト候補 |
