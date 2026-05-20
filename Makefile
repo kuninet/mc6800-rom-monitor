@@ -221,7 +221,7 @@ stage1: check-stage1-profile $(STAGE1_BIN)
 check-stage1-profile:
 	"$(PYTHON)" -c "import sys; profile='$(MONITOR_PROFILE)'; sys.exit(0 if profile in ('sbcio_vdg', 'k6802_vdg') else 1)" || (echo "stage1 target requires MONITOR_PROFILE=sbcio_vdg or MONITOR_PROFILE=k6802_vdg" && exit 1)
 
-$(STAGE1_OBJ): FORCE $(STAGE1_TOPSRC) include/hardware.inc $(CONFIG_INC) | $(OUTDIR)
+$(STAGE1_OBJ): FORCE $(STAGE1_TOPSRC) include/hardware.inc $(CONFIG_INC) src/sdcard.asm | $(OUTDIR)
 	"$(ASL)" -q -L -olist $(STAGE1_LST) -o $(STAGE1_OBJ) -i $(ASL_INCLUDE_ARG) $(STAGE1_TOPSRC)
 
 $(STAGE1_BIN): $(STAGE1_OBJ)

@@ -33,14 +33,10 @@ S1_JUMP_TABLE:
         jmp     S1_GET_ERROR
 
 S1_INIT:
-        ldaa    #S1_ERR_NONE
-        clc
-        rts
+        jmp     SD_INIT
 
 S1_READ_SECTOR:
-        ldaa    #S1_ERR_UNIMPL
-        sec
-        rts
+        jmp     SD_READ_SECTOR
 
 S1_MOUNT:
         ldaa    #S1_ERR_UNIMPL
@@ -58,9 +54,11 @@ S1_LOAD_FILE_83:
         rts
 
 S1_GET_ERROR:
-        ldaa    #S1_ERR_UNIMPL
+        ldaa    SD_ERROR
         clc
         rts
+
+        include "sdcard.asm"
 
 S1_END:
         if S1_END-1 > S1_LIMIT
