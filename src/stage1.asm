@@ -44,9 +44,7 @@ S1_MOUNT:
         jmp     FAT32_MOUNT
 
 S1_FIND_83:
-        ldaa    #S1_ERR_UNIMPL
-        sec
-        rts
+        jmp     FAT32_FIND_83
 
 S1_LOAD_FILE_83:
         ldaa    #S1_ERR_UNIMPL
@@ -61,6 +59,7 @@ S1_GET_ERROR_DONE:
         clc
         rts
 
+FAT32_INCLUDE_FIND_API equ 1
 FAT32_INCLUDE_FILE_API equ 0
 
         include "sdcard.asm"
