@@ -36,6 +36,7 @@
 - [plans/issue-107_fixed_sector_boot_eval.md](plans/issue-107_fixed_sector_boot_eval.md): 固定セクタ版SDFS/68 loaderのROM削減評価
 - [plans/issue-109_stage1_boot_services.md](plans/issue-109_stage1_boot_services.md): SDFS/68 stage1 boot services設計
 - [plans/issue-113_stage1_header_build.md](plans/issue-113_stage1_header_build.md): SDFS/68 stage1 header / jump table とビルド基盤
+- [plans/issue-115_stage1_sd_read.md](plans/issue-115_stage1_sd_read.md): SDFS/68 stage1 SD raw sector read boot services
 - [testing/sbc6800_bringup.md](testing/sbc6800_bringup.md)
 - [testing/sbc_io_sd_bringup.md](testing/sbc_io_sd_bringup.md): SBC-IO と microSD SPI モジュールで SD/FAT を実機確認する手順
 - [testing/sbc6800_datapack.md](testing/sbc6800_datapack.md): SBC6800 データパックの扱いと互換確認
