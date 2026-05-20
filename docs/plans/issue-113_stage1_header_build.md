@@ -20,7 +20,9 @@ stage1 binaryは `S1_BASE` から始まる。
 | `+7` | API version。v1は `1` |
 | `+8` | API count。v1は `6` |
 | `+9` | flags。v1は `0` |
-| `+10` - `+15` | reserved。すべて `0` |
+| `+10` - `+11` | stage1 boot entry address |
+| `+12` - `+13` | stage1 image size |
+| `+14` - `+15` | reserved。すべて `0` |
 | `+16` | jump table開始 |
 
 jump tableはMC6800の3byte `jmp` 命令列にする。
