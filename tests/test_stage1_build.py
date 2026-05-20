@@ -20,6 +20,7 @@ from sd_fixtures import (  # noqa: E402
     build_fat32_image,
     layout_for_image,
 )
+from fat32_image import Fat32File, build_fat32_image_from_files  # noqa: E402
 
 EMU_PATH = PROJECT_ROOT / "emu" / "sbc6800_emu.py"
 
@@ -68,6 +69,7 @@ def test_stage1_profiles_build_and_match_layout() -> None:
             "S1_FIND_83",
             "S1_LOAD_FILE_83",
             "S1_GET_ERROR",
+            "S1_BOOT_SDFS",
             "S1_END",
         )
         assert symbols["S1_BASE"] == expected["S1_BASE"], f"{profile} S1_BASE mismatch"
@@ -79,7 +81,7 @@ def test_stage1_profiles_build_and_match_layout() -> None:
             f"{profile} SDFS_LOAD_LIMIT mismatch"
         )
         assert len(data) <= symbols["S1_LIMIT"] - symbols["S1_BASE"] + 1
-        _assert_stage1_header(data)
+        _assert_stage1_header(data, symbols["S1_BOOT_SDFS"])
         _assert_jump(data, 16, symbols["S1_INIT"])
         _assert_jump(data, 19, symbols["S1_READ_SECTOR"])
         _assert_jump(data, 22, symbols["S1_MOUNT"])
@@ -208,12 +210,39 @@ def test_stage1_load_file_83_service_rejects_unsupported_files() -> None:
     print("[PASS] test_stage1_load_file_83_service_rejects_unsupported_files")
 
 
-def _assert_stage1_header(data: bytes) -> None:
+def test_stage1_boot_sdfs_jumps_to_valid_entry() -> None:
+    result = _run_stage1_boot_harness(lambda dest, result_addr: _make_sdfs_bin(dest, result_addr))
+    assert result == 0x42, f"S1_BOOT_SDFS did not jump to SDFS entry: {result:02X}"
+    print("[PASS] test_stage1_boot_sdfs_jumps_to_valid_entry")
+
+
+def test_stage1_boot_sdfs_rejects_invalid_headers() -> None:
+    cases = [
+        ("bad signature", lambda data: data.__setitem__(0, ord("X"))),
+        ("bad version", lambda data: data.__setitem__(6, 2)),
+        ("bad header size", lambda data: data.__setitem__(7, 15)),
+        ("bad entry", lambda data: data.__setitem__(slice(8, 10), b"\x00\x00")),
+        ("entry outside size", lambda data: data.__setitem__(slice(8, 10), b"\xD1\x00")),
+        ("bad size", lambda data: data.__setitem__(slice(10, 12), b"\x02\x01")),
+    ]
+    for label, mutate in cases:
+        result = _run_stage1_boot_harness(
+            lambda dest, result_addr, mutate=mutate: _make_sdfs_bin(dest, result_addr, mutate=mutate)
+        )
+        assert result == 0xE1, f"S1_BOOT_SDFS accepted {label}: {result:02X}"
+    print("[PASS] test_stage1_boot_sdfs_rejects_invalid_headers")
+
+
+def _assert_stage1_header(data: bytes, boot_entry: int) -> None:
     assert data[0:7] == b"S1API68"
     assert data[7] == 1, "API version mismatch"
     assert data[8] == 6, "API count mismatch"
     assert data[9] == 0, "flags mismatch"
-    assert data[10:16] == bytes(6), "reserved bytes must be zero"
+    actual_boot_entry = (data[10] << 8) | data[11]
+    assert actual_boot_entry == boot_entry, "boot entry mismatch"
+    actual_image_size = (data[12] << 8) | data[13]
+    assert actual_image_size == len(data), "stage1 image size mismatch"
+    assert data[14:16] == bytes(2), "reserved bytes must be zero"
 
 
 def _assert_jump(data: bytes, offset: int, target: int) -> None:
@@ -412,6 +441,85 @@ def _run_stage1_load_harness(
     return int(match.group(1), 16), _parse_dump_bytes(stdout, dest)
 
 
+def _run_stage1_boot_harness(sdfs_factory) -> int:
+    profile = "sbcio_vdg"
+    _run_make(profile)
+    _run_make(profile, target="bin")
+    expected = EXPECTED[profile]
+    suffix = expected["suffix"]
+    stage1_data = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+    symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"stage1{suffix}.lst",
+        "S1_BASE",
+        "SDFS_LOAD_BASE",
+    )
+    dest = symbols["SDFS_LOAD_BASE"]
+    result_addr = dest + 0x0200
+    boot_entry = (stage1_data[10] << 8) | stage1_data[11]
+    sd_image = _build_sdfs_image(sdfs_factory(dest, result_addr))
+    harness_addr = 0x0100
+    harness = [
+        0xBD, (boot_entry >> 8) & 0xFF, boot_entry & 0xFF,
+        0x25, 0x06,
+        0x86, 0x99,
+        0xB7, (result_addr >> 8) & 0xFF, result_addr & 0xFF,
+        0x3F,
+        0x86, 0xE1,
+        0xB7, (result_addr >> 8) & 0xFF, result_addr & 0xFF,
+        0x3F,
+    ]
+    input_text = (
+        f"M{symbols['S1_BASE']:04X}\r"
+        f"{_hex_bytes(list(stage1_data))}\r.\r"
+        f"M{harness_addr:04X}\r"
+        f"{_hex_bytes(harness)}\r.\r"
+        f"G{harness_addr:04X}\r"
+        f"D{result_addr:04X}-{result_addr:04X}\r"
+        "\r"
+    )
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
+        input_text=input_text,
+        sd_image=sd_image,
+        max_cycles=100_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    line = _dump_line(stdout, result_addr)
+    match = re.search(rf"{result_addr:04X}\s+([0-9A-Fa-f]{{2}})", line)
+    if not match:
+        raise AssertionError(f"missing boot result byte: {line!r}\nstdout={stdout!r}")
+    return int(match.group(1), 16)
+
+
+def _make_sdfs_bin(dest: int, result_addr: int, mutate=None) -> bytes:
+    entry = dest + 16
+    entry_code = [
+        0x86, 0x42,
+        0xB7, (result_addr >> 8) & 0xFF, result_addr & 0xFF,
+        0x3F,
+    ]
+    size = 16 + len(entry_code)
+    data = bytearray(size)
+    data[0:6] = b"SDFS68"
+    data[6] = 1
+    data[7] = 16
+    data[8:10] = entry.to_bytes(2, "big")
+    data[10:12] = size.to_bytes(2, "big")
+    data[16:] = bytes(entry_code)
+    if mutate is not None:
+        mutate(data)
+    return bytes(data)
+
+
+def _build_sdfs_image(sdfs_data: bytes) -> bytes:
+    image, _layout = build_fat32_image_from_files(
+        [Fat32File(b"SDFS    BIN", sdfs_data)],
+        with_mbr=True,
+        total_volume_sectors=64,
+    )
+    return image
+
+
 def _run_emu_with_sd(
     *,
     rom_path: Path,
@@ -520,6 +628,8 @@ def main() -> None:
         test_stage1_find_83_service_rejects_missing_name,
         test_stage1_load_file_83_service_loads_one_sector_file,
         test_stage1_load_file_83_service_rejects_unsupported_files,
+        test_stage1_boot_sdfs_jumps_to_valid_entry,
+        test_stage1_boot_sdfs_rejects_invalid_headers,
     ]
     passed = 0
     failed = 0

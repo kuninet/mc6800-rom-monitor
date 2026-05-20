@@ -70,6 +70,9 @@ stage1 loader には短い header と jump table を置く。初期案は次の�
 | `+7` | API version |
 | `+8` | API count |
 | `+9` | flags |
+| `+10` - `+11` | stage1 boot entry address |
+| `+12` - `+13` | stage1 image size |
+| `+14` - `+15` | reserved |
 | `+16` | `jmp S1_INIT` |
 | `+19` | `jmp S1_READ_SECTOR` |
 | `+22` | `jmp S1_MOUNT` |

@@ -7,6 +7,8 @@ S1_API_COUNT    equ 6
 S1_FLAG_NONE    equ 0
 S1_ERR_NONE     equ 0
 S1_ERR_UNIMPL   equ 1
+S1_LOAD_MAX_HI  equ 2
+S1_LOAD_MAX_LO  equ 0
 
 SDFS_VERSION    equ 1
 SDFS_HDR_SIZE   equ 16
@@ -22,7 +24,9 @@ S1_HEADER:
         fcb     S1_API_VERSION
         fcb     S1_API_COUNT
         fcb     S1_FLAG_NONE
-        fcb     0,0,0,0,0,0
+        fdb     S1_BOOT_SDFS
+        fdb     S1_END-S1_BASE
+        fcb     0,0
 
 S1_JUMP_TABLE:
         jmp     S1_INIT
@@ -79,6 +83,82 @@ S1_LOAD_SIZE_FAIL:
         ldaa    #FAT_ERR_SIZE
         jmp     FAT_FAIL_A
 
+S1_BOOT_SDFS:
+        jsr     S1_MOUNT
+        bcs     S1_BOOT_DONE
+        ldx     #S1_SDFS_NAME
+        jsr     S1_LOAD_FILE_83
+        bcs     S1_BOOT_DONE
+        jsr     S1_VALIDATE_SDFS
+        bcs     S1_BOOT_DONE
+        ldx     SDFS_LOAD_BASE+8
+        jmp     0,x
+S1_BOOT_DONE:
+        rts
+
+S1_VALIDATE_SDFS:
+        ldx     #SDFS_LOAD_BASE
+        ldaa    0,x
+        cmpa    #'S'
+        bne     S1_SDFS_SIG_FAIL
+        ldaa    1,x
+        cmpa    #'D'
+        bne     S1_SDFS_SIG_FAIL
+        ldaa    2,x
+        cmpa    #'F'
+        bne     S1_SDFS_SIG_FAIL
+        ldaa    3,x
+        cmpa    #'S'
+        bne     S1_SDFS_SIG_FAIL
+        ldaa    4,x
+        cmpa    #'6'
+        bne     S1_SDFS_SIG_FAIL
+        ldaa    5,x
+        cmpa    #'8'
+        bne     S1_SDFS_SIG_FAIL
+        ldaa    6,x
+        cmpa    #SDFS_VERSION
+        bne     S1_SDFS_SIG_FAIL
+        ldaa    7,x
+        cmpa    #SDFS_HDR_SIZE
+        bne     S1_SDFS_SIG_FAIL
+
+        ldaa    10,x
+        oraa    11,x
+        beq     S1_SDFS_SIZE_FAIL
+        ldaa    10,x
+        cmpa    #S1_LOAD_MAX_HI
+        bhi     S1_SDFS_SIZE_FAIL
+        blo     S1_SDFS_CHECK_ENTRY
+        ldaa    11,x
+        cmpa    #S1_LOAD_MAX_LO
+        bhi     S1_SDFS_SIZE_FAIL
+
+S1_SDFS_CHECK_ENTRY:
+        ldaa    8,x
+        suba    #SDFS_LOAD_BASE/256
+        bcs     S1_SDFS_SIZE_FAIL
+        staa    FAT_TMP
+        cmpa    #S1_LOAD_MAX_HI
+        bhs     S1_SDFS_SIZE_FAIL
+        ldaa    FAT_TMP
+        cmpa    10,x
+        bhi     S1_SDFS_SIZE_FAIL
+        blo     S1_SDFS_ENTRY_OK
+        ldaa    9,x
+        cmpa    11,x
+        bhs     S1_SDFS_SIZE_FAIL
+S1_SDFS_ENTRY_OK:
+        clr     FAT_ERROR
+        clc
+        rts
+S1_SDFS_SIG_FAIL:
+        ldaa    #FAT_ERR_SIG
+        jmp     FAT_FAIL_A
+S1_SDFS_SIZE_FAIL:
+        ldaa    #FAT_ERR_SIZE
+        jmp     FAT_FAIL_A
+
 S1_COPY_FILE_TO_CUR:
         ldaa    FAT_FILE_CLUS0
         staa    FAT_CUR_CLUS0
@@ -97,6 +177,9 @@ S1_GET_ERROR:
 S1_GET_ERROR_DONE:
         clc
         rts
+
+S1_SDFS_NAME:
+        fcc     "SDFS    BIN"
 
 FAT32_INCLUDE_FIND_API equ 1
 FAT32_INCLUDE_FILE_API equ 0
