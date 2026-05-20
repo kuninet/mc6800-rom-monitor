@@ -33,15 +33,15 @@ S1_JUMP_TABLE:
         jmp     S1_GET_ERROR
 
 S1_INIT:
+        clr     FAT_ERROR
         jmp     SD_INIT
 
 S1_READ_SECTOR:
+        clr     FAT_ERROR
         jmp     SD_READ_SECTOR
 
 S1_MOUNT:
-        ldaa    #S1_ERR_UNIMPL
-        sec
-        rts
+        jmp     FAT32_MOUNT
 
 S1_FIND_83:
         ldaa    #S1_ERR_UNIMPL
@@ -54,11 +54,17 @@ S1_LOAD_FILE_83:
         rts
 
 S1_GET_ERROR:
+        ldaa    FAT_ERROR
+        bne     S1_GET_ERROR_DONE
         ldaa    SD_ERROR
+S1_GET_ERROR_DONE:
         clc
         rts
 
+FAT32_INCLUDE_FILE_API equ 0
+
         include "sdcard.asm"
+        include "fat32.asm"
 
 S1_END:
         if S1_END-1 > S1_LIMIT
