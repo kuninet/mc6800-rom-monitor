@@ -2,10 +2,31 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import sys
+from pathlib import Path
 
 
-SECTOR_SIZE = 512
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "tools"))
+
+from fat32_image import (  # noqa: E402
+    EOC,
+    SECTOR_SIZE,
+    Fat32Layout,
+    layout_for_image as _layout_for_image,
+    root_entry,
+    sector,
+    write_cluster as _write_cluster_common,
+    write_file_data as _write_file_data_common,
+    write_fsinfo as _write_fsinfo_common,
+    write_mbr as _write_mbr_common,
+    write_sector as _write_sector_common,
+    write_vbr as _write_vbr_common,
+    cluster_count_for_size as _cluster_count_for_size,
+    sector_count_for_size as _sector_count_for_size,
+)
+
+
 PARTITION_START_LBA = 32
 TOTAL_VOLUME_SECTORS = 64
 RESERVED_SECTORS = 4
@@ -23,7 +44,6 @@ BIG_S_CLUSTER_1 = 9
 BIG_S_CLUSTER_2 = 10
 BIG_S_CLUSTER_3 = 11
 BIG_S_CLUSTER_4 = 12
-EOC = 0x0FFFFFFF
 
 TEST_S_CONTENT = b"S1060200010203F1\r\nS9030000FC\r\n"
 TEST_HEX_CONTENT = b":03030000AABBCCC9\r\n:00000001FF\r\n"
@@ -53,18 +73,6 @@ BIG_S_CONTENT = _make_big_s_content()
 BIG_S_CLUSTERS = (BIG_S_CLUSTER_1, BIG_S_CLUSTER_2, BIG_S_CLUSTER_3, BIG_S_CLUSTER_4)
 
 
-@dataclass(frozen=True)
-class Fat32Layout:
-    volume_start_lba: int
-    fat_lba: int
-    root_dir_lba: int
-    data_start_lba: int
-    sectors_per_cluster: int = SECTORS_PER_CLUSTER
-
-    def cluster_lba(self, cluster: int) -> int:
-        return self.data_start_lba + (cluster - 2) * self.sectors_per_cluster
-
-
 def build_fat32_image(with_mbr: bool, root_chain: bool = False, sectors_per_cluster: int = SECTORS_PER_CLUSTER) -> bytes:
     volume_start = PARTITION_START_LBA if with_mbr else 0
     total_sectors = volume_start + TOTAL_VOLUME_SECTORS
@@ -83,79 +91,37 @@ def build_fat32_image(with_mbr: bool, root_chain: bool = False, sectors_per_clus
 
 
 def layout_for_image(with_mbr: bool, sectors_per_cluster: int = SECTORS_PER_CLUSTER) -> Fat32Layout:
-    volume_start = PARTITION_START_LBA if with_mbr else 0
-    fat_lba = volume_start + RESERVED_SECTORS
-    data_start = volume_start + RESERVED_SECTORS + FAT_COUNT * FAT_SIZE_SECTORS
-    return Fat32Layout(
-        volume_start_lba=volume_start,
-        fat_lba=fat_lba,
-        root_dir_lba=data_start,
-        data_start_lba=data_start,
+    return _layout_for_image(
+        with_mbr=with_mbr,
+        partition_start_lba=PARTITION_START_LBA,
+        total_volume_sectors=TOTAL_VOLUME_SECTORS,
+        reserved_sectors=RESERVED_SECTORS,
+        fat_count=FAT_COUNT,
+        fat_size_sectors=FAT_SIZE_SECTORS,
         sectors_per_cluster=sectors_per_cluster,
+        root_cluster=ROOT_CLUSTER,
     )
 
 
-def sector(image: bytes, lba: int) -> bytes:
-    start = lba * SECTOR_SIZE
-    return image[start:start + SECTOR_SIZE]
-
-
-def root_entry(name: bytes, attr: int, cluster: int, size: int) -> bytes:
-    if len(name) != 11:
-        raise ValueError("FAT 8.3 directory name must be 11 bytes")
-    entry = bytearray(32)
-    entry[0:11] = name
-    entry[11] = attr
-    entry[20:22] = ((cluster >> 16) & 0xFFFF).to_bytes(2, "little")
-    entry[26:28] = (cluster & 0xFFFF).to_bytes(2, "little")
-    entry[28:32] = size.to_bytes(4, "little")
-    return bytes(entry)
-
-
 def _write_mbr(image: bytearray, start_lba: int, sector_count: int) -> None:
-    mbr = bytearray(SECTOR_SIZE)
-    entry = 446
-    mbr[entry + 4] = 0x0C
-    mbr[entry + 8:entry + 12] = start_lba.to_bytes(4, "little")
-    mbr[entry + 12:entry + 16] = sector_count.to_bytes(4, "little")
-    mbr[510:512] = b"\x55\xAA"
-    image[0:SECTOR_SIZE] = mbr
+    _write_mbr_common(image, start_lba, sector_count)
 
 
 def _write_vbr(image: bytearray, lba: int, sectors_per_cluster: int) -> None:
-    vbr = bytearray(SECTOR_SIZE)
-    vbr[0:3] = b"\xEB\x58\x90"
-    vbr[3:11] = b"MSDOS5.0"
-    vbr[11:13] = SECTOR_SIZE.to_bytes(2, "little")
-    vbr[13] = sectors_per_cluster
-    vbr[14:16] = RESERVED_SECTORS.to_bytes(2, "little")
-    vbr[16] = FAT_COUNT
-    vbr[17:19] = (0).to_bytes(2, "little")
-    vbr[19:21] = (0).to_bytes(2, "little")
-    vbr[21] = 0xF8
-    vbr[22:24] = (0).to_bytes(2, "little")
-    vbr[32:36] = TOTAL_VOLUME_SECTORS.to_bytes(4, "little")
-    vbr[36:40] = FAT_SIZE_SECTORS.to_bytes(4, "little")
-    vbr[44:48] = ROOT_CLUSTER.to_bytes(4, "little")
-    vbr[48:50] = (1).to_bytes(2, "little")
-    vbr[50:52] = (0).to_bytes(2, "little")
-    vbr[64] = 0x80
-    vbr[66] = 0x29
-    vbr[67:71] = (0x68004800).to_bytes(4, "little")
-    vbr[71:82] = b"MC6800 SD  "
-    vbr[82:90] = b"FAT32   "
-    vbr[510:512] = b"\x55\xAA"
-    _write_sector(image, lba, vbr)
+    _write_vbr_common(
+        image,
+        lba,
+        total_volume_sectors=TOTAL_VOLUME_SECTORS,
+        reserved_sectors=RESERVED_SECTORS,
+        fat_count=FAT_COUNT,
+        fat_size_sectors=FAT_SIZE_SECTORS,
+        sectors_per_cluster=sectors_per_cluster,
+        root_cluster=ROOT_CLUSTER,
+    )
 
 
 def _write_fsinfo(image: bytearray, lba: int) -> None:
-    fsinfo = bytearray(SECTOR_SIZE)
-    fsinfo[0:4] = b"RRaA"
-    fsinfo[484:488] = b"rrAa"
-    fsinfo[488:492] = (0xFFFFFFFF).to_bytes(4, "little")
-    fsinfo[492:496] = (0xFFFFFFFF).to_bytes(4, "little")
-    fsinfo[510:512] = b"\x55\xAA"
-    _write_sector(image, lba, fsinfo)
+    _write_fsinfo_common(image, lba)
 
 
 def _write_fats(image: bytearray, layout: Fat32Layout, root_chain: bool) -> None:
@@ -227,36 +193,18 @@ def _write_file_clusters(image: bytearray, layout: Fat32Layout, root_chain: bool
 
 
 def _write_cluster(image: bytearray, layout: Fat32Layout, cluster: int, data: bytes) -> None:
-    _write_sector(image, layout.cluster_lba(cluster), data)
+    if len(data) == SECTOR_SIZE:
+        _write_sector(image, layout.cluster_lba(cluster), data)
+        return
+    _write_cluster_common(image, layout, cluster, data)
 
 
 def _write_sector(image: bytearray, lba: int, data: bytes | bytearray) -> None:
-    if len(data) != SECTOR_SIZE:
-        raise ValueError("sector data must be exactly 512 bytes")
-    start = lba * SECTOR_SIZE
-    image[start:start + SECTOR_SIZE] = data
+    _write_sector_common(image, lba, data)
 
 
 def _write_file_data(image: bytearray, layout: Fat32Layout, clusters: tuple[int, ...], data: bytes, fill: int) -> None:
-    sector_count = _sector_count_for_size(len(data))
-    cluster_count = _cluster_count_for_size(len(data), layout.sectors_per_cluster)
-    if cluster_count > len(clusters):
-        raise ValueError("not enough clusters for file data")
-    for sector_index in range(sector_count):
-        chunk = data[sector_index * SECTOR_SIZE:(sector_index + 1) * SECTOR_SIZE]
-        sector_data = chunk + bytes([fill]) * (SECTOR_SIZE - len(chunk))
-        cluster_index = sector_index // layout.sectors_per_cluster
-        sector_in_cluster = sector_index % layout.sectors_per_cluster
-        lba = layout.cluster_lba(clusters[cluster_index]) + sector_in_cluster
-        _write_sector(image, lba, sector_data)
-
-
-def _sector_count_for_size(size: int) -> int:
-    return (size + SECTOR_SIZE - 1) // SECTOR_SIZE
-
-
-def _cluster_count_for_size(size: int, sectors_per_cluster: int) -> int:
-    return (_sector_count_for_size(size) + sectors_per_cluster - 1) // sectors_per_cluster
+    _write_file_data_common(image, layout, clusters, data, fill)
 
 
 def _padded(prefix: bytes, fill: int) -> bytes:
