@@ -60,7 +60,7 @@ ROM 側には次を入れない。
 - 画像や大きなデータの direct access API。
 - RTC / I2C / OLED / VDG高機能処理。
 
-stage1 loader の初期ロード先は、SBC-IO + VDG では **`$C400` 以降**、K6802-SBC + VDG では **`$A400` 以降**を候補にする。`$C000/$A000` 先頭はsector buffer、`$C200/$A200` 以降はモニタ/stage1ワークの候補があるため、実装Issueでは listing で実際のワーク終端を確認してから最終値を決める。
+stage1 loader のロード先は、SBC-IO + VDG では **`$C400-$CFFF`**、K6802-SBC + VDG では **`$A400-$AFFF`** とする。`$C000/$A000` 先頭はsector buffer、`$C200/$A200` 以降はモニタ/stage1ワーク、`$D000-$DEFF` / `$B000-$BEFF` はSDFS/68本体ロード領域、`$DF00-$DFFF` / `$BF00-$BFFF` は当面stack余白として扱う。
 
 stage1 loader には短い header と jump table を置く。初期案は次の最小情報にする。
 
