@@ -64,6 +64,23 @@ ROM_CODE_LIMIT=0 make bin
 | Intel HEX | `MONITOR_PROFILE=sbcio make ihex` | `build/mc6800-monitor-sbcio.hex` |
 | S-record と Intel HEX | `MONITOR_PROFILE=sbcio make` | `.srec` と `.hex` |
 | ROMライタ用の容量合わせ済みバイナリ | `MONITOR_PROFILE=sbcio make rombin ROM_KIND=W27C512` | `build/mc6800-monitor-sbcio-W27C512.bin` |
+| SDFS/68 stage1 | `MONITOR_PROFILE=sbcio_vdg make stage1` | `build/stage1-sbcio-vdg.bin` |
+
+## SDFS/68 stage1
+
+`stage1` ターゲットは SDFS/68 の固定LBA boot areaへ置くstage1 loaderを単体生成する。対象は当面 `sbcio_vdg` と `k6802_vdg` だけで、`base` profileでは生成しない。
+
+```sh
+MONITOR_PROFILE=sbcio_vdg make stage1
+MONITOR_PROFILE=k6802_vdg make stage1
+```
+
+主な出力:
+
+| profile | 出力 |
+| --- | --- |
+| `sbcio_vdg` | `build/stage1-sbcio-vdg.bin` |
+| `k6802_vdg` | `build/stage1-k6802-vdg.bin` |
 
 ## ROM_KIND
 
