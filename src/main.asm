@@ -2363,6 +2363,7 @@ SPURIOUS_IRQ:
 
         include "acia6850.asm"
  if MONITOR_FEATURE_SD
+FAT32_INCLUDE_FILE_API equ 1
         include "sdcard.asm"
         include "fat32.asm"
  endif

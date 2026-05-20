@@ -136,6 +136,19 @@ def test_stage1_read_sector_service_reads_known_fixture_sector() -> None:
     print("[PASS] test_stage1_read_sector_service_reads_known_fixture_sector")
 
 
+def test_stage1_mount_service_accepts_fat32_fixtures() -> None:
+    for with_mbr in (True, False):
+        value = _run_stage1_mount_harness(build_fat32_image(with_mbr=with_mbr))
+        assert value == 0x42, f"S1_MOUNT failed for with_mbr={with_mbr}: {value:02X}"
+    print("[PASS] test_stage1_mount_service_accepts_fat32_fixtures")
+
+
+def test_stage1_mount_service_rejects_invalid_fat32() -> None:
+    value = _run_stage1_mount_harness(bytes(512 * 64))
+    assert value == 0xE1, f"S1_MOUNT unexpectedly accepted invalid image: {value:02X}"
+    print("[PASS] test_stage1_mount_service_rejects_invalid_fat32")
+
+
 def _assert_stage1_header(data: bytes) -> None:
     assert data[0:7] == b"S1API68"
     assert data[7] == 1, "API version mismatch"
@@ -169,6 +182,54 @@ def _run_make(
             f"make stage1 failed for {profile}: stdout={result.stdout!r} stderr={result.stderr!r}"
         )
     return result
+
+
+def _run_stage1_mount_harness(sd_image: bytes) -> int:
+    profile = "sbcio_vdg"
+    _run_make(profile)
+    _run_make(profile, target="bin")
+    expected = EXPECTED[profile]
+    suffix = expected["suffix"]
+    stage1_data = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+    symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"stage1{suffix}.lst",
+        "S1_BASE",
+        "SDFS_LOAD_BASE",
+    )
+    dest = symbols["SDFS_LOAD_BASE"]
+    harness_addr = 0x0100
+    harness = [
+        0xBD, ((symbols["S1_BASE"] + 16) >> 8) & 0xFF, (symbols["S1_BASE"] + 16) & 0xFF,
+        0x25, 0x0B,
+        0xBD, ((symbols["S1_BASE"] + 22) >> 8) & 0xFF, (symbols["S1_BASE"] + 22) & 0xFF,
+        0x25, 0x06,
+        0x86, 0x42,
+        0xB7, (dest >> 8) & 0xFF, dest & 0xFF,
+        0x3F,
+        0x86, 0xE1,
+        0xB7, (dest >> 8) & 0xFF, dest & 0xFF,
+        0x3F,
+    ]
+    input_text = (
+        f"M{symbols['S1_BASE']:04X}\r"
+        f"{_hex_bytes(list(stage1_data))}\r.\r"
+        f"M{harness_addr:04X}\r"
+        f"{_hex_bytes(harness)}\r.\r"
+        f"G{harness_addr:04X}\r"
+        f"D{dest:04X}-{dest:04X}\r"
+        "\r"
+    )
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
+        input_text=input_text,
+        sd_image=sd_image,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    line = _dump_line(stdout, dest)
+    match = re.search(rf"{dest:04X}\s+([0-9A-Fa-f]{{2}})", line)
+    if not match:
+        raise AssertionError(f"missing mount result byte: {line!r}\nstdout={stdout!r}")
+    return int(match.group(1), 16)
 
 
 def _run_emu_with_sd(
@@ -251,6 +312,8 @@ def main() -> None:
         test_stage1_rejects_base_profile,
         test_stage1_profiles_build_and_match_layout,
         test_stage1_read_sector_service_reads_known_fixture_sector,
+        test_stage1_mount_service_accepts_fat32_fixtures,
+        test_stage1_mount_service_rejects_invalid_fat32,
     ]
     passed = 0
     failed = 0

@@ -333,6 +333,7 @@ FAT_FAIL_A:
         sec
         rts
 
+ if FAT32_INCLUDE_FILE_API
 FAT32_FIND_83:
         jsr     FAT_COPY_FIND_NAME
         jsr     FAT_COPY_ROOT_TO_CUR
@@ -841,3 +842,4 @@ FAT_DEC_REM_B2:
 FAT_DEC_REM_LO:
         dec     FAT_BYTES_REM3
         rts
+ endif
