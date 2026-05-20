@@ -130,11 +130,16 @@ endif
 TARGET := mc6800-monitor$(TARGET_SUFFIX)
 OUTDIR := build
 TOPSRC := src/main.asm
+STAGE1_TOPSRC := src/stage1.asm
 OBJ := $(OUTDIR)/$(TARGET).p
 LST := $(OUTDIR)/$(TARGET).lst
 BIN := $(OUTDIR)/$(TARGET).bin
 SREC := $(OUTDIR)/$(TARGET).srec
 IHEX := $(OUTDIR)/$(TARGET).hex
+STAGE1_TARGET := stage1$(TARGET_SUFFIX)
+STAGE1_OBJ := $(OUTDIR)/$(STAGE1_TARGET).p
+STAGE1_LST := $(OUTDIR)/$(STAGE1_TARGET).lst
+STAGE1_BIN := $(OUTDIR)/$(STAGE1_TARGET).bin
 CONFIG_INC := $(OUTDIR)/monitor_config.inc
 ROM_KIND ?= 27C64
 ROM_FILL ?= 0xFF
@@ -190,7 +195,7 @@ endif
 
 ASL_INCLUDE := $(CURDIR)/$(OUTDIR)$(ASL_PATHSEP)$(CURDIR)/include$(ASL_PATHSEP)$(CURDIR)/src
 
-.PHONY: all clean bin check-rom-size srec ihex rombin rombin-27c64 rombin-27c128 rombin-27c256 rombin-28c256 rombin-w27c512 program verify readback program-27c64 program-27c128 program-27c256 program-28c256 program-w27c512 program-upd28c256 FORCE
+.PHONY: all clean bin check-rom-size srec ihex stage1 check-stage1-profile rombin rombin-27c64 rombin-27c128 rombin-27c256 rombin-28c256 rombin-w27c512 program verify readback program-27c64 program-27c128 program-27c256 program-28c256 program-w27c512 program-upd28c256 FORCE
 
 all: check-rom-size srec ihex
 
@@ -210,6 +215,17 @@ $(BIN): $(OBJ)
 
 check-rom-size: $(BIN)
 	"$(PYTHON)" -c "from pathlib import Path; import sys; p=Path('$(BIN)'); size=p.stat().st_size; limit=int('$(ROM_CODE_LIMIT)', 0); print(f'{p}: {size}/{limit} bytes'); sys.exit(0 if limit <= 0 or size <= limit else 1)"
+
+stage1: check-stage1-profile $(STAGE1_BIN)
+
+check-stage1-profile:
+	"$(PYTHON)" -c "import sys; profile='$(MONITOR_PROFILE)'; sys.exit(0 if profile in ('sbcio_vdg', 'k6802_vdg') else 1)" || (echo "stage1 target requires MONITOR_PROFILE=sbcio_vdg or MONITOR_PROFILE=k6802_vdg" && exit 1)
+
+$(STAGE1_OBJ): FORCE $(STAGE1_TOPSRC) include/hardware.inc $(CONFIG_INC) | $(OUTDIR)
+	"$(ASL)" -q -L -olist $(STAGE1_LST) -o $(STAGE1_OBJ) -i $(ASL_INCLUDE_ARG) $(STAGE1_TOPSRC)
+
+$(STAGE1_BIN): $(STAGE1_OBJ)
+	"$(P2BIN)" $(STAGE1_OBJ) $(STAGE1_BIN) -q
 
 srec: $(SREC)
 
