@@ -18,6 +18,18 @@ SDFS/68 は、ROM モニタの `BOOT` から起動する第2段システムで�
 
 ツールは Mac / Windows / Linux で同じ Python コードを使い、FAT32 SDイメージファイルを生成する。実SDカードへの直接書き込みは行わない。
 
+基本形:
+
+```console
+python3 tools/mk_sdfs_image.py --stage1 STAGE1.BIN --sdfs SDFS.BIN --output sdfs.img HELLO.S HELLO.HEX
+```
+
+Windows では `python` コマンドを使う環境もある。
+
+```powershell
+python tools\mk_sdfs_image.py --stage1 STAGE1.BIN --sdfs SDFS.BIN --output sdfs.img HELLO.S HELLO.HEX
+```
+
 入力候補:
 
 - stage1 loader binary
@@ -30,9 +42,13 @@ SDFS/68 は、ROM モニタの `BOOT` から起動する第2段システムで�
 出力:
 
 - FAT32 形式の SDイメージファイル。
-- 固定LBA boot area にstage1 loaderを配置する。
+- partition開始前の physical LBA `16` 以降にstage1 loaderを配置する。
+- FAT32 partition は既定で physical LBA `32` から開始する。
+- 既定出力はホストOSがFAT32として扱えるクラスタ数を持つ。
 - root directory に `SDFS.BIN` と指定ファイルを配置する。
 - テスト用には小さい決定的イメージを生成できるようにする。
+
+stage1 boot area は FAT32 reserved sector ではない。ROMはFATを見ずに physical LBA `16` からstage1を読み、stage1がFAT rootの `SDFS.BIN` を読む。
 
 ## 実SDカードへの書き込み
 

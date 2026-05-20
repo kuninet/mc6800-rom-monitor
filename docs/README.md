@@ -32,6 +32,7 @@
 - [design/memory_map.md](design/memory_map.md)
 - [design/architecture.md](design/architecture.md)
 - [plans/implementation_plan.md](plans/implementation_plan.md)
+- [plans/issue-103_mk_sdfs_image.md](plans/issue-103_mk_sdfs_image.md): SDFS/68 システムSDイメージ生成ツールの実装計画
 - [plans/issue-107_fixed_sector_boot_eval.md](plans/issue-107_fixed_sector_boot_eval.md): 固定セクタ版SDFS/68 loaderのROM削減評価
 - [plans/issue-109_stage1_boot_services.md](plans/issue-109_stage1_boot_services.md): SDFS/68 stage1 boot services設計
 - [testing/sbc6800_bringup.md](testing/sbc6800_bringup.md)
