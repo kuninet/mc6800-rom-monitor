@@ -28,6 +28,7 @@
 - [development/workflow.md](development/workflow.md): Issue/PR、テスト、レビューの開発運用ルール
 - [development/project_context.md](development/project_context.md): 新規コンテキスト向けのプロジェクト引き継ぎ情報
 - [usage/monitor_commands.md](usage/monitor_commands.md): ROM モニタのコマンドリファレンス
+- [usage/sdfs68_system_sd.md](usage/sdfs68_system_sd.md): SDFS/68 システムSDカードの初期方針
 - [design/memory_map.md](design/memory_map.md)
 - [design/architecture.md](design/architecture.md)
 - [plans/implementation_plan.md](plans/implementation_plan.md)
