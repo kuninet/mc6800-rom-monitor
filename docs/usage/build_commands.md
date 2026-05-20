@@ -31,6 +31,12 @@ MONITOR_PROFILE=sbcio make program ROM_KIND=W27C512
 MONITOR_PROFILE=sbcio make program ROM_KIND=W27C512
 ```
 
+`make bin` は生成したROM本体のサイズを確認し、既定では `ROM_CODE_LIMIT=8192` を超えると失敗する。これは27C64互換の8KB ROMに収まらない変更を早期に検出するためである。`make rombin` と `make program` も同じ確認を通ってから容量合わせ済みイメージを作る。サイズ上限を一時的に無効化して調査したい場合だけ、明示的に `ROM_CODE_LIMIT=0` を指定する。
+
+```sh
+ROM_CODE_LIMIT=0 make bin
+```
+
 | 作りたいROM | コマンド | 主な出力 |
 | --- | --- | --- |
 | SBC6800互換の最小ROM | `make bin` | `build/mc6800-monitor.bin` |

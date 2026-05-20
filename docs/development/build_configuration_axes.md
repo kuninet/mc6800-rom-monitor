@@ -51,6 +51,8 @@ SBC-IOを装備していてもメモリ配置は別軸で決めるため、`BOAR
 I2CはSBC-IOのPIAを前提にした将来機能として扱う。
 VDGはSBC-IOとは独立した外部表示装備として扱い、VRAM範囲は `MEMORY_CONFIG` とは別に明示する。
 
+ただし、I2CはRTC、EEPROM、OLED/LCDなど個別デバイス処理を含めるとROM容量を急速に消費する。8KB ROM互換を維持する間は、`FEATURE_I2C=1` を「I2C関連コードを無条件にROMへ押し込む入口」として使わない。ROM側へ入れる場合でも、最小BOOTや診断用の薄い入口に限定し、I2Cバスドライバ本体や個別デバイス機能はシリアル `L`、SD `LF`、または `SDFS.BIN` など第2段のRAMロード機能として検証する。
+
 ## 既存profileの展開
 
 既存の `MONITOR_PROFILE` は、当面は次のプリセットとして扱う。
@@ -117,7 +119,7 @@ make bin MEMORY_CONFIG=ram64_a000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_VDG=1
 同時に、コマンド本体、内部ルーチン、関連文字列はROMから除外する。
 listingのsymbol tableでも、無効機能の内部ラベルは原則として出ないことを期待する。
 
-I2C本体は未実装であり、現時点では構成軸と `BOARD_IO=sbcio` 依存関係だけを導入する。
+I2C本体は未実装であり、現時点では構成軸と `BOARD_IO=sbcio` 依存関係だけを導入する。実装Issueを切る場合も、まずRAMロード可能なPoCとして作り、ROM常駐化はサイズ見積もりと第2段ロード方針を確認してから判断する。
 
 ## MAP表示方針
 
