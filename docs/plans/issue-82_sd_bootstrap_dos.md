@@ -30,6 +30,8 @@
 
 ROM容量は8KB互換を前提にすると既に余裕が小さいため、I2C、RTC、EEPROM、OLED/LCD、AUTOEXEC 処理をROMへ常駐させて肥大化させない。これらの周辺機能は、まずRAMロード可能なPoCとして煮詰め、最終的には `SDFS.BIN` または将来の M6800 DOS 相当の第2段機能へ寄せる。
 
+ROM側のSD機能は `FEATURE_SD` と `FEATURE_FAT` を分ける。`FEATURE_SD` はraw sector readと固定LBA stage1 `BOOT` の前提、`FEATURE_FAT` はROM常駐の `DIR` / `LF` を含める互換構成である。スタンドアロン寄りの `sbcio_vdg` / `k6802_vdg` は `FEATURE_FAT=0` とし、FAT操作はstage1とSDFS/68側へ移す。
+
 ## 方式比較
 
 | 方式 | 位置づけ | 採用条件 |

@@ -160,14 +160,22 @@ def test_error_display():
 
 def test_help_command():
     stdout, stderr, rc = run_emu("H\r\r")
-    if is_sd_build() and is_vdg_build() and is_keyboard_build():
-        expected = "D DIR M MAP RAMTEST VDGTEST KEYTEST G L LF B C R U H F"
+    if is_fat_build() and is_vdg_build() and is_keyboard_build():
+        expected = "D DIR M MAP RAMTEST VDGTEST KEYTEST G L LF BOOT B C R U H F"
+    elif is_fat_build() and is_vdg_build():
+        expected = "D DIR M MAP RAMTEST VDGTEST G L LF BOOT B C R U H F"
+    elif is_fat_build() and is_keyboard_build():
+        expected = "D DIR M MAP RAMTEST KEYTEST G L LF BOOT B C R U H F"
+    elif is_fat_build():
+        expected = "D DIR M MAP RAMTEST G L LF BOOT B C R U H F"
+    elif is_sd_build() and is_vdg_build() and is_keyboard_build():
+        expected = "D M MAP RAMTEST VDGTEST KEYTEST G L BOOT B C R U H F"
     elif is_sd_build() and is_vdg_build():
-        expected = "D DIR M MAP RAMTEST VDGTEST G L LF B C R U H F"
+        expected = "D M MAP RAMTEST VDGTEST G L BOOT B C R U H F"
     elif is_sd_build() and is_keyboard_build():
-        expected = "D DIR M MAP RAMTEST KEYTEST G L LF B C R U H F"
+        expected = "D M MAP RAMTEST KEYTEST G L BOOT B C R U H F"
     elif is_sd_build():
-        expected = "D DIR M MAP RAMTEST G L LF B C R U H F"
+        expected = "D M MAP RAMTEST G L BOOT B C R U H F"
     elif is_vdg_build() and is_keyboard_build():
         expected = "D M MAP RAMTEST VDGTEST KEYTEST G L B C R U H F"
     elif is_vdg_build():
@@ -210,6 +218,12 @@ def is_sd_build() -> bool:
     if os.environ.get("FEATURE_SD") in ("0", "1"):
         return os.environ["FEATURE_SD"] == "1"
     return is_sbcio_build()
+
+
+def is_fat_build() -> bool:
+    if os.environ.get("FEATURE_FAT") in ("0", "1"):
+        return os.environ["FEATURE_FAT"] == "1"
+    return BUILD_ROM_PATH.stem.endswith("-sbcio")
 
 
 def is_keyboard_build() -> bool:

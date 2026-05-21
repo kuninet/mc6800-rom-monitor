@@ -46,12 +46,12 @@ ROM_CODE_LIMIT=0 make bin
 
 ## profileごとの違い
 
-| `MONITOR_PROFILE` | RAM/WORK | SBC-IO | SD/FAT | VDG | KEYTEST | VRAM |
-| --- | --- | --- | --- | --- | --- | --- |
-| `base` | `RAM 0000-1FFF`, `WORK 1C00-1FFF` | なし | なし | なし | なし | なし |
-| `sbcio` | `RAM 0000-7FFF`, `WORK C000-DFFF` | あり | あり | なし | あり | なし |
-| `sbcio_vdg` | `RAM 0000-7FFF`, `WORK C000-DFFF` | あり | あり | あり | あり | `$A000-$BFFF` |
-| `k6802_vdg` | `RAM 0000-7FFF`, `WORK A000-BFFF` | あり | あり | あり | あり | `$C000-$DFFF` |
+| `MONITOR_PROFILE` | RAM/WORK | SBC-IO | raw SD/BOOT | ROM FAT `DIR`/`LF` | VDG | KEYTEST | VRAM |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `base` | `RAM 0000-1FFF`, `WORK 1C00-1FFF` | なし | なし | なし | なし | なし | なし |
+| `sbcio` | `RAM 0000-7FFF`, `WORK C000-DFFF` | あり | あり | あり | なし | あり | なし |
+| `sbcio_vdg` | `RAM 0000-7FFF`, `WORK C000-DFFF` | あり | あり | なし | あり | あり | `$A000-$BFFF` |
+| `k6802_vdg` | `RAM 0000-7FFF`, `WORK A000-BFFF` | あり | あり | なし | あり | あり | `$C000-$DFFF` |
 
 ## 生成物の種類
 
@@ -83,6 +83,8 @@ MONITOR_PROFILE=k6802_vdg make stage1
 | `k6802_vdg` | `build/stage1-k6802-vdg.bin` |
 
 stage1 v1の配置は、`sbcio_vdg` が `$C400-$CFFF`、`k6802_vdg` が `$A400-$AFFF` である。SDFS/68本体の初期ロード領域はそれぞれ `$D000-$DEFF`、`$B000-$BEFF` とする。
+
+ROM profileでは `FEATURE_SD` と `FEATURE_FAT` を分ける。`FEATURE_SD=1` はraw SD sector readと `BOOT` の前提、`FEATURE_FAT=1` はROM常駐の `DIR` / `LF` を含める設定である。`sbcio` は従来のROM FATコマンドを残し、`sbcio_vdg` / `k6802_vdg` はROM FATを外して固定LBA stage1 `BOOT` に寄せる。
 
 ## ROM_KIND
 

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import subprocess
 import tempfile
@@ -12,6 +13,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "tests"))
+sys.path.insert(0, str(PROJECT_ROOT / "tools"))
 sys.path.insert(0, str(PROJECT_ROOT / "emu"))
 EMU_PATH = PROJECT_ROOT / "emu" / "sbc6800_emu.py"
 
@@ -72,6 +74,7 @@ from sd_fixtures import (
     layout_for_image,
     sector,
 )
+from mk_sdfs_image import build_sdfs_image
 
 
 def u16(data: bytes, offset: int) -> int:
@@ -236,8 +239,6 @@ def _poll_until(read_byte, expected: int) -> int:
 
 
 def _load_symbol_addresses(*names: str) -> dict[str, int]:
-    import re
-
     text = BUILD_LST_PATH.read_text(encoding="utf-8", errors="replace")
     result: dict[str, int] = {}
     wanted = set(names)
@@ -292,6 +293,16 @@ def _is_sd_build() -> bool:
     if os.environ.get("FEATURE_SD") in ("0", "1"):
         return os.environ["FEATURE_SD"] == "1"
     return _is_sbcio_build()
+
+
+def _is_fat_build() -> bool:
+    if os.environ.get("FEATURE_FAT") in ("0", "1"):
+        return os.environ["FEATURE_FAT"] == "1"
+    return BUILD_ROM_PATH.stem.endswith("-sbcio")
+
+
+def _is_s1_boot_build() -> bool:
+    return _is_sd_build() and (_is_vdg_build() or BUILD_ROM_PATH.stem.endswith("-sbcio"))
 
 
 def _run_emu_with_sd(input_text: str, sd_image: bytes, max_cycles: int = 30_000_000) -> tuple[str, str, int]:
@@ -495,6 +506,7 @@ def test_rom_sd_read_sector_reads_known_fixture_sector() -> None:
 def test_rom_profile_memory_layout() -> None:
     names = [
         "MONITOR_FEATURE_SD",
+        "MONITOR_FEATURE_FAT",
         "MONITOR_RAM_BASE",
         "USER_RAM_END",
         "WORK_RAM_START",
@@ -526,6 +538,7 @@ def test_rom_profile_memory_layout() -> None:
         expected_work_end = 0x1FFF
 
     assert symbols["MONITOR_FEATURE_SD"] == (1 if _is_sd_build() else 0), "SD feature flag mismatch"
+    assert symbols["MONITOR_FEATURE_FAT"] == (1 if _is_fat_build() else 0), "FAT feature flag mismatch"
     if _is_sd_build():
         assert symbols["SD_SECTOR_BUF"] == expected_sector_buf, (
             f"SD_SECTOR_BUF mismatch: got={symbols['SD_SECTOR_BUF']:04X} "
@@ -814,6 +827,87 @@ def test_rom_dir_keeps_dump_command() -> None:
     print("[PASS] test_rom_dir_keeps_dump_command")
 
 
+def test_rom_boot_loads_fixed_lba_stage1_and_jumps() -> None:
+    if not _is_s1_boot_build():
+        print("[SKIP] test_rom_boot_loads_fixed_lba_stage1_and_jumps")
+        return
+
+    symbols = _load_symbol_addresses("S1_BASE")
+    result_addr = symbols["S1_BASE"] + 0x0300
+    image = _build_boot_stage1_image(_make_boot_stage1_stub(symbols["S1_BASE"], result_addr))
+    stdout, stderr, rc = _run_emu_with_sd(
+        f"BOOT\rD{result_addr:04X}-{result_addr:04X}\r\r",
+        image,
+        max_cycles=120_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    line = _dump_line(stdout, result_addr)
+    assert re.search(rf"{result_addr:04X}\s+42\b", line), f"BOOT did not jump to stage1: {stdout!r}"
+    print("[PASS] test_rom_boot_loads_fixed_lba_stage1_and_jumps")
+
+
+def test_rom_boot_rejects_invalid_stage1_headers() -> None:
+    if not _is_s1_boot_build():
+        print("[SKIP] test_rom_boot_rejects_invalid_stage1_headers")
+        return
+
+    symbols = _load_symbol_addresses("S1_BASE")
+    result_addr = symbols["S1_BASE"] + 0x0300
+    cases = [
+        lambda data: data.__setitem__(0, ord("X")),
+        lambda data: data.__setitem__(slice(10, 12), b"\x00\x00"),
+        lambda data: data.__setitem__(slice(12, 14), b"\x00\x00"),
+        lambda data: data.__setitem__(slice(12, 14), b"\x20\x00"),
+    ]
+    for mutate in cases:
+        stage1 = bytearray(_make_boot_stage1_stub(symbols["S1_BASE"], result_addr))
+        mutate(stage1)
+        image = _build_boot_stage1_image(bytes(stage1))
+        stdout, stderr, rc = _run_emu_with_sd(
+            f"BOOT\rD{result_addr:04X}-{result_addr:04X}\r\r",
+            image,
+            max_cycles=120_000_000,
+        )
+        assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+        assert "?" in stdout, f"BOOT should reject invalid stage1: {stdout!r}"
+        line = _dump_line(stdout, result_addr)
+        assert not re.search(rf"{result_addr:04X}\s+42\b", line), (
+            f"BOOT jumped despite invalid stage1: {stdout!r}"
+        )
+    print("[PASS] test_rom_boot_rejects_invalid_stage1_headers")
+
+
+def test_rom_boot_returns_prompt_on_stage1_read_failure() -> None:
+    if not _is_s1_boot_build():
+        print("[SKIP] test_rom_boot_returns_prompt_on_stage1_read_failure")
+        return
+
+    symbols = _load_symbol_addresses("S1_BASE")
+    result_addr = symbols["S1_BASE"] + 0x0300
+    stdout, stderr, rc = _run_emu_with_sd(
+        f"BOOT\rD{result_addr:04X}-{result_addr:04X}\r\r",
+        bytes(SECTOR_SIZE * 17),
+        max_cycles=120_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert "?" in stdout, f"BOOT read failure should return an error prompt: {stdout!r}"
+    assert f"{result_addr:04X}" in stdout, f"monitor did not continue after BOOT failure: {stdout!r}"
+    print("[PASS] test_rom_boot_returns_prompt_on_stage1_read_failure")
+
+
+def test_rom_fat_commands_disabled_without_feature_fat() -> None:
+    if not _is_sd_build() or _is_fat_build():
+        print("[SKIP] test_rom_fat_commands_disabled_without_feature_fat")
+        return
+
+    stdout, stderr, rc = _run_emu_with_sd("DIR\rLF TEST.S\r\r", build_fat32_image(with_mbr=True))
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert stdout.count("?") >= 2, f"DIR/LF should be disabled when FEATURE_FAT=0: {stdout!r}"
+    assert "TEST.S A" not in stdout, f"DIR should not list FAT root when FEATURE_FAT=0: {stdout!r}"
+    assert "OK" not in stdout, f"LF should not load when FEATURE_FAT=0: {stdout!r}"
+    print("[PASS] test_rom_fat_commands_disabled_without_feature_fat")
+
+
 def test_rom_lf_command_opens_83_files_only() -> None:
     image = build_fat32_image(with_mbr=True)
     input_text = (
@@ -891,7 +985,7 @@ def test_rom_lf_reads_file_across_cluster_boundary_multisector_cluster() -> None
 
 
 def test_sbcio_sd_fat_ignores_old_low_ram_work_area() -> None:
-    if not _is_sbcio_build():
+    if not _is_fat_build():
         print("[SKIP] test_sbcio_sd_fat_ignores_old_low_ram_work_area")
         return
 
@@ -909,7 +1003,7 @@ def test_sbcio_sd_fat_ignores_old_low_ram_work_area() -> None:
 
 
 def test_sbcio_ramtest_preserves_sd_fat_work_area() -> None:
-    if not _is_sbcio_build():
+    if not _is_fat_build():
         print("[SKIP] test_sbcio_ramtest_preserves_sd_fat_work_area")
         return
 
@@ -927,6 +1021,33 @@ def test_sbcio_ramtest_preserves_sd_fat_work_area() -> None:
     assert "TEST.S A 0000001E" in stdout, f"DIR should work after RAMTEST: {stdout!r}"
     assert "0200 01 02 03" in stdout, f"LF should work after RAMTEST: {stdout!r}"
     print("[PASS] test_sbcio_ramtest_preserves_sd_fat_work_area")
+
+
+def _make_boot_stage1_stub(s1_base: int, result_addr: int) -> bytes:
+    entry = s1_base + 16
+    code = bytes([
+        0x86, 0x42,
+        0xB7, (result_addr >> 8) & 0xFF, result_addr & 0xFF,
+        0x3F,
+    ])
+    data = bytearray(512)
+    data[0:7] = b"S1API68"
+    data[7] = 1
+    data[8] = 6
+    data[9] = 0
+    data[10:12] = entry.to_bytes(2, "big")
+    data[12:14] = (16 + len(code)).to_bytes(2, "big")
+    data[16:16 + len(code)] = code
+    return bytes(data)
+
+
+def _build_boot_stage1_image(stage1: bytes) -> bytes:
+    return build_sdfs_image(
+        stage1_data=stage1,
+        sdfs_data=b"SDFS68\x01\x10\x00\x00\x00\x10" + bytes(4),
+        extra_files=[],
+        total_volume_sectors=64,
+    )
 
 
 def main() -> None:
@@ -948,6 +1069,13 @@ def main() -> None:
     if _is_sd_build():
         tests.extend([
             test_rom_sd_read_sector_reads_known_fixture_sector,
+            test_rom_boot_loads_fixed_lba_stage1_and_jumps,
+            test_rom_boot_rejects_invalid_stage1_headers,
+            test_rom_boot_returns_prompt_on_stage1_read_failure,
+            test_rom_fat_commands_disabled_without_feature_fat,
+        ])
+    if _is_fat_build():
+        tests.extend([
             test_rom_fat32_mount_reads_mbr_bpb_layout,
             test_rom_fat32_mount_reads_superfloppy_bpb_layout,
             test_rom_fat32_find_and_read_multicluster_file,
@@ -965,7 +1093,7 @@ def main() -> None:
             test_sbcio_sd_fat_ignores_old_low_ram_work_area,
             test_sbcio_ramtest_preserves_sd_fat_work_area,
         ])
-    else:
+    if not _is_sd_build():
         tests.append(test_rom_sd_commands_disabled_without_feature)
 
     passed = 0

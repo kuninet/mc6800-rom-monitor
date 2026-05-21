@@ -92,11 +92,15 @@ def main() -> None:
     parser.add_argument("--memory-config", choices=MEMORY_CONFIGS, required=True)
     parser.add_argument("--board-io", choices=("none", "sbcio"), required=True)
     parser.add_argument("--feature-sd", type=feature, required=True)
+    parser.add_argument("--feature-fat", type=feature, default=None)
     parser.add_argument("--feature-vdg", type=feature, required=True)
     parser.add_argument("--feature-keyboard", type=feature, required=True)
     parser.add_argument("--feature-i2c", type=feature, required=True)
     parser.add_argument("--vdg-vram-config", choices=VDG_VRAM, required=True)
     args = parser.parse_args()
+    feature_fat = args.feature_sd if args.feature_fat is None else args.feature_fat
+    if feature_fat and not args.feature_sd:
+        raise SystemExit("FEATURE_FAT=1 requires FEATURE_SD=1")
 
     memory = MEMORY_CONFIGS[args.memory_config]
     is_base = args.memory_config == "base8k" and args.board_io == "none"
@@ -120,6 +124,7 @@ def main() -> None:
         f"MONITOR_PROFILE_SBCIO equ {1 if is_sbcio else 0}",
         f"MONITOR_PROFILE_K6802_VDG equ {1 if is_k6802_vdg else 0}",
         f"MONITOR_FEATURE_SD equ {args.feature_sd}",
+        f"MONITOR_FEATURE_FAT equ {feature_fat}",
         f"MONITOR_FEATURE_VDG equ {args.feature_vdg}",
         f"MONITOR_FEATURE_KEYBOARD equ {args.feature_keyboard}",
         f"MONITOR_FEATURE_I2C equ {args.feature_i2c}",
