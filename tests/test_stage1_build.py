@@ -14,8 +14,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "tests"))
 
 from sd_fixtures import (  # noqa: E402
+    BIG_S_CONTENT,
     MULTI_CLUSTER_1,
     MULTI_CLUSTER_1_PREFIX,
+    MULTI_CLUSTER_2_PREFIX,
     TEST_S_CONTENT,
     build_fat32_image,
     layout_for_image,
@@ -193,20 +195,40 @@ def test_stage1_load_file_83_service_loads_one_sector_file() -> None:
     print("[PASS] test_stage1_load_file_83_service_loads_one_sector_file")
 
 
-def test_stage1_load_file_83_service_rejects_unsupported_files() -> None:
-    result, _data = _run_stage1_load_harness(
+def test_stage1_load_file_83_service_loads_multisector_files() -> None:
+    result, data = _run_stage1_load_harness(
         build_fat32_image(with_mbr=True),
         b"MULTI   BIN",
+        512 + len(MULTI_CLUSTER_2_PREFIX),
+    )
+    assert result == 0x42, f"S1_LOAD_FILE_83 failed to load MULTI.BIN: {result:02X}"
+    assert bytes(data[:len(MULTI_CLUSTER_1_PREFIX)]) == MULTI_CLUSTER_1_PREFIX
+    assert bytes(data[512:512 + len(MULTI_CLUSTER_2_PREFIX)]) == MULTI_CLUSTER_2_PREFIX
+
+    result, data = _run_stage1_load_harness(
+        build_fat32_image(with_mbr=True),
+        b"BIGSREC S  ",
+        len(BIG_S_CONTENT),
+    )
+    assert result == 0x42, f"S1_LOAD_FILE_83 failed to load BIGSREC.S: {result:02X}"
+    assert bytes(data[:len(BIG_S_CONTENT)]) == BIG_S_CONTENT
+    print("[PASS] test_stage1_load_file_83_service_loads_multisector_files")
+
+
+def test_stage1_load_file_83_service_rejects_unsupported_files() -> None:
+    result, _data = _run_stage1_load_harness(
+        _build_named_file_image(b"HUGE    BIN", bytes(0x0F01)),
+        b"HUGE    BIN",
         16,
     )
-    assert result == 0xE1, f"S1_LOAD_FILE_83 accepted >512 byte file: {result:02X}"
+    assert result == 0x07, f"S1_LOAD_FILE_83 returned wrong oversized error: {result:02X}"
 
     result, _data = _run_stage1_load_harness(
         build_fat32_image(with_mbr=True),
         b"NOPE    BIN",
         16,
     )
-    assert result == 0xE1, f"S1_LOAD_FILE_83 accepted missing file: {result:02X}"
+    assert result == 0x05, f"S1_LOAD_FILE_83 returned wrong missing-file error: {result:02X}"
     print("[PASS] test_stage1_load_file_83_service_rejects_unsupported_files")
 
 
@@ -216,6 +238,14 @@ def test_stage1_boot_sdfs_jumps_to_valid_entry() -> None:
     print("[PASS] test_stage1_boot_sdfs_jumps_to_valid_entry")
 
 
+def test_stage1_boot_sdfs_loads_multisector_entry() -> None:
+    result = _run_stage1_boot_harness(
+        lambda dest, result_addr: _make_sdfs_bin(dest, result_addr, entry_offset=0x220)
+    )
+    assert result == 0x42, f"S1_BOOT_SDFS did not jump to multisector SDFS entry: {result:02X}"
+    print("[PASS] test_stage1_boot_sdfs_loads_multisector_entry")
+
+
 def test_stage1_boot_sdfs_rejects_invalid_headers() -> None:
     cases = [
         ("bad signature", lambda data: data.__setitem__(0, ord("X"))),
@@ -223,7 +253,7 @@ def test_stage1_boot_sdfs_rejects_invalid_headers() -> None:
         ("bad header size", lambda data: data.__setitem__(7, 15)),
         ("bad entry", lambda data: data.__setitem__(slice(8, 10), b"\x00\x00")),
         ("entry outside size", lambda data: data.__setitem__(slice(8, 10), b"\xD1\x00")),
-        ("bad size", lambda data: data.__setitem__(slice(10, 12), b"\x02\x01")),
+        ("bad size", lambda data: data.__setitem__(slice(10, 12), b"\x0F\x01")),
     ]
     for label, mutate in cases:
         result = _run_stage1_boot_harness(
@@ -396,11 +426,12 @@ def _run_stage1_load_harness(
         PROJECT_ROOT / "build" / f"stage1{suffix}.lst",
         "S1_BASE",
         "SDFS_LOAD_BASE",
+        "SDFS_LOAD_LIMIT",
     )
     dest = symbols["SDFS_LOAD_BASE"]
-    result_addr = dest + 0x0200
+    result_addr = symbols["SDFS_LOAD_LIMIT"] + 1
     harness_addr = 0x0100
-    name_addr = harness_addr + 30
+    name_addr = harness_addr + 31
     harness = [
         0xBD, ((symbols["S1_BASE"] + 16) >> 8) & 0xFF, (symbols["S1_BASE"] + 16) & 0xFF,
         0x25, 0x13,
@@ -412,7 +443,7 @@ def _run_stage1_load_harness(
         0x86, 0x42,
         0xB7, (result_addr >> 8) & 0xFF, result_addr & 0xFF,
         0x3F,
-        0x86, 0xE1,
+        0xBD, ((symbols["S1_BASE"] + 31) >> 8) & 0xFF, (symbols["S1_BASE"] + 31) & 0xFF,
         0xB7, (result_addr >> 8) & 0xFF, result_addr & 0xFF,
         0x3F,
         *fat_name,
@@ -491,24 +522,33 @@ def _run_stage1_boot_harness(sdfs_factory) -> int:
     return int(match.group(1), 16)
 
 
-def _make_sdfs_bin(dest: int, result_addr: int, mutate=None) -> bytes:
-    entry = dest + 16
+def _make_sdfs_bin(dest: int, result_addr: int, entry_offset: int = 16, mutate=None) -> bytes:
+    entry = dest + entry_offset
     entry_code = [
         0x86, 0x42,
         0xB7, (result_addr >> 8) & 0xFF, result_addr & 0xFF,
         0x3F,
     ]
-    size = 16 + len(entry_code)
+    size = entry_offset + len(entry_code)
     data = bytearray(size)
     data[0:6] = b"SDFS68"
     data[6] = 1
     data[7] = 16
     data[8:10] = entry.to_bytes(2, "big")
     data[10:12] = size.to_bytes(2, "big")
-    data[16:] = bytes(entry_code)
+    data[entry_offset:] = bytes(entry_code)
     if mutate is not None:
         mutate(data)
     return bytes(data)
+
+
+def _build_named_file_image(fat_name: bytes, data: bytes) -> bytes:
+    image, _layout = build_fat32_image_from_files(
+        [Fat32File(fat_name, data)],
+        with_mbr=True,
+        total_volume_sectors=96,
+    )
+    return image
 
 
 def _build_sdfs_image(sdfs_data: bytes) -> bytes:
@@ -627,8 +667,10 @@ def main() -> None:
         test_stage1_find_83_service_finds_root_entries,
         test_stage1_find_83_service_rejects_missing_name,
         test_stage1_load_file_83_service_loads_one_sector_file,
+        test_stage1_load_file_83_service_loads_multisector_files,
         test_stage1_load_file_83_service_rejects_unsupported_files,
         test_stage1_boot_sdfs_jumps_to_valid_entry,
+        test_stage1_boot_sdfs_loads_multisector_entry,
         test_stage1_boot_sdfs_rejects_invalid_headers,
     ]
     passed = 0
