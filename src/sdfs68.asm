@@ -35,13 +35,88 @@ SDFS_START:
         jsr     SDFS_PRINT_PROMPT
 
 SDFS_LOOP:
-        jsr     MIKBUG_INCH
-        cmpa    #CHR_LF
-        beq     SDFS_LOOP
-        cmpa    #CHR_CR
-        bne     SDFS_LOOP
+        jsr     SDFS_READ_LINE
+        ldab    LINE_LEN
+        beq     SDFS_PROMPT_NEXT
+        ldaa    LINE_BUF
+        jsr     SDFS_TO_UPPER
+        cmpa    #'L'
+        bne     SDFS_CHECK_DUMP
+        jsr     SDFS_CMD_LOAD
+        bcc     SDFS_LOAD_OK
+        jsr     SDFS_SHOW_LOADER_ERROR
+        bra     SDFS_PROMPT_NEXT
+SDFS_LOAD_OK:
+        ldx     #TXT_OK
+        jsr     SDFS_PRINT
+        bra     SDFS_PROMPT_NEXT
+SDFS_CHECK_DUMP:
+        cmpa    #'D'
+        bne     SDFS_COMMAND_ERROR
+        jsr     SDFS_CMD_DUMP_BYTE
+        bcc     SDFS_PROMPT_NEXT
+        jsr     SDFS_SHOW_ERROR
+SDFS_PROMPT_NEXT:
         jsr     SDFS_PRINT_PROMPT
         bra     SDFS_LOOP
+SDFS_COMMAND_ERROR:
+        jsr     SDFS_SHOW_ERROR
+        bra     SDFS_PROMPT_NEXT
+
+SDFS_CMD_LOAD:
+        clr     LOADER_MODE
+        clr     LOADER_STAGE
+        ldab    LINE_LEN
+        cmpb    #2
+        blo     SDFS_CMD_LOAD_FAIL
+        subb    #1
+        ldx     #LINE_BUF+1
+        jsr     SDFS_PARSE_FILENAME_83
+        bcs     SDFS_CMD_LOAD_FAIL
+        jsr     SDFS_API_MOUNT
+        bcs     SDFS_CMD_LOAD_FAIL
+        ldx     #FAT_FIND_NAME0
+        jsr     SDFS_API_FIND_83
+        bcs     SDFS_CMD_LOAD_FAIL
+        jsr     SDFS_STREAM_OPEN
+        bcs     SDFS_CMD_LOAD_FAIL
+SDFS_LOAD_LOOP:
+        jsr     SDFS_READ_LOADER_RECORD
+        bcs     SDFS_CMD_LOAD_FAIL
+        cmpa    #1
+        beq     SDFS_CMD_LOAD_DONE
+        bra     SDFS_LOAD_LOOP
+SDFS_CMD_LOAD_DONE:
+        clc
+        rts
+SDFS_CMD_LOAD_FAIL:
+        sec
+        rts
+
+SDFS_CMD_DUMP_BYTE:
+        ldab    LINE_LEN
+        cmpb    #2
+        blo     SDFS_CMD_DUMP_FAIL
+        subb    #1
+        ldx     #LINE_BUF+1
+        jsr     SDFS_PARSE_HEX16
+        bcs     SDFS_CMD_DUMP_FAIL
+        ldaa    HEX_VALUE_HI
+        jsr     SDFS_PRINT_HEX8
+        ldaa    HEX_VALUE_LO
+        jsr     SDFS_PRINT_HEX8
+        ldaa    #CHR_SPACE
+        jsr     SDFS_PUTC
+        ldx     HEX_VALUE_HI
+        ldaa    0,x
+        jsr     SDFS_PRINT_HEX8
+        ldaa    #CHR_CR
+        jsr     SDFS_PUTC
+        clc
+        rts
+SDFS_CMD_DUMP_FAIL:
+        sec
+        rts
 
 SDFS_CHECK_S1:
         ldx     #S1_BASE
@@ -104,6 +179,925 @@ SDFS_API_GET_ERROR:
         jsr     S1_BASE+31
         rts
 
+SDFS_READ_LINE:
+        ldx     #LINE_BUF
+        stx     LINE_PTR
+        clr     LINE_LEN
+SDFS_READ_LINE_LOOP:
+        jsr     MIKBUG_INCH
+        cmpa    #CHR_LF
+        beq     SDFS_READ_LINE_LOOP
+        cmpa    #CHR_CR
+        beq     SDFS_READ_LINE_DONE
+        cmpa    #CHR_BS
+        beq     SDFS_READ_LINE_BACKSPACE
+        cmpa    #CHR_DEL
+        beq     SDFS_READ_LINE_BACKSPACE
+        cmpa    #CHR_SPACE
+        blo     SDFS_READ_LINE_LOOP
+        ldab    LINE_LEN
+        cmpb    #LINE_BUF_SIZE
+        bhs     SDFS_READ_LINE_LOOP
+        ldx     LINE_PTR
+        staa    0,x
+        inx
+        stx     LINE_PTR
+        inc     LINE_LEN
+        bra     SDFS_READ_LINE_LOOP
+SDFS_READ_LINE_BACKSPACE:
+        tst     LINE_LEN
+        beq     SDFS_READ_LINE_LOOP
+        ldx     LINE_PTR
+        dex
+        stx     LINE_PTR
+        dec     LINE_LEN
+        bra     SDFS_READ_LINE_LOOP
+SDFS_READ_LINE_DONE:
+        ldaa    #CHR_CR
+        jsr     SDFS_PUTC
+        rts
+
+SDFS_PARSE_FILENAME_83:
+        stx     ARG_PTR
+        stab    ARG_LEN
+        jsr     SDFS_CLEAR_FIND_NAME
+SDFS_PARSE_FILENAME_SKIP_HEAD:
+        tst     ARG_LEN
+        bne     SDFS_PARSE_FILENAME_SKIP_HAS
+        jmp     SDFS_PARSE_FILENAME_FAIL
+SDFS_PARSE_FILENAME_SKIP_HAS:
+        ldx     ARG_PTR
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        bne     SDFS_PARSE_FILENAME_NAME_START
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+        bra     SDFS_PARSE_FILENAME_SKIP_HEAD
+
+SDFS_PARSE_FILENAME_NAME_START:
+        ldx     #FAT_FIND_NAME0
+        stx     FAT_ENTRY_PTR
+        clr     ARG2_LEN
+SDFS_PARSE_FILENAME_NAME_LOOP:
+        tst     ARG_LEN
+        beq     SDFS_PARSE_FILENAME_NAME_DONE
+        ldx     ARG_PTR
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        bne     SDFS_PARSE_FILENAME_NAME_NOT_SPACE
+        jmp     SDFS_PARSE_FILENAME_TRAILING
+SDFS_PARSE_FILENAME_NAME_NOT_SPACE:
+        cmpa    #'.'
+        bne     SDFS_PARSE_FILENAME_NAME_NOT_DOT
+        jmp     SDFS_PARSE_FILENAME_EXT_START
+SDFS_PARSE_FILENAME_NAME_NOT_DOT:
+        ldab    ARG2_LEN
+        cmpb    #8
+        blo     SDFS_PARSE_FILENAME_NAME_ROOM
+        jmp     SDFS_PARSE_FILENAME_FAIL
+SDFS_PARSE_FILENAME_NAME_ROOM:
+        jsr     SDFS_TO_UPPER
+        ldx     FAT_ENTRY_PTR
+        staa    0,x
+        inx
+        stx     FAT_ENTRY_PTR
+        inc     ARG2_LEN
+        ldx     ARG_PTR
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+        bra     SDFS_PARSE_FILENAME_NAME_LOOP
+
+SDFS_PARSE_FILENAME_NAME_DONE:
+        tst     ARG2_LEN
+        bne     SDFS_PARSE_FILENAME_NAME_OK
+        jmp     SDFS_PARSE_FILENAME_FAIL
+SDFS_PARSE_FILENAME_NAME_OK:
+        jmp     SDFS_PARSE_FILENAME_OK
+
+SDFS_PARSE_FILENAME_EXT_START:
+        tst     ARG2_LEN
+        bne     SDFS_PARSE_FILENAME_EXT_NAME_OK
+        jmp     SDFS_PARSE_FILENAME_FAIL
+SDFS_PARSE_FILENAME_EXT_NAME_OK:
+        ldx     ARG_PTR
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+        ldx     #FAT_FIND_NAME8
+        stx     FAT_ENTRY_PTR
+        clr     ARG2_LEN
+SDFS_PARSE_FILENAME_EXT_LOOP:
+        tst     ARG_LEN
+        bne     SDFS_PARSE_FILENAME_EXT_HAS_LEN
+        jmp     SDFS_PARSE_FILENAME_OK
+SDFS_PARSE_FILENAME_EXT_HAS_LEN:
+        ldx     ARG_PTR
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        bne     SDFS_PARSE_FILENAME_EXT_NOT_SPACE
+        jmp     SDFS_PARSE_FILENAME_TRAILING
+SDFS_PARSE_FILENAME_EXT_NOT_SPACE:
+        cmpa    #'.'
+        bne     SDFS_PARSE_FILENAME_EXT_CHAR_OK
+        jmp     SDFS_PARSE_FILENAME_FAIL
+SDFS_PARSE_FILENAME_EXT_CHAR_OK:
+        ldab    ARG2_LEN
+        cmpb    #3
+        blo     SDFS_PARSE_FILENAME_EXT_ROOM
+        jmp     SDFS_PARSE_FILENAME_FAIL
+SDFS_PARSE_FILENAME_EXT_ROOM:
+        jsr     SDFS_TO_UPPER
+        ldx     FAT_ENTRY_PTR
+        staa    0,x
+        inx
+        stx     FAT_ENTRY_PTR
+        inc     ARG2_LEN
+        ldx     ARG_PTR
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+        bra     SDFS_PARSE_FILENAME_EXT_LOOP
+
+SDFS_PARSE_FILENAME_TRAILING:
+        ldx     ARG_PTR
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+SDFS_PARSE_FILENAME_TRAILING_LOOP:
+        tst     ARG_LEN
+        beq     SDFS_PARSE_FILENAME_OK
+        ldx     ARG_PTR
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        beq     SDFS_PARSE_FILENAME_TRAILING_SPACE_OK
+        jmp     SDFS_PARSE_FILENAME_FAIL
+SDFS_PARSE_FILENAME_TRAILING_SPACE_OK:
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+        bra     SDFS_PARSE_FILENAME_TRAILING_LOOP
+
+SDFS_PARSE_FILENAME_OK:
+        clc
+        rts
+SDFS_PARSE_FILENAME_FAIL:
+        sec
+        rts
+
+SDFS_CLEAR_FIND_NAME:
+        ldx     #FAT_FIND_NAME0
+        ldab    #11
+SDFS_CLEAR_FIND_NAME_LOOP:
+        ldaa    #CHR_SPACE
+        staa    0,x
+        inx
+        decb
+        bne     SDFS_CLEAR_FIND_NAME_LOOP
+        rts
+
+SDFS_TO_UPPER:
+        cmpa    #'a'
+        blo     SDFS_TO_UPPER_DONE
+        cmpa    #'z'
+        bhi     SDFS_TO_UPPER_DONE
+        suba    #$20
+SDFS_TO_UPPER_DONE:
+        rts
+
+SDFS_PARSE_HEX16:
+        stx     ARG_PTR
+        stab    ARG_LEN
+        clr     HEX_VALUE_HI
+        clr     HEX_VALUE_LO
+        clr     ARG2_LEN
+SDFS_PARSE_HEX16_SKIP:
+        tst     ARG_LEN
+        bne     SDFS_PARSE_HEX16_SKIP_HAS
+        jmp     SDFS_PARSE_HEX16_FAIL
+SDFS_PARSE_HEX16_SKIP_HAS:
+        ldx     ARG_PTR
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        bne     SDFS_PARSE_HEX16_LOOP
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+        bra     SDFS_PARSE_HEX16_SKIP
+SDFS_PARSE_HEX16_LOOP:
+        tst     ARG_LEN
+        beq     SDFS_PARSE_HEX16_DONE
+        ldx     ARG_PTR
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        beq     SDFS_PARSE_HEX16_TRAILING
+        jsr     SDFS_HEX_TO_NIBBLE
+        bcs     SDFS_PARSE_HEX16_FAIL
+        ldab    ARG2_LEN
+        cmpb    #4
+        bhs     SDFS_PARSE_HEX16_FAIL
+        tstb
+        beq     SDFS_PARSE_HEX16_HI_H
+        cmpb    #1
+        beq     SDFS_PARSE_HEX16_HI_L
+        cmpb    #2
+        beq     SDFS_PARSE_HEX16_LO_H
+        oraa    HEX_VALUE_LO
+        staa    HEX_VALUE_LO
+        bra     SDFS_PARSE_HEX16_ADVANCE
+SDFS_PARSE_HEX16_HI_H:
+        lsla
+        lsla
+        lsla
+        lsla
+        staa    HEX_VALUE_HI
+        bra     SDFS_PARSE_HEX16_ADVANCE
+SDFS_PARSE_HEX16_HI_L:
+        oraa    HEX_VALUE_HI
+        staa    HEX_VALUE_HI
+        bra     SDFS_PARSE_HEX16_ADVANCE
+SDFS_PARSE_HEX16_LO_H:
+        lsla
+        lsla
+        lsla
+        lsla
+        staa    HEX_VALUE_LO
+SDFS_PARSE_HEX16_ADVANCE:
+        ldx     ARG_PTR
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+        inc     ARG2_LEN
+        bra     SDFS_PARSE_HEX16_LOOP
+SDFS_PARSE_HEX16_TRAILING:
+        ldx     ARG_PTR
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+SDFS_PARSE_HEX16_TRAILING_LOOP:
+        tst     ARG_LEN
+        beq     SDFS_PARSE_HEX16_DONE
+        ldx     ARG_PTR
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        bne     SDFS_PARSE_HEX16_FAIL
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+        bra     SDFS_PARSE_HEX16_TRAILING_LOOP
+SDFS_PARSE_HEX16_DONE:
+        ldaa    ARG2_LEN
+        cmpa    #4
+        bne     SDFS_PARSE_HEX16_FAIL
+        clc
+        rts
+SDFS_PARSE_HEX16_FAIL:
+        sec
+        rts
+
+SDFS_STREAM_OPEN:
+        ldaa    FAT_FILE_CLUS0
+        staa    FAT_CUR_CLUS0
+        ldaa    FAT_FILE_CLUS1
+        staa    FAT_CUR_CLUS1
+        ldaa    FAT_FILE_CLUS2
+        staa    FAT_CUR_CLUS2
+        ldaa    FAT_FILE_CLUS3
+        staa    FAT_CUR_CLUS3
+        ldaa    FAT_FILE_SIZE0
+        staa    FAT_BYTES_REM0
+        ldaa    FAT_FILE_SIZE1
+        staa    FAT_BYTES_REM1
+        ldaa    FAT_FILE_SIZE2
+        staa    FAT_BYTES_REM2
+        ldaa    FAT_FILE_SIZE3
+        staa    FAT_BYTES_REM3
+        clr     FAT_COPY_COUNT
+        clr     FAT_COPY_COUNT+1
+        clr     FAT_SECTOR_IN_CLUS
+        ldx     #SD_SECTOR_BUF
+        stx     FAT_ENTRY_PTR
+        clc
+        rts
+
+SDFS_STREAM_GETC:
+        jsr     SDFS_BYTES_REMAIN
+        bcs     SDFS_STREAM_HAS_REMAIN
+        sec
+        rts
+SDFS_STREAM_HAS_REMAIN:
+        ldaa    FAT_COPY_COUNT
+        oraa    FAT_COPY_COUNT+1
+        bne     SDFS_STREAM_HAVE_SECTOR
+        jsr     SDFS_STREAM_LOAD_SECTOR
+        bcc     SDFS_STREAM_HAVE_SECTOR
+        sec
+        rts
+SDFS_STREAM_HAVE_SECTOR:
+        ldx     FAT_ENTRY_PTR
+        ldaa    0,x
+        inx
+        stx     FAT_ENTRY_PTR
+        psha
+        ldx     FAT_COPY_COUNT
+        dex
+        stx     FAT_COPY_COUNT
+        jsr     SDFS_DEC_BYTES_REM_ONE
+        ldaa    FAT_COPY_COUNT
+        oraa    FAT_COPY_COUNT+1
+        bne     SDFS_STREAM_RETURN_BYTE
+        jsr     SDFS_BYTES_REMAIN
+        bcc     SDFS_STREAM_RETURN_BYTE
+        jsr     SDFS_ADVANCE_FILE_SECTOR
+        bcc     SDFS_STREAM_RETURN_BYTE
+        pula
+        sec
+        rts
+SDFS_STREAM_RETURN_BYTE:
+        pula
+        clc
+        rts
+
+SDFS_STREAM_LOAD_SECTOR:
+        jsr     SDFS_SECTOR_TO_SD_LBA
+        ldx     #SD_SECTOR_BUF
+        jsr     SDFS_API_READ_SECTOR
+        bcc     SDFS_STREAM_LOAD_OK
+        sec
+        rts
+SDFS_STREAM_LOAD_OK:
+        jsr     SDFS_PREP_COPY_COUNT
+        ldx     #SD_SECTOR_BUF
+        stx     FAT_ENTRY_PTR
+        clc
+        rts
+
+SDFS_SECTOR_TO_SD_LBA:
+        jsr     SDFS_CLUSTER_TO_SD_LBA
+        ldab    FAT_SECTOR_IN_CLUS
+        beq     SDFS_SECTOR_TO_SD_LBA_DONE
+SDFS_SECTOR_TO_SD_LBA_LOOP:
+        jsr     SDFS_INC_SD_LBA
+        decb
+        bne     SDFS_SECTOR_TO_SD_LBA_LOOP
+SDFS_SECTOR_TO_SD_LBA_DONE:
+        rts
+
+SDFS_CLUSTER_TO_SD_LBA:
+        ldaa    FAT_DATA_LBA0
+        staa    SD_LBA0
+        ldaa    FAT_DATA_LBA1
+        staa    SD_LBA1
+        ldaa    FAT_DATA_LBA2
+        staa    SD_LBA2
+        ldaa    FAT_DATA_LBA3
+        staa    SD_LBA3
+        ldaa    FAT_CUR_CLUS3
+        suba    #$02
+        staa    FAT_TMP
+SDFS_CLUSTER_ADD_LOOP:
+        ldaa    FAT_TMP
+        beq     SDFS_CLUSTER_ADD_DONE
+        ldab    FAT_SEC_PER_CLUS
+SDFS_CLUSTER_ADD_SECTOR_LOOP:
+        jsr     SDFS_INC_SD_LBA
+        decb
+        bne     SDFS_CLUSTER_ADD_SECTOR_LOOP
+        dec     FAT_TMP
+        bra     SDFS_CLUSTER_ADD_LOOP
+SDFS_CLUSTER_ADD_DONE:
+        rts
+
+SDFS_INC_SD_LBA:
+        inc     SD_LBA3
+        bne     SDFS_INC_SD_LBA_DONE
+        inc     SD_LBA2
+        bne     SDFS_INC_SD_LBA_DONE
+        inc     SD_LBA1
+        bne     SDFS_INC_SD_LBA_DONE
+        inc     SD_LBA0
+SDFS_INC_SD_LBA_DONE:
+        rts
+
+SDFS_ADVANCE_FILE_SECTOR:
+        inc     FAT_SECTOR_IN_CLUS
+        ldaa    FAT_SECTOR_IN_CLUS
+        cmpa    FAT_SEC_PER_CLUS
+        blo     SDFS_ADVANCE_SAME_CLUSTER
+        clr     FAT_SECTOR_IN_CLUS
+        jsr     SDFS_NEXT_CLUSTER
+        bcc     SDFS_ADVANCE_NEXT_CLUSTER
+        sec
+        rts
+SDFS_ADVANCE_NEXT_CLUSTER:
+        jsr     SDFS_COPY_NEXT_TO_CUR
+SDFS_ADVANCE_SAME_CLUSTER:
+        clc
+        rts
+
+SDFS_NEXT_CLUSTER:
+        ldaa    FAT_FAT_LBA0
+        staa    SD_LBA0
+        ldaa    FAT_FAT_LBA1
+        staa    SD_LBA1
+        ldaa    FAT_FAT_LBA2
+        staa    SD_LBA2
+        ldaa    FAT_FAT_LBA3
+        staa    SD_LBA3
+        ldx     #SD_SECTOR_BUF
+        jsr     SDFS_API_READ_SECTOR
+        bcc     SDFS_NEXT_OFFSET_PREP
+        sec
+        rts
+SDFS_NEXT_OFFSET_PREP:
+        ldaa    FAT_CUR_CLUS3
+        asla
+        asla
+        tab
+        ldx     #SD_SECTOR_BUF
+SDFS_NEXT_OFFSET_LOOP:
+        tstb
+        beq     SDFS_NEXT_READ
+        inx
+        decb
+        bra     SDFS_NEXT_OFFSET_LOOP
+SDFS_NEXT_READ:
+        ldaa    3,x
+        anda    #$0F
+        staa    FAT_NEXT_CLUS0
+        ldaa    2,x
+        staa    FAT_NEXT_CLUS1
+        ldaa    1,x
+        staa    FAT_NEXT_CLUS2
+        ldaa    0,x
+        staa    FAT_NEXT_CLUS3
+        ldaa    FAT_NEXT_CLUS0
+        cmpa    #$0F
+        bne     SDFS_NEXT_NOT_EOC
+        ldaa    FAT_NEXT_CLUS1
+        cmpa    #$FF
+        bne     SDFS_NEXT_NOT_EOC
+        ldaa    FAT_NEXT_CLUS2
+        cmpa    #$FF
+        bne     SDFS_NEXT_NOT_EOC
+        ldaa    FAT_NEXT_CLUS3
+        cmpa    #$F8
+        blo     SDFS_NEXT_NOT_EOC
+        sec
+        rts
+SDFS_NEXT_NOT_EOC:
+        clc
+        rts
+
+SDFS_COPY_NEXT_TO_CUR:
+        ldaa    FAT_NEXT_CLUS0
+        staa    FAT_CUR_CLUS0
+        ldaa    FAT_NEXT_CLUS1
+        staa    FAT_CUR_CLUS1
+        ldaa    FAT_NEXT_CLUS2
+        staa    FAT_CUR_CLUS2
+        ldaa    FAT_NEXT_CLUS3
+        staa    FAT_CUR_CLUS3
+        rts
+
+SDFS_BYTES_REMAIN:
+        ldaa    FAT_BYTES_REM0
+        oraa    FAT_BYTES_REM1
+        oraa    FAT_BYTES_REM2
+        oraa    FAT_BYTES_REM3
+        bne     SDFS_BYTES_REMAIN_YES
+        clc
+        rts
+SDFS_BYTES_REMAIN_YES:
+        sec
+        rts
+
+SDFS_PREP_COPY_COUNT:
+        ldaa    FAT_BYTES_REM0
+        oraa    FAT_BYTES_REM1
+        bne     SDFS_PREP_COPY_512
+        ldaa    FAT_BYTES_REM2
+        cmpa    #$02
+        bhs     SDFS_PREP_COPY_512
+        staa    FAT_COPY_COUNT
+        ldaa    FAT_BYTES_REM3
+        staa    FAT_COPY_COUNT+1
+        rts
+SDFS_PREP_COPY_512:
+        ldaa    #$02
+        staa    FAT_COPY_COUNT
+        clr     FAT_COPY_COUNT+1
+        rts
+
+SDFS_DEC_BYTES_REM_ONE:
+        ldaa    FAT_BYTES_REM3
+        bne     SDFS_DEC_REM_LO
+        ldaa    #$FF
+        staa    FAT_BYTES_REM3
+        ldaa    FAT_BYTES_REM2
+        bne     SDFS_DEC_REM_B2
+        ldaa    #$FF
+        staa    FAT_BYTES_REM2
+        ldaa    FAT_BYTES_REM1
+        bne     SDFS_DEC_REM_B1
+        ldaa    #$FF
+        staa    FAT_BYTES_REM1
+        dec     FAT_BYTES_REM0
+        rts
+SDFS_DEC_REM_B1:
+        dec     FAT_BYTES_REM1
+        rts
+SDFS_DEC_REM_B2:
+        dec     FAT_BYTES_REM2
+        rts
+SDFS_DEC_REM_LO:
+        dec     FAT_BYTES_REM3
+        rts
+
+SDFS_READ_LOADER_RECORD:
+        jsr     SDFS_READ_RECORD_HEAD
+        bcs     SDFS_READ_LOADER_RECORD_FAIL
+        ldaa    LOADER_MODE
+        bne     SDFS_READ_LOADER_RECORD_MODE_SET
+        ldaa    HEX_NIBBLE
+        cmpa    #'S'
+        beq     SDFS_READ_LOADER_RECORD_SET_SREC
+        cmpa    #':'
+        beq     SDFS_READ_LOADER_RECORD_SET_IHEX
+        sec
+        rts
+SDFS_READ_LOADER_RECORD_SET_SREC:
+        ldaa    #LOAD_MODE_SREC
+        staa    LOADER_MODE
+        bra     SDFS_READ_LOADER_RECORD_MODE_SET
+SDFS_READ_LOADER_RECORD_SET_IHEX:
+        ldaa    #LOAD_MODE_IHEX
+        staa    LOADER_MODE
+SDFS_READ_LOADER_RECORD_MODE_SET:
+        ldaa    LOADER_MODE
+        cmpa    #LOAD_MODE_SREC
+        beq     SDFS_READ_SREC_RECORD
+        cmpa    #LOAD_MODE_IHEX
+        bne     SDFS_READ_LOADER_RECORD_FAIL
+        jmp     SDFS_READ_IHEX_RECORD
+SDFS_READ_LOADER_RECORD_FAIL:
+        sec
+        rts
+
+SDFS_READ_RECORD_HEAD:
+        jsr     SDFS_STREAM_GETC
+        bcs     SDFS_READ_RECORD_HEAD_FAIL
+        cmpa    #CHR_LF
+        beq     SDFS_READ_RECORD_HEAD
+        cmpa    #CHR_CR
+        beq     SDFS_READ_RECORD_HEAD
+        cmpa    #CHR_SPACE
+        blo     SDFS_READ_RECORD_HEAD
+        staa    HEX_NIBBLE
+        clc
+        rts
+SDFS_READ_RECORD_HEAD_FAIL:
+        sec
+        rts
+
+SDFS_READ_RECORD_TRAILER:
+        jsr     SDFS_STREAM_GETC
+        bcs     SDFS_READ_RECORD_TRAILER_OK
+        cmpa    #CHR_LF
+        beq     SDFS_READ_RECORD_TRAILER_OK
+        cmpa    #CHR_CR
+        beq     SDFS_READ_RECORD_TRAILER_OK
+SDFS_READ_RECORD_TRAILER_FAIL:
+        sec
+        rts
+SDFS_READ_RECORD_TRAILER_OK:
+        clc
+        rts
+
+SDFS_READ_HEXBYTE_INPUT:
+        pshb
+        jsr     SDFS_STREAM_GETC
+        bcs     SDFS_READ_HEXBYTE_INPUT_FAIL
+        jsr     SDFS_HEX_TO_NIBBLE
+        bcs     SDFS_READ_HEXBYTE_INPUT_FAIL
+        lsla
+        lsla
+        lsla
+        lsla
+        tab
+        jsr     SDFS_STREAM_GETC
+        bcs     SDFS_READ_HEXBYTE_INPUT_FAIL
+        jsr     SDFS_HEX_TO_NIBBLE
+        bcs     SDFS_READ_HEXBYTE_INPUT_FAIL
+        aba
+        pulb
+        clc
+        rts
+SDFS_READ_HEXBYTE_INPUT_FAIL:
+        pulb
+        sec
+        rts
+
+SDFS_READ_SREC_RECORD:
+        ldaa    HEX_NIBBLE
+        cmpa    #'S'
+        beq     SDFS_READ_SREC_HEAD_OK
+        jmp     SDFS_READ_SREC_FAIL
+SDFS_READ_SREC_HEAD_OK:
+        ldaa    #1
+        staa    LOADER_STAGE
+        jsr     SDFS_STREAM_GETC
+        bcs     SDFS_READ_SREC_FAIL_NEAR0
+        staa    LOADER_TYPE
+        cmpa    #'0'
+        beq     SDFS_READ_SREC_TYPE_OK
+        cmpa    #'1'
+        beq     SDFS_READ_SREC_TYPE_OK
+        cmpa    #'2'
+        beq     SDFS_READ_SREC_TYPE_OK
+        cmpa    #'5'
+        beq     SDFS_READ_SREC_TYPE_OK
+        cmpa    #'8'
+        beq     SDFS_READ_SREC_TYPE_OK
+        cmpa    #'9'
+        beq     SDFS_READ_SREC_TYPE_OK
+        jmp     SDFS_READ_SREC_FAIL
+SDFS_READ_SREC_FAIL_NEAR0:
+        jmp     SDFS_READ_SREC_FAIL
+SDFS_READ_SREC_TYPE_OK:
+        ldaa    #2
+        staa    LOADER_STAGE
+        jsr     SDFS_READ_HEXBYTE_INPUT
+        bcs     SDFS_READ_SREC_FAIL_NEAR1
+        staa    LOADER_COUNT
+        staa    LOADER_SUM
+        ldaa    LOADER_TYPE
+        cmpa    #'2'
+        beq     SDFS_READ_SREC_ADDR24
+        cmpa    #'8'
+        beq     SDFS_READ_SREC_ADDR24
+        ldaa    LOADER_COUNT
+        cmpa    #3
+        blo     SDFS_READ_SREC_FAIL_NEAR1
+        ldaa    #3
+        staa    LOADER_STAGE
+        jsr     SDFS_READ_HEXBYTE_INPUT
+        bcs     SDFS_READ_SREC_FAIL_NEAR1
+        staa    LOADER_ADDR
+        jsr     SDFS_ADD_TO_LOADER_SUM
+        jsr     SDFS_READ_HEXBYTE_INPUT
+        bcs     SDFS_READ_SREC_FAIL_NEAR1
+        staa    LOADER_ADDR+1
+        jsr     SDFS_ADD_TO_LOADER_SUM
+        ldab    LOADER_COUNT
+        subb    #3
+        bra     SDFS_READ_SREC_DATA_LOOP
+SDFS_READ_SREC_FAIL_NEAR1:
+        jmp     SDFS_READ_SREC_FAIL
+SDFS_READ_SREC_ADDR24:
+        ldaa    LOADER_COUNT
+        cmpa    #4
+        blo     SDFS_READ_SREC_FAIL_NEAR2
+        ldaa    #3
+        staa    LOADER_STAGE
+        jsr     SDFS_READ_HEXBYTE_INPUT
+        bcs     SDFS_READ_SREC_FAIL_NEAR2
+        staa    HEX_NIBBLE
+        jsr     SDFS_ADD_TO_LOADER_SUM
+        ldaa    HEX_NIBBLE
+        bne     SDFS_READ_SREC_FAIL_NEAR2
+        jsr     SDFS_READ_HEXBYTE_INPUT
+        bcs     SDFS_READ_SREC_FAIL_NEAR2
+        staa    LOADER_ADDR
+        jsr     SDFS_ADD_TO_LOADER_SUM
+        jsr     SDFS_READ_HEXBYTE_INPUT
+        bcs     SDFS_READ_SREC_FAIL_NEAR2
+        staa    LOADER_ADDR+1
+        jsr     SDFS_ADD_TO_LOADER_SUM
+        ldab    LOADER_COUNT
+        subb    #4
+        bra     SDFS_READ_SREC_DATA_LOOP
+SDFS_READ_SREC_FAIL_NEAR2:
+        jmp     SDFS_READ_SREC_FAIL
+SDFS_READ_SREC_DATA_LOOP:
+        ldaa    #4
+        staa    LOADER_STAGE
+        tstb
+        beq     SDFS_READ_SREC_CHECKSUM
+        jsr     SDFS_READ_HEXBYTE_INPUT
+        bcs     SDFS_READ_SREC_FAIL
+        staa    HEX_NIBBLE
+        jsr     SDFS_ADD_TO_LOADER_SUM
+        ldaa    LOADER_TYPE
+        cmpa    #'1'
+        beq     SDFS_READ_SREC_STORE
+        cmpa    #'2'
+        bne     SDFS_READ_SREC_SKIP_STORE
+SDFS_READ_SREC_STORE:
+        ldaa    HEX_NIBBLE
+        pshb
+        ldx     LOADER_ADDR
+        staa    0,x
+        inx
+        stx     LOADER_ADDR
+        pulb
+SDFS_READ_SREC_SKIP_STORE:
+        decb
+        bra     SDFS_READ_SREC_DATA_LOOP
+SDFS_READ_SREC_CHECKSUM:
+        ldaa    #5
+        staa    LOADER_STAGE
+        jsr     SDFS_READ_HEXBYTE_INPUT
+        bcs     SDFS_READ_SREC_FAIL
+        jsr     SDFS_ADD_TO_LOADER_SUM
+        cmpa    #$FF
+        bne     SDFS_READ_SREC_FAIL
+        jsr     SDFS_READ_RECORD_TRAILER
+        bcs     SDFS_READ_SREC_FAIL
+        ldaa    LOADER_TYPE
+        cmpa    #'8'
+        beq     SDFS_READ_SREC_EOF
+        cmpa    #'9'
+        beq     SDFS_READ_SREC_EOF
+        ldaa    #0
+        clc
+        rts
+SDFS_READ_SREC_EOF:
+        ldaa    #1
+        clc
+        rts
+SDFS_READ_SREC_FAIL:
+        sec
+        rts
+
+SDFS_READ_IHEX_RECORD:
+        ldaa    HEX_NIBBLE
+        cmpa    #':'
+        beq     SDFS_READ_IHEX_HEAD_OK
+        jmp     SDFS_READ_IHEX_FAIL
+SDFS_READ_IHEX_HEAD_OK:
+        ldaa    #1
+        staa    LOADER_STAGE
+        ldaa    #2
+        staa    LOADER_STAGE
+        jsr     SDFS_READ_HEXBYTE_INPUT
+        bcs     SDFS_READ_IHEX_FAIL_NEAR1
+        staa    LOADER_COUNT
+        staa    LOADER_SUM
+        ldaa    #3
+        staa    LOADER_STAGE
+        jsr     SDFS_READ_HEXBYTE_INPUT
+        bcs     SDFS_READ_IHEX_FAIL_NEAR1
+        staa    LOADER_ADDR
+        jsr     SDFS_ADD_TO_LOADER_SUM
+        jsr     SDFS_READ_HEXBYTE_INPUT
+        bcs     SDFS_READ_IHEX_FAIL_NEAR1
+        staa    LOADER_ADDR+1
+        jsr     SDFS_ADD_TO_LOADER_SUM
+        jsr     SDFS_READ_HEXBYTE_INPUT
+        bcs     SDFS_READ_IHEX_FAIL_NEAR1
+        staa    LOADER_TYPE
+        jsr     SDFS_ADD_TO_LOADER_SUM
+        ldaa    LOADER_TYPE
+        cmpa    #$00
+        beq     SDFS_READ_IHEX_DATA
+        cmpa    #$01
+        bne     SDFS_READ_IHEX_FAIL
+        ldaa    LOADER_COUNT
+        bne     SDFS_READ_IHEX_FAIL
+        bra     SDFS_READ_IHEX_DATA
+SDFS_READ_IHEX_FAIL_NEAR1:
+        jmp     SDFS_READ_IHEX_FAIL
+SDFS_READ_IHEX_DATA:
+        ldaa    #4
+        staa    LOADER_STAGE
+        ldab    LOADER_COUNT
+SDFS_READ_IHEX_DATA_LOOP:
+        tstb
+        beq     SDFS_READ_IHEX_CHECKSUM
+        jsr     SDFS_READ_HEXBYTE_INPUT
+        bcs     SDFS_READ_IHEX_FAIL
+        staa    HEX_NIBBLE
+        jsr     SDFS_ADD_TO_LOADER_SUM
+        ldaa    LOADER_TYPE
+        cmpa    #$00
+        bne     SDFS_READ_IHEX_SKIP_STORE
+        ldaa    HEX_NIBBLE
+        pshb
+        ldx     LOADER_ADDR
+        staa    0,x
+        inx
+        stx     LOADER_ADDR
+        pulb
+SDFS_READ_IHEX_SKIP_STORE:
+        decb
+        bra     SDFS_READ_IHEX_DATA_LOOP
+SDFS_READ_IHEX_CHECKSUM:
+        ldaa    #5
+        staa    LOADER_STAGE
+        jsr     SDFS_READ_HEXBYTE_INPUT
+        bcs     SDFS_READ_IHEX_FAIL
+        jsr     SDFS_ADD_TO_LOADER_SUM
+        cmpa    #$00
+        bne     SDFS_READ_IHEX_FAIL
+        jsr     SDFS_READ_RECORD_TRAILER
+        bcs     SDFS_READ_IHEX_FAIL
+        ldaa    LOADER_TYPE
+        cmpa    #$01
+        beq     SDFS_READ_IHEX_EOF
+        ldaa    #0
+        clc
+        rts
+SDFS_READ_IHEX_EOF:
+        ldaa    #1
+        clc
+        rts
+SDFS_READ_IHEX_FAIL:
+        sec
+        rts
+
+SDFS_HEX_TO_NIBBLE:
+        cmpa    #'0'
+        blo     SDFS_HEX_TO_NIBBLE_FAIL
+        cmpa    #'9'
+        bhi     SDFS_HEX_ALPHA
+        suba    #'0'
+        clc
+        rts
+SDFS_HEX_ALPHA:
+        cmpa    #'A'
+        blo     SDFS_HEX_LOWER
+        cmpa    #'F'
+        bhi     SDFS_HEX_LOWER
+        suba    #'A'
+        adda    #10
+        clc
+        rts
+SDFS_HEX_LOWER:
+        cmpa    #'a'
+        blo     SDFS_HEX_TO_NIBBLE_FAIL
+        cmpa    #'f'
+        bhi     SDFS_HEX_TO_NIBBLE_FAIL
+        suba    #'a'
+        adda    #10
+        clc
+        rts
+SDFS_HEX_TO_NIBBLE_FAIL:
+        sec
+        rts
+
+SDFS_ADD_TO_LOADER_SUM:
+        adda    LOADER_SUM
+        staa    LOADER_SUM
+        rts
+
+SDFS_PRINT_HEX8:
+        psha
+        lsra
+        lsra
+        lsra
+        lsra
+        bsr     SDFS_PRINT_NIBBLE
+        pula
+        bsr     SDFS_PRINT_NIBBLE
+        rts
+
+SDFS_PRINT_NIBBLE:
+        anda    #$0F
+        adda    #'0'
+        cmpa    #'9'+1
+        blo     SDFS_PRINT_NIBBLE_OUT
+        adda    #7
+SDFS_PRINT_NIBBLE_OUT:
+        jmp     SDFS_PUTC
+
+SDFS_SHOW_ERROR:
+        ldx     #TXT_ERROR
+        jmp     SDFS_PRINT
+
+SDFS_SHOW_LOADER_ERROR:
+        ldx     #TXT_ERROR_PREFIX
+        jsr     SDFS_PRINT
+        ldaa    LOADER_MODE
+        beq     SDFS_SHOW_LOADER_ERROR_CR
+        cmpa    #LOAD_MODE_SREC
+        bne     SDFS_SHOW_LOADER_ERROR_IHEX
+        ldaa    #'S'
+        jsr     SDFS_PUTC
+        bra     SDFS_SHOW_LOADER_ERROR_STAGE
+SDFS_SHOW_LOADER_ERROR_IHEX:
+        ldaa    #'I'
+        jsr     SDFS_PUTC
+SDFS_SHOW_LOADER_ERROR_STAGE:
+        ldaa    LOADER_STAGE
+        adda    #'0'
+        jsr     SDFS_PUTC
+SDFS_SHOW_LOADER_ERROR_CR:
+        ldaa    #CHR_CR
+        jsr     SDFS_PUTC
+        rts
+
 SDFS_PRINT_PROMPT:
         ldx     #TXT_PROMPT
         jmp     SDFS_PRINT
@@ -135,6 +1129,18 @@ TXT_BANNER:
 
 TXT_PROMPT:
         fcc     "SDFS> "
+        fcb     0
+
+TXT_OK:
+        fcc     "OK"
+        fcb     CHR_CR,0
+
+TXT_ERROR:
+        fcc     "?"
+        fcb     CHR_CR,0
+
+TXT_ERROR_PREFIX:
+        fcc     "?"
         fcb     0
 
 TXT_S1_ERROR:

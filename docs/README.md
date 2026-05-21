@@ -45,6 +45,7 @@
 - [plans/issue-123_stage1_memory_3kb.md](plans/issue-123_stage1_memory_3kb.md): SDFS/68 stage1 3KB配置
 - [plans/issue-125_stage1_sdfs_entry.md](plans/issue-125_stage1_sdfs_entry.md): SDFS/68 stage1 header検査とentry jump
 - [plans/issue-129_sdfs68_migration_roadmap.md](plans/issue-129_sdfs68_migration_roadmap.md): SDFS/68 v1移行とROM FAT整理ロードマップ
+- [plans/issue-130_sdfs68_loader.md](plans/issue-130_sdfs68_loader.md): SDFS/68 v1 HEX/S-recordロード
 - [testing/sbc6800_bringup.md](testing/sbc6800_bringup.md)
 - [testing/sbc_io_sd_bringup.md](testing/sbc_io_sd_bringup.md): SBC-IO と microSD SPI モジュールで SD/FAT を実機確認する手順
 - [testing/sbc6800_datapack.md](testing/sbc6800_datapack.md): SBC6800 データパックの扱いと互換確認

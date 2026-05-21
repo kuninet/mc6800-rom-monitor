@@ -13,6 +13,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "tools"))
 
+from fat32_image import Fat32File  # noqa: E402
 from mk_sdfs_image import build_sdfs_image  # noqa: E402
 
 EMU_PATH = PROJECT_ROOT / "emu" / "sbc6800_emu.py"
@@ -125,6 +126,68 @@ def test_stage1_boot_runs_built_sdfs_binary() -> None:
         assert "SDFS/68 V1" in stdout, f"missing SDFS banner for {profile}: {stdout!r}"
         assert "SDFS> " in stdout, f"missing SDFS prompt for {profile}: {stdout!r}"
     print("[PASS] test_stage1_boot_runs_built_sdfs_binary")
+
+
+def test_sdfs_loads_srec_and_ihex_files() -> None:
+    for profile, expected in EXPECTED.items():
+        _run_make(profile, "bin")
+        _run_make(profile, "stage1")
+        _run_make(profile, "sdfs")
+        suffix = expected["suffix"]
+        stage1 = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+        sdfs = (PROJECT_ROOT / "build" / f"SDFS{suffix}.BIN").read_bytes()
+        image = build_sdfs_image(
+            stage1_data=stage1,
+            sdfs_data=sdfs,
+            extra_files=[
+                _file("HELLO.S", _srec_file(0x0200, b"S")),
+                _file("HELLO.HEX", _ihex_file(0x0201, b"I")),
+                _file("EOF.HEX", _ihex_file(0x0202, b"N", trailing_newline=False)),
+            ],
+        )
+        stdout, stderr, rc = _run_emu_with_sd(
+            rom_path=PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
+            input_text="BOOT\rL HELLO.S\rD0200\rL HELLO.HEX\rD0201\rL EOF.HEX\rD0202\rX",
+            sd_image=image,
+            max_cycles=160_000_000,
+        )
+        assert rc == 0 and "[TIMEOUT]" not in stderr, (
+            f"emulator failed for {profile}: rc={rc} stderr={stderr!r}"
+        )
+        assert "0200 53" in stdout, f"S-record load did not write data for {profile}: {stdout!r}"
+        assert "0201 49" in stdout, f"Intel HEX load did not write data for {profile}: {stdout!r}"
+        assert "0202 4E" in stdout, f"EOF-without-newline HEX did not load for {profile}: {stdout!r}"
+        assert stdout.count("OK") >= 3, f"missing load success messages for {profile}: {stdout!r}"
+    print("[PASS] test_sdfs_loads_srec_and_ihex_files")
+
+
+def test_sdfs_loader_errors_return_to_prompt() -> None:
+    profile = "sbcio_vdg"
+    _run_make(profile, "bin")
+    _run_make(profile, "stage1")
+    _run_make(profile, "sdfs")
+    suffix = EXPECTED[profile]["suffix"]
+    stage1 = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+    sdfs = (PROJECT_ROOT / "build" / f"SDFS{suffix}.BIN").read_bytes()
+    image = build_sdfs_image(
+        stage1_data=stage1,
+        sdfs_data=sdfs,
+        extra_files=[
+            _file("BAD.HEX", b":00000000FF\r\n"),
+            _file("NOEND.S", b"S1060200010203F1\r\n"),
+        ],
+    )
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
+        input_text="BOOT\rL MISSING.S\rL BAD.HEX\rL NOEND.S\rX",
+        sd_image=image,
+        max_cycles=140_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert "MISSING.S" in stdout and "BAD.HEX" in stdout and "NOEND.S" in stdout
+    assert stdout.count("SDFS> ") >= 4, f"SDFS prompt did not recover after errors: {stdout!r}"
+    assert "?" in stdout, f"missing loader error output: {stdout!r}"
+    print("[PASS] test_sdfs_loader_errors_return_to_prompt")
 
 
 def test_sdfs_rejects_missing_boot_services() -> None:
@@ -272,6 +335,34 @@ def _hex_bytes(values: list[int]) -> str:
     return "\r".join(f"{value:02X}" for value in values)
 
 
+def _file(name: str, data: bytes) -> Fat32File:
+    stem, _dot, ext = name.partition(".")
+    name83 = stem.upper().encode("ascii").ljust(8, b" ")
+    name83 += ext.upper().encode("ascii").ljust(3, b" ")
+    return Fat32File(name83, data)
+
+
+def _srec_file(address: int, data: bytes, trailing_newline: bool = True) -> bytes:
+    count = len(data) + 3
+    values = [count, (address >> 8) & 0xFF, address & 0xFF, *data]
+    checksum = (~sum(values)) & 0xFF
+    record = "S1" + "".join(f"{value:02X}" for value in [*values, checksum])
+    text = record + "\r\nS9030000FC"
+    if trailing_newline:
+        text += "\r\n"
+    return text.encode("ascii")
+
+
+def _ihex_file(address: int, data: bytes, trailing_newline: bool = True) -> bytes:
+    values = [len(data), (address >> 8) & 0xFF, address & 0xFF, 0x00, *data]
+    checksum = (-sum(values)) & 0xFF
+    record = ":" + "".join(f"{value:02X}" for value in [*values, checksum])
+    text = record + "\r\n:00000001FF"
+    if trailing_newline:
+        text += "\r\n"
+    return text.encode("ascii")
+
+
 def _load_symbols(path: Path, *names: str) -> dict[str, int]:
     text = path.read_text(encoding="utf-8", errors="replace")
     result: dict[str, int] = {}
@@ -300,6 +391,8 @@ def main() -> None:
         test_sdfs_profiles_build_and_match_header,
         test_sdfs_api_wrappers_target_stage1_jump_table,
         test_stage1_boot_runs_built_sdfs_binary,
+        test_sdfs_loads_srec_and_ihex_files,
+        test_sdfs_loader_errors_return_to_prompt,
         test_sdfs_rejects_missing_boot_services,
         test_sdfs_rejects_bad_boot_services_headers,
     ]
