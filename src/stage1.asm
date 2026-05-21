@@ -7,7 +7,7 @@ S1_API_COUNT    equ 6
 S1_FLAG_NONE    equ 0
 S1_ERR_NONE     equ 0
 S1_ERR_UNIMPL   equ 1
-S1_LOAD_MAX_HI  equ 2
+S1_LOAD_MAX_HI  equ $0F
 S1_LOAD_MAX_LO  equ 0
 
 SDFS_VERSION    equ 1
@@ -59,26 +59,18 @@ S1_LOAD_CHECK_SIZE:
         oraa    FAT_FILE_SIZE1
         bne     S1_LOAD_SIZE_FAIL
         ldaa    FAT_FILE_SIZE2
-        cmpa    #$02
+        cmpa    #S1_LOAD_MAX_HI
         bhi     S1_LOAD_SIZE_FAIL
         bne     S1_LOAD_NONZERO
         ldaa    FAT_FILE_SIZE3
+        cmpa    #S1_LOAD_MAX_LO
         bne     S1_LOAD_SIZE_FAIL
 S1_LOAD_NONZERO:
         ldaa    FAT_FILE_SIZE2
         oraa    FAT_FILE_SIZE3
         beq     S1_LOAD_SIZE_FAIL
-        jsr     S1_COPY_FILE_TO_CUR
-        jsr     FAT_CLUSTER_TO_SD_LBA
         ldx     #SDFS_LOAD_BASE
-        jsr     SD_READ_SECTOR
-        bcc     S1_LOAD_OK
-        ldaa    #FAT_ERR_SD
-        jmp     FAT_FAIL_A
-S1_LOAD_OK:
-        clr     FAT_ERROR
-        clc
-        rts
+        jmp     FAT32_READ_FILE
 S1_LOAD_SIZE_FAIL:
         ldaa    #FAT_ERR_SIZE
         jmp     FAT_FAIL_A
@@ -159,17 +151,6 @@ S1_SDFS_SIZE_FAIL:
         ldaa    #FAT_ERR_SIZE
         jmp     FAT_FAIL_A
 
-S1_COPY_FILE_TO_CUR:
-        ldaa    FAT_FILE_CLUS0
-        staa    FAT_CUR_CLUS0
-        ldaa    FAT_FILE_CLUS1
-        staa    FAT_CUR_CLUS1
-        ldaa    FAT_FILE_CLUS2
-        staa    FAT_CUR_CLUS2
-        ldaa    FAT_FILE_CLUS3
-        staa    FAT_CUR_CLUS3
-        rts
-
 S1_GET_ERROR:
         ldaa    FAT_ERROR
         bne     S1_GET_ERROR_DONE
@@ -182,7 +163,7 @@ S1_SDFS_NAME:
         fcc     "SDFS    BIN"
 
 FAT32_INCLUDE_FIND_API equ 1
-FAT32_INCLUDE_FILE_API equ 0
+FAT32_INCLUDE_FILE_API equ 1
 
         include "sdcard.asm"
         include "fat32.asm"
