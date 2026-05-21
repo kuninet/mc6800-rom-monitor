@@ -10,6 +10,7 @@ PROFILE_TARGET_SUFFIX :=
 PROFILE_MEMORY_CONFIG := base8k
 PROFILE_BOARD_IO := none
 PROFILE_FEATURE_SD := 0
+PROFILE_FEATURE_FAT := 0
 PROFILE_FEATURE_VDG := 0
 PROFILE_FEATURE_KEYBOARD := 0
 PROFILE_FEATURE_I2C := 0
@@ -19,6 +20,7 @@ PROFILE_TARGET_SUFFIX := -sbcio
 PROFILE_MEMORY_CONFIG := ram64_c000_work
 PROFILE_BOARD_IO := sbcio
 PROFILE_FEATURE_SD := 1
+PROFILE_FEATURE_FAT := 1
 PROFILE_FEATURE_VDG := 0
 PROFILE_FEATURE_KEYBOARD := 1
 PROFILE_FEATURE_I2C := 0
@@ -28,6 +30,7 @@ PROFILE_TARGET_SUFFIX := -sbcio-vdg
 PROFILE_MEMORY_CONFIG := ram64_c000_work
 PROFILE_BOARD_IO := sbcio
 PROFILE_FEATURE_SD := 1
+PROFILE_FEATURE_FAT := 0
 PROFILE_FEATURE_VDG := 1
 PROFILE_FEATURE_KEYBOARD := 1
 PROFILE_FEATURE_I2C := 0
@@ -37,6 +40,7 @@ PROFILE_TARGET_SUFFIX := -k6802-vdg
 PROFILE_MEMORY_CONFIG := ram64_a000_work
 PROFILE_BOARD_IO := sbcio
 PROFILE_FEATURE_SD := 1
+PROFILE_FEATURE_FAT := 0
 PROFILE_FEATURE_VDG := 1
 PROFILE_FEATURE_KEYBOARD := 1
 PROFILE_FEATURE_I2C := 0
@@ -55,6 +59,9 @@ endif
 ifneq ($(filter command line environment environment override,$(origin FEATURE_SD)),)
 AXIS_OVERRIDE := 1
 endif
+ifneq ($(filter command line environment environment override,$(origin FEATURE_FAT)),)
+AXIS_OVERRIDE := 1
+endif
 ifneq ($(filter command line environment environment override,$(origin FEATURE_VDG)),)
 AXIS_OVERRIDE := 1
 endif
@@ -71,6 +78,7 @@ endif
 MEMORY_CONFIG ?= $(PROFILE_MEMORY_CONFIG)
 BOARD_IO ?= $(PROFILE_BOARD_IO)
 FEATURE_SD ?= $(PROFILE_FEATURE_SD)
+FEATURE_FAT ?= $(PROFILE_FEATURE_FAT)
 FEATURE_VDG ?= $(PROFILE_FEATURE_VDG)
 FEATURE_KEYBOARD ?= $(PROFILE_FEATURE_KEYBOARD)
 FEATURE_I2C ?= $(PROFILE_FEATURE_I2C)
@@ -90,6 +98,9 @@ endif
 ifeq ($(filter $(FEATURE_SD),$(VALID_FEATURE_VALUES)),)
 $(error Unsupported FEATURE_SD '$(FEATURE_SD)')
 endif
+ifeq ($(filter $(FEATURE_FAT),$(VALID_FEATURE_VALUES)),)
+$(error Unsupported FEATURE_FAT '$(FEATURE_FAT)')
+endif
 ifeq ($(filter $(FEATURE_VDG),$(VALID_FEATURE_VALUES)),)
 $(error Unsupported FEATURE_VDG '$(FEATURE_VDG)')
 endif
@@ -106,6 +117,11 @@ endif
 ifneq ($(FEATURE_SD),0)
 ifneq ($(BOARD_IO),sbcio)
 $(error FEATURE_SD=1 requires BOARD_IO=sbcio)
+endif
+endif
+ifneq ($(FEATURE_FAT),0)
+ifeq ($(FEATURE_SD),0)
+$(error FEATURE_FAT=1 requires FEATURE_SD=1)
 endif
 endif
 ifneq ($(FEATURE_KEYBOARD),0)
@@ -203,7 +219,7 @@ $(OUTDIR):
 	$(MKDIR_P)
 
 $(CONFIG_INC): FORCE tools/generate_monitor_config.py | $(OUTDIR)
-	"$(PYTHON)" tools/generate_monitor_config.py --output "$(CONFIG_INC)" --monitor-profile "$(MONITOR_PROFILE)" --memory-config "$(MEMORY_CONFIG)" --board-io "$(BOARD_IO)" --feature-sd "$(FEATURE_SD)" --feature-vdg "$(FEATURE_VDG)" --feature-keyboard "$(FEATURE_KEYBOARD)" --feature-i2c "$(FEATURE_I2C)" --vdg-vram-config "$(VDG_VRAM_CONFIG)"
+	"$(PYTHON)" tools/generate_monitor_config.py --output "$(CONFIG_INC)" --monitor-profile "$(MONITOR_PROFILE)" --memory-config "$(MEMORY_CONFIG)" --board-io "$(BOARD_IO)" --feature-sd "$(FEATURE_SD)" --feature-fat "$(FEATURE_FAT)" --feature-vdg "$(FEATURE_VDG)" --feature-keyboard "$(FEATURE_KEYBOARD)" --feature-i2c "$(FEATURE_I2C)" --vdg-vram-config "$(VDG_VRAM_CONFIG)"
 
 $(OBJ): FORCE $(TOPSRC) include/hardware.inc include/mikbug.inc $(CONFIG_INC) src/acia6850.asm src/sdcard.asm src/fat32.asm | $(OUTDIR)
 	"$(ASL)" -q -L -olist $(LST) -o $(OBJ) -i $(ASL_INCLUDE_ARG) $(TOPSRC)

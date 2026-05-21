@@ -78,7 +78,7 @@ MAIN_LOOP:
         ldaa    LINE_BUF
         cmpa    #'D'
         bne     CHK_CMD_MOD
- if MONITOR_FEATURE_SD
+ if MONITOR_FEATURE_FAT
         jsr     IS_CMD_DIR
         bcs     MAIN_DISPATCH_DUMP
         jmp     CMD_DIR
@@ -104,6 +104,14 @@ CHK_CMD_LOAD:
 CHK_CMD_BREAK:
         cmpa    #'B'
         bne     CHK_CMD_RESUME
+ if MONITOR_FEATURE_SD
+ if S1_SUPPORTED
+        jsr     IS_CMD_BOOT
+        bcs     MAIN_DISPATCH_BREAK
+        jmp     CMD_BOOT
+MAIN_DISPATCH_BREAK:
+ endif
+ endif
         jmp     CMD_BREAK_SET
 CHK_CMD_RESUME:
         cmpa    #'R'
@@ -148,7 +156,7 @@ MAIN_LOOP_ERROR:
         jsr     SHOW_ERROR
         bra     MAIN_LOOP
 
- if MONITOR_FEATURE_SD
+ if MONITOR_FEATURE_FAT
 IS_CMD_DIR:
         ldab    LINE_LEN
         cmpb    #3
@@ -216,6 +224,29 @@ IS_CMD_RAMTEST:
 IS_CMD_RAMTEST_FAIL:
         sec
         rts
+
+ if MONITOR_FEATURE_SD
+ if S1_SUPPORTED
+IS_CMD_BOOT:
+        ldab    LINE_LEN
+        cmpb    #4
+        bne     IS_CMD_BOOT_FAIL
+        ldaa    LINE_BUF+1
+        cmpa    #'O'
+        bne     IS_CMD_BOOT_FAIL
+        ldaa    LINE_BUF+2
+        cmpa    #'O'
+        bne     IS_CMD_BOOT_FAIL
+        ldaa    LINE_BUF+3
+        cmpa    #'T'
+        bne     IS_CMD_BOOT_FAIL
+        clc
+        rts
+IS_CMD_BOOT_FAIL:
+        sec
+        rts
+ endif
+ endif
 
 CMD_DUMP:
         ldab    LINE_LEN
@@ -481,7 +512,7 @@ PARSE_FILL_FAIL:
         sec
         rts
 
- if MONITOR_FEATURE_SD
+ if MONITOR_FEATURE_FAT
 PARSE_FILENAME_83:
         stx     ARG_PTR
         stab    ARG_LEN
@@ -1362,7 +1393,7 @@ CMD_LOAD_BADARG:
         jmp     MAIN_LOOP_ERROR
 
 CMD_LOAD_EXTENDED:
- if MONITOR_FEATURE_SD
+ if MONITOR_FEATURE_FAT
         ldaa    LINE_BUF+1
         cmpa    #'F'
         beq     CMD_LF
@@ -1371,7 +1402,7 @@ CMD_LOAD_EXTENDED:
  endif
         jmp     CMD_LOAD_BADARG
 
- if MONITOR_FEATURE_SD
+ if MONITOR_FEATURE_FAT
 CMD_LF:
         ldab    LINE_LEN
         subb    #2
@@ -1392,7 +1423,128 @@ CMD_LF:
         bra     CMD_LOAD_LOOP
 CMD_LF_ERROR:
         jmp     MAIN_LOOP_ERROR
+ endif
 
+ if MONITOR_FEATURE_SD
+ if S1_SUPPORTED
+S1_BOOT_SECTORS equ (S1_LIMIT-S1_BASE+1)/$0200
+S1_BOOT_MAX_HI  equ (S1_LIMIT-S1_BASE+1)/$0100
+S1_BOOT_MAX_LO  equ 0
+
+CMD_BOOT:
+        jsr     SD_INIT
+        bcs     CMD_BOOT_ERROR
+        jsr     BOOT_SET_LBA16
+        ldx     #S1_BASE
+        stx     FAT_READ_PTR
+        ldaa    #S1_BOOT_SECTORS
+        staa    FAT_TMP
+CMD_BOOT_READ_LOOP:
+        ldx     FAT_READ_PTR
+        jsr     SD_READ_SECTOR
+        bcs     CMD_BOOT_ERROR
+        dec     FAT_TMP
+        beq     CMD_BOOT_CHECK
+        ldaa    FAT_READ_PTR
+        adda    #$02
+        staa    FAT_READ_PTR
+        jsr     BOOT_INC_SD_LBA
+        bra     CMD_BOOT_READ_LOOP
+CMD_BOOT_CHECK:
+        jsr     BOOT_CHECK_STAGE1
+        bcs     CMD_BOOT_ERROR
+        ldx     S1_BASE+10
+        jmp     0,x
+CMD_BOOT_ERROR:
+        jmp     MAIN_LOOP_ERROR
+
+BOOT_SET_LBA16:
+        clr     SD_LBA0
+        clr     SD_LBA1
+        clr     SD_LBA2
+        ldaa    #$10
+        staa    SD_LBA3
+        rts
+
+BOOT_INC_SD_LBA:
+        inc     SD_LBA3
+        bne     BOOT_INC_SD_LBA_DONE
+        inc     SD_LBA2
+        bne     BOOT_INC_SD_LBA_DONE
+        inc     SD_LBA1
+        bne     BOOT_INC_SD_LBA_DONE
+        inc     SD_LBA0
+BOOT_INC_SD_LBA_DONE:
+        rts
+
+BOOT_CHECK_STAGE1:
+        ldx     #S1_BASE
+        ldaa    0,x
+        cmpa    #'S'
+        bne     BOOT_STAGE1_SIG_FAIL
+        ldaa    1,x
+        cmpa    #'1'
+        bne     BOOT_STAGE1_SIG_FAIL
+        ldaa    2,x
+        cmpa    #'A'
+        bne     BOOT_STAGE1_SIG_FAIL
+        ldaa    3,x
+        cmpa    #'P'
+        bne     BOOT_STAGE1_SIG_FAIL
+        ldaa    4,x
+        cmpa    #'I'
+        bne     BOOT_STAGE1_SIG_FAIL
+        ldaa    5,x
+        cmpa    #'6'
+        bne     BOOT_STAGE1_SIG_FAIL
+        ldaa    6,x
+        cmpa    #'8'
+        bne     BOOT_STAGE1_SIG_FAIL
+        ldaa    7,x
+        cmpa    #1
+        bne     BOOT_STAGE1_SIG_FAIL
+
+        ldaa    12,x
+        oraa    13,x
+        beq     BOOT_STAGE1_SIZE_FAIL
+        ldaa    12,x
+        cmpa    #S1_BOOT_MAX_HI
+        bhi     BOOT_STAGE1_SIZE_FAIL
+        blo     BOOT_STAGE1_CHECK_ENTRY
+        ldaa    13,x
+        cmpa    #S1_BOOT_MAX_LO
+        bhi     BOOT_STAGE1_SIZE_FAIL
+
+BOOT_STAGE1_CHECK_ENTRY:
+        ldaa    10,x
+        suba    #S1_BASE/$0100
+        bcs     BOOT_STAGE1_SIZE_FAIL
+        staa    FAT_TMP
+        cmpa    #S1_BOOT_MAX_HI
+        bhs     BOOT_STAGE1_SIZE_FAIL
+        ldaa    FAT_TMP
+        cmpa    12,x
+        bhi     BOOT_STAGE1_SIZE_FAIL
+        blo     BOOT_STAGE1_OK
+        ldaa    11,x
+        cmpa    13,x
+        bhs     BOOT_STAGE1_SIZE_FAIL
+BOOT_STAGE1_OK:
+        clc
+        rts
+BOOT_STAGE1_SIG_FAIL:
+        ldaa    #FAT_ERR_SIG
+        jmp     BOOT_FAIL_A
+BOOT_STAGE1_SIZE_FAIL:
+        ldaa    #FAT_ERR_SIZE
+        jmp     BOOT_FAIL_A
+BOOT_FAIL_A:
+        staa    FAT_ERROR
+        sec
+        rts
+ endif
+ endif
+ if MONITOR_FEATURE_FAT
 CMD_DIR:
         ldab    LINE_LEN
         cmpb    #3
@@ -1847,7 +1999,7 @@ ADD_TO_LOADER_SUM:
         rts
 
 LOADER_GETC:
- if MONITOR_FEATURE_SD
+ if MONITOR_FEATURE_FAT
         ldaa    LOADER_INPUT
         cmpa    #LOAD_INPUT_FAT
         beq     LOADER_GETC_FAT
@@ -1855,7 +2007,7 @@ LOADER_GETC:
         jsr     ACIA_GETC
         clc
         rts
- if MONITOR_FEATURE_SD
+ if MONITOR_FEATURE_FAT
 LOADER_GETC_FAT:
         pshb
         jsr     FAT32_STREAM_GETC
@@ -2172,18 +2324,34 @@ TXT_BRK:        fcc     "BRK "
 TXT_WELCOME:    fcc     "MC6800 MONITOR"
                 fcb     $04
 TXT_HELP:
- if MONITOR_FEATURE_SD
+ if MONITOR_FEATURE_FAT
  if MONITOR_FEATURE_VDG
  if MONITOR_FEATURE_KEYBOARD
-                fcc     "D DIR M MAP RAMTEST VDGTEST KEYTEST G L LF B C R U H F"
+                fcc     "D DIR M MAP RAMTEST VDGTEST KEYTEST G L LF BOOT B C R U H F"
  else
-                fcc     "D DIR M MAP RAMTEST VDGTEST G L LF B C R U H F"
+                fcc     "D DIR M MAP RAMTEST VDGTEST G L LF BOOT B C R U H F"
  endif
  else
  if MONITOR_FEATURE_KEYBOARD
-                fcc     "D DIR M MAP RAMTEST KEYTEST G L LF B C R U H F"
+                fcc     "D DIR M MAP RAMTEST KEYTEST G L LF BOOT B C R U H F"
  else
-                fcc     "D DIR M MAP RAMTEST G L LF B C R U H F"
+                fcc     "D DIR M MAP RAMTEST G L LF BOOT B C R U H F"
+ endif
+ endif
+ else
+ if MONITOR_FEATURE_SD
+ if S1_SUPPORTED
+ if MONITOR_FEATURE_VDG
+ if MONITOR_FEATURE_KEYBOARD
+                fcc     "D M MAP RAMTEST VDGTEST KEYTEST G L BOOT B C R U H F"
+ else
+                fcc     "D M MAP RAMTEST VDGTEST G L BOOT B C R U H F"
+ endif
+ else
+ if MONITOR_FEATURE_KEYBOARD
+                fcc     "D M MAP RAMTEST KEYTEST G L BOOT B C R U H F"
+ else
+                fcc     "D M MAP RAMTEST G L BOOT B C R U H F"
  endif
  endif
  else
@@ -2198,6 +2366,22 @@ TXT_HELP:
                 fcc     "D M MAP RAMTEST KEYTEST G L B C R U H F"
  else
                 fcc     "D M MAP RAMTEST G L B C R U H F"
+ endif
+ endif
+ endif
+ else
+ if MONITOR_FEATURE_VDG
+ if MONITOR_FEATURE_KEYBOARD
+                fcc     "D M MAP RAMTEST VDGTEST KEYTEST G L B C R U H F"
+ else
+                fcc     "D M MAP RAMTEST VDGTEST G L B C R U H F"
+ endif
+ else
+ if MONITOR_FEATURE_KEYBOARD
+                fcc     "D M MAP RAMTEST KEYTEST G L B C R U H F"
+ else
+                fcc     "D M MAP RAMTEST G L B C R U H F"
+ endif
  endif
  endif
  endif
@@ -2363,9 +2547,11 @@ SPURIOUS_IRQ:
 
         include "acia6850.asm"
  if MONITOR_FEATURE_SD
+        include "sdcard.asm"
+ endif
+ if MONITOR_FEATURE_FAT
 FAT32_INCLUDE_FIND_API equ 1
 FAT32_INCLUDE_FILE_API equ 1
-        include "sdcard.asm"
         include "fat32.asm"
  endif
 
