@@ -65,6 +65,7 @@ ROM_CODE_LIMIT=0 make bin
 | S-record と Intel HEX | `MONITOR_PROFILE=sbcio make` | `.srec` と `.hex` |
 | ROMライタ用の容量合わせ済みバイナリ | `MONITOR_PROFILE=sbcio make rombin ROM_KIND=W27C512` | `build/mc6800-monitor-sbcio-W27C512.bin` |
 | SDFS/68 stage1 | `MONITOR_PROFILE=sbcio_vdg make stage1` | `build/stage1-sbcio-vdg.bin` |
+| SDFS/68本体 | `MONITOR_PROFILE=sbcio_vdg make sdfs` | `build/SDFS-sbcio-vdg.BIN` |
 
 ## SDFS/68 stage1
 
@@ -73,6 +74,8 @@ ROM_CODE_LIMIT=0 make bin
 ```sh
 MONITOR_PROFILE=sbcio_vdg make stage1
 MONITOR_PROFILE=k6802_vdg make stage1
+MONITOR_PROFILE=sbcio_vdg make sdfs
+MONITOR_PROFILE=k6802_vdg make sdfs
 ```
 
 主な出力:
@@ -83,6 +86,8 @@ MONITOR_PROFILE=k6802_vdg make stage1
 | `k6802_vdg` | `build/stage1-k6802-vdg.bin` |
 
 stage1 v1の配置は、`sbcio_vdg` が `$C400-$CFFF`、`k6802_vdg` が `$A400-$AFFF` である。SDFS/68本体の初期ロード領域はそれぞれ `$D000-$DEFF`、`$B000-$BEFF` とする。
+
+`sdfs` ターゲットは FAT root の `SDFS.BIN` として配置するSDFS/68本体を生成する。出力はprofile suffix付きの `build/SDFS-sbcio-vdg.BIN` / `build/SDFS-k6802-vdg.BIN` で、SDイメージ作成時に root の8.3名 `SDFS.BIN` として格納する。
 
 ROM profileでは `FEATURE_SD` と `FEATURE_FAT` を分ける。`FEATURE_SD=1` はraw SD sector readと `BOOT` の前提、`FEATURE_FAT=1` はROM常駐の `DIR` / `LF` を含める設定である。`sbcio` は従来のROM FATコマンドを残し、`sbcio_vdg` / `k6802_vdg` はROM FATを外して固定LBA stage1 `BOOT` に寄せる。
 

@@ -147,6 +147,7 @@ TARGET := mc6800-monitor$(TARGET_SUFFIX)
 OUTDIR := build
 TOPSRC := src/main.asm
 STAGE1_TOPSRC := src/stage1.asm
+SDFS_TOPSRC := src/sdfs68.asm
 OBJ := $(OUTDIR)/$(TARGET).p
 LST := $(OUTDIR)/$(TARGET).lst
 BIN := $(OUTDIR)/$(TARGET).bin
@@ -156,6 +157,10 @@ STAGE1_TARGET := stage1$(TARGET_SUFFIX)
 STAGE1_OBJ := $(OUTDIR)/$(STAGE1_TARGET).p
 STAGE1_LST := $(OUTDIR)/$(STAGE1_TARGET).lst
 STAGE1_BIN := $(OUTDIR)/$(STAGE1_TARGET).bin
+SDFS_TARGET := SDFS$(TARGET_SUFFIX)
+SDFS_OBJ := $(OUTDIR)/$(SDFS_TARGET).p
+SDFS_LST := $(OUTDIR)/$(SDFS_TARGET).lst
+SDFS_BIN := $(OUTDIR)/$(SDFS_TARGET).BIN
 CONFIG_INC := $(OUTDIR)/monitor_config.inc
 ROM_KIND ?= 27C64
 ROM_FILL ?= 0xFF
@@ -211,7 +216,7 @@ endif
 
 ASL_INCLUDE := $(CURDIR)/$(OUTDIR)$(ASL_PATHSEP)$(CURDIR)/include$(ASL_PATHSEP)$(CURDIR)/src
 
-.PHONY: all clean bin check-rom-size srec ihex stage1 check-stage1-profile rombin rombin-27c64 rombin-27c128 rombin-27c256 rombin-28c256 rombin-w27c512 program verify readback program-27c64 program-27c128 program-27c256 program-28c256 program-w27c512 program-upd28c256 FORCE
+.PHONY: all clean bin check-rom-size srec ihex stage1 sdfs check-stage1-profile rombin rombin-27c64 rombin-27c128 rombin-27c256 rombin-28c256 rombin-w27c512 program verify readback program-27c64 program-27c128 program-27c256 program-28c256 program-w27c512 program-upd28c256 FORCE
 
 all: check-rom-size srec ihex
 
@@ -234,6 +239,8 @@ check-rom-size: $(BIN)
 
 stage1: check-stage1-profile $(STAGE1_BIN)
 
+sdfs: check-stage1-profile $(SDFS_BIN)
+
 check-stage1-profile:
 	"$(PYTHON)" -c "import sys; profile='$(MONITOR_PROFILE)'; sys.exit(0 if profile in ('sbcio_vdg', 'k6802_vdg') else 1)" || (echo "stage1 target requires MONITOR_PROFILE=sbcio_vdg or MONITOR_PROFILE=k6802_vdg" && exit 1)
 
@@ -242,6 +249,12 @@ $(STAGE1_OBJ): FORCE $(STAGE1_TOPSRC) include/hardware.inc $(CONFIG_INC) src/sdc
 
 $(STAGE1_BIN): $(STAGE1_OBJ)
 	"$(P2BIN)" $(STAGE1_OBJ) $(STAGE1_BIN) -q
+
+$(SDFS_OBJ): FORCE $(SDFS_TOPSRC) include/hardware.inc $(CONFIG_INC) | $(OUTDIR)
+	"$(ASL)" -q -L -olist $(SDFS_LST) -o $(SDFS_OBJ) -i $(ASL_INCLUDE_ARG) $(SDFS_TOPSRC)
+
+$(SDFS_BIN): $(SDFS_OBJ)
+	"$(P2BIN)" $(SDFS_OBJ) $(SDFS_BIN) -q
 
 srec: $(SREC)
 
