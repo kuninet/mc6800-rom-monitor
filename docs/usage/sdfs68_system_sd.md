@@ -76,6 +76,32 @@ v1 の root directory は次を想定する。
 
 `AUTOEXEC.S` は v1 の必須ファイルではない。ROM 側 `BOOT` は `AUTOEXEC.S` を直接読まない。
 
+## SDFS/68 v1 コマンド
+
+SDFS/68 v1 は最小シェルとして `SDFS> ` プロンプトを表示する。
+
+| コマンド | 用途 |
+| --- | --- |
+| `L filename` | FAT root の8.3 short filenameファイルをS-RecordまたはIntel HEXとしてロードする |
+| `Dhhhh` | 16bit hexadecimal address の1 byteを表示する。ロード確認用の最小コマンド |
+
+例:
+
+```text
+SDFS> L HELLO.S
+OK
+SDFS> L HELLO.HEX
+OK
+SDFS> D0200
+0200 86
+```
+
+存在しないファイル、壊れたHEX、終端recordなしのファイルでは `?` または `?S5` / `?I5` のようなloader stage付きエラーを表示し、プロンプトへ戻る。
+
+SDFS/68 v1 のloaderは ROM loader と同じ制限を持つ。S-Recordは `S1` / `S2` のデータrecordを扱い、`S2` は上位 1 byte が `0` の場合だけ有効である。Intel HEX は record type `00` と `01` のみ対応し、拡張アドレスrecordは扱わない。
+
+SDFS/68 v1 はloaderの書き込み先アドレスを保護しない。`SDFS.BIN` 本体、stage1、SD/FAT work、stack、VDG VRAMなどを壊すファイルも指定できるため、当面は作成者がロード先を管理する。
+
 ## 将来拡張
 
 SDFS/68 v2 以降では、既存 FAT32 カードへ必要ファイルをコピーする補助ツールを追加できる。
