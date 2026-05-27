@@ -20,7 +20,7 @@
 | `Dssss` | `ssss` から 64 バイト分をダンプする |
 | `Dssss-eeee` | `ssss` から `eeee` までをダンプする |
 | `DIR` | SDカード上のroot directoryにある8.3通常ファイルを表示する。`FEATURE_FAT=1` のROMだけで有効 |
-| `BOOT` | 固定LBAからSDFS/68 stage1 loaderを読み込んで起動する。`FEATURE_SD=1` かつ stage1対応RAM構成のROMで有効 |
+| `BOOT` | 固定LBAからSDFS/68 stage1 loaderを読み込んで、第2段システムへ移行する。`FEATURE_SD=1` かつ stage1対応RAM構成のROMで有効 |
 | `Mssss` | `ssss` からメモリを変更する |
 | `MAP` | 現在のビルドが想定する主要メモリ配置を表示する |
 | `RAMTEST ssss-eeee` | 許可された明示範囲のRAMを破壊テストする |
@@ -268,6 +268,8 @@ OK
 ファイル名の前後の空白は無視する。subdirectory、LFN、wildcardは対象外である。
 LOAD後の自動実行は行わない。必要に応じて `Gssss` で開始アドレスへジャンプする。
 `FEATURE_FAT=0` のROMでは `LF` のコマンド本体をROMに入れず、未対応コマンドとして `?` を返す。`FEATURE_SD=1` / `FEATURE_FAT=0` のprofileでは、SDからのロードは `BOOT` でSDFS/68を起動し、SDFS/68側の `L filename` を使う。
+
+SDFS/68はROMモニタとは別の第2段システムとして扱う。SDFS/68側の `DIR`、`TYPE`、`RUN`、`LOAD`、`EXIT` は [SDFS/68 システムSDカード方針](sdfs68_system_sd.md) に記載する。
 
 ## SD directory
 

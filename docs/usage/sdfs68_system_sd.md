@@ -11,6 +11,8 @@ SDFS/68 は、ROM モニタの `BOOT` から起動する第2段システムで�
 - ROMはFATを読まず、stage1がFAT32 read-only最小実装で `SDFS.BIN` を読む。
 - 初期 SDFS/68 は read-only とし、FAT write や SAVE は別Issueで扱う。
 - 8.3 short filename を前提にする。LFN とサブディレクトリは後続段階で扱う。
+- SDFS/68はROMモニタの拡張コマンドではなく、小さい第2段DOSとして扱う。
+- ROMモニタは救命具、デバッガ、復旧口として残し、SDFS/68内にモニタ機能を再実装しない。
 
 ## システムSDイメージ生成
 
@@ -101,6 +103,24 @@ SDFS> D0200
 SDFS/68 v1 のloaderは ROM loader と同じ制限を持つ。S-Recordは `S1` / `S2` のデータrecordを扱い、`S2` は上位 1 byte が `0` の場合だけ有効である。Intel HEX は record type `00` と `01` のみ対応し、拡張アドレスrecordは扱わない。
 
 SDFS/68 v1 はloaderの書き込み先アドレスを保護しない。`SDFS.BIN` 本体、stage1、SD/FAT work、stack、VDG VRAMなどを壊すファイルも指定できるため、当面は作成者がロード先を管理する。
+
+## SDFS/68 v2 予定コマンド
+
+SDFS/68 v2では、DOS風の通常操作を本線にする。
+
+| コマンド | 用途 |
+| --- | --- |
+| `DIR` | FAT root の8.3通常ファイルを表示する |
+| `TYPE filename` | テキストファイルをコンソールへ表示する |
+| `RUN filename` | ファイルをロードし、entryが取れれば実行する |
+| `RUN addr` | 指定アドレスへジャンプする |
+| `LOAD filename` | ファイルをロードする。自動実行しない |
+| `L filename` | `LOAD filename` の短縮エイリアス |
+| `EXIT` | ROMモニタへ戻る |
+
+通常実行は `RUN` を使う。`LOAD` / `L` はロード確認やデバッグ用の補助コマンドとして扱う。
+
+メモリ変更、ブレークポイント、逆アセンブルなどの低レベルデバッグはSDFS/68に取り込まず、`EXIT` でROMモニタへ戻って行う。
 
 ## 将来拡張
 
