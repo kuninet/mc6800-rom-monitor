@@ -44,6 +44,7 @@
 - [plans/issue-121_stage1_load_file_1sector.md](plans/issue-121_stage1_load_file_1sector.md): SDFS/68 stage1 1-sector file load boot service
 - [plans/issue-123_stage1_memory_3kb.md](plans/issue-123_stage1_memory_3kb.md): SDFS/68 stage1 3KB配置
 - [plans/issue-125_stage1_sdfs_entry.md](plans/issue-125_stage1_sdfs_entry.md): SDFS/68 stage1 header検査とentry jump
+- [plans/issue-128_rom_fat_cleanup.md](plans/issue-128_rom_fat_cleanup.md): SDFS/68移行後のROM常駐FAT DIR/LF整理
 - [plans/issue-129_sdfs68_migration_roadmap.md](plans/issue-129_sdfs68_migration_roadmap.md): SDFS/68 v1移行とROM FAT整理ロードマップ
 - [plans/issue-130_sdfs68_loader.md](plans/issue-130_sdfs68_loader.md): SDFS/68 v1 HEX/S-recordロード
 - [testing/sbc6800_bringup.md](testing/sbc6800_bringup.md)

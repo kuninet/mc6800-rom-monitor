@@ -256,7 +256,7 @@ OK
 ロード処理はレコードを受信しながら解析する。
 ロード中の進捗表示は速度を優先して行わず、正常終了時は `OK`、異常時は `?S1` から `?S5`、または `?I1` から `?I5` を表示する。
 
-`LF filename` は `FEATURE_SD=1` のROMで、SDカード上のroot directoryから8.3 short filenameのファイルを検索し、S-RecordまたはIntel HEXとしてロードする。
+`LF filename` は `FEATURE_FAT=1` のROMで、SDカード上のroot directoryから8.3 short filenameのファイルを検索し、S-RecordまたはIntel HEXとしてロードする。
 既存の `L` とは別の入口だが、レコード解析とRAM書き込みは同じローダ処理を使う。
 
 ```text
@@ -267,11 +267,11 @@ OK
 
 ファイル名の前後の空白は無視する。subdirectory、LFN、wildcardは対象外である。
 LOAD後の自動実行は行わない。必要に応じて `Gssss` で開始アドレスへジャンプする。
-`FEATURE_SD=0` のROMでは `LF` のコマンド本体をROMに入れず、未対応コマンドとして `?` を返す。
+`FEATURE_FAT=0` のROMでは `LF` のコマンド本体をROMに入れず、未対応コマンドとして `?` を返す。`FEATURE_SD=1` / `FEATURE_FAT=0` のprofileでは、SDからのロードは `BOOT` でSDFS/68を起動し、SDFS/68側の `L filename` を使う。
 
 ## SD directory
 
-`DIR` は `FEATURE_SD=1` のROMで、SDカード上のroot directoryにある8.3通常ファイルを表示する。
+`DIR` は `FEATURE_FAT=1` のROMで、SDカード上のroot directoryにある8.3通常ファイルを表示する。
 LFN、削除entry、volume label、subdirectoryは表示しない。
 
 ```text
@@ -283,7 +283,7 @@ MULTI.BIN A 00000400
 ```
 
 サイズは8桁16進で表示する。`DIR` は `D` dumpとは別コマンドであり、従来の `D0100` や `D0100-011F` はそのまま使える。
-`FEATURE_SD=0` のROMでは `DIR` のコマンド本体をROMに入れず、`D` dump以外の未対応入力として `?` を返す。
+`FEATURE_FAT=0` のROMでは `DIR` のコマンド本体をROMに入れず、`D` dump以外の未対応入力として `?` を返す。
 
 ## ヘルプ
 
@@ -295,27 +295,35 @@ D M MAP RAMTEST G L B C R U H F
 ]
 ```
 
-`FEATURE_SD=1` のROMでは `DIR` と `LF` を含めて表示する。
+`FEATURE_SD=1` かつ `FEATURE_FAT=0` のROMでは、固定LBA stage1起動用の `BOOT` を含めて表示する。
 
 ```text
 ] H
-D DIR M MAP RAMTEST G L LF B C R U H F
+D M MAP RAMTEST G L BOOT B C R U H F
 ]
 ```
 
-`FEATURE_KEYBOARD=1` のROMでは `KEYTEST` を含めて表示する。
+`FEATURE_FAT=1` のROMでは、ROM常駐FAT互換機能として `DIR` と `LF` を含めて表示する。
 
 ```text
 ] H
-D DIR M MAP RAMTEST KEYTEST G L LF B C R U H F
+D DIR M MAP RAMTEST G L LF BOOT B C R U H F
 ]
 ```
 
-`FEATURE_VDG=1` かつ `FEATURE_KEYBOARD=1` のROMでは `VDGTEST` と `KEYTEST` を含めて表示する。
+`FEATURE_KEYBOARD=1` のROMでは `KEYTEST` を含めて表示する。次はSD/FATなしの例である。
 
 ```text
 ] H
-D DIR M MAP RAMTEST VDGTEST KEYTEST G L LF B C R U H F
+D M MAP RAMTEST KEYTEST G L B C R U H F
+]
+```
+
+`FEATURE_VDG=1` かつ `FEATURE_KEYBOARD=1` のROMでは `VDGTEST` と `KEYTEST` を含めて表示する。`FEATURE_SD=1` かつ `FEATURE_FAT=0` のprofileでは、ROM側FAT互換コマンドではなく `BOOT` を含める。
+
+```text
+] H
+D M MAP RAMTEST VDGTEST KEYTEST G L BOOT B C R U H F
 ]
 ```
 
