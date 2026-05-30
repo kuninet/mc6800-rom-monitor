@@ -8,6 +8,23 @@
 通常は `MONITOR_PROFILE` を使う。
 直接指定の `MEMORY_CONFIG` / `BOARD_IO` / `FEATURE_*` は、新しい組み合わせを試すときや、profile化する前の確認に使う。
 
+ROMモニタ、stage1、SDFS/68本体は生成物も責務も分かれている。
+ROMだけを焼けば低レベルのメモリ操作とデバッグはできるが、SDFS/68の通常運用には stage1 と `SDFS.BIN` を入れた system SD が必要である。
+
+```mermaid
+flowchart TD
+    ROM["ROM Monitor"]
+    BOOT["BOOT command"]
+    STAGE1["stage1 loader<br/>fixed boot area"]
+    SDFS["SDFS.BIN<br/>FAT root"]
+    PROMPT["SDFS>"]
+
+    ROM --> BOOT
+    BOOT --> STAGE1
+    STAGE1 --> SDFS
+    SDFS --> PROMPT
+```
+
 ROMへ焼く場合、`make bin` を先に実行する必要はない。
 `make rombin` は必要なアセンブルを内部で実行し、ROMライタ用の容量合わせ済みバイナリを作る。
 `make program` は `rombin` を作ってからROMライタへ書き込む。
@@ -46,12 +63,24 @@ ROM_CODE_LIMIT=0 make bin
 
 ## profileごとの違い
 
-| `MONITOR_PROFILE` | RAM/WORK | SBC-IO | raw SD/BOOT | ROM FAT `DIR`/`LF` | VDG | KEYTEST | VRAM |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `base` | `RAM 0000-1FFF`, `WORK 1C00-1FFF` | なし | なし | なし | なし | なし | なし |
-| `sbcio` | `RAM 0000-7FFF`, `WORK C000-DFFF` | あり | あり | あり | なし | あり | なし |
-| `sbcio_vdg` | `RAM 0000-7FFF`, `WORK C000-DFFF` | あり | あり | なし | あり | あり | `$A000-$BFFF` |
-| `k6802_vdg` | `RAM 0000-7FFF`, `WORK A000-BFFF` | あり | あり | なし | あり | あり | `$C000-$DFFF` |
+`FEATURE_SD=1` は raw SD sector read と `BOOT` の前提、`FEATURE_FAT=1` はROM常駐FAT `DIR` / `LF` を含める設定である。
+`sbcio` はROM常駐FAT互換profile、`sbcio_vdg` / `k6802_vdg` はROM FATを外して `BOOT + SDFS/68` を本線にするprofileとして扱う。
+
+| `MONITOR_PROFILE` | 位置づけ | ROM FAT `DIR`/`LF` | `BOOT` | system SD要否 | 主な用途 |
+| --- | --- | --- | --- | --- | --- |
+| `base` | SDなしの最小ROM | なし | なし | 不要 | SBC6800互換の低レベル操作 |
+| `sbcio` | ROM常駐FAT互換profile | あり | あり | ROM FATだけならSDFS/68 system SDは不要。FAT32 SDカード自体は必要 | 既存 `DIR` / `LF` 互換確認 |
+| `sbcio_vdg` | `BOOT + SDFS/68` 本線profile | なし | あり | 必要 | SBC-IO + K68-VDG + SDFS/68 |
+| `k6802_vdg` | `BOOT + SDFS/68` 本線profile | なし | あり | 必要 | K6802-SBC + K68-VDG + SDFS/68 |
+
+メモリ配置と装備の差分は次の通り。
+
+| `MONITOR_PROFILE` | RAM/WORK | SBC-IO | raw SD/BOOT | VDG | KEYTEST | VRAM |
+| --- | --- | --- | --- | --- | --- | --- |
+| `base` | `RAM 0000-1FFF`, `WORK 1C00-1FFF` | なし | なし | なし | なし | なし |
+| `sbcio` | `RAM 0000-7FFF`, `WORK C000-DFFF` | あり | あり | なし | あり | なし |
+| `sbcio_vdg` | `RAM 0000-7FFF`, `WORK C000-DFFF` | あり | あり | あり | あり | `$A000-$BFFF` |
+| `k6802_vdg` | `RAM 0000-7FFF`, `WORK A000-BFFF` | あり | あり | あり | あり | `$C000-$DFFF` |
 
 ## 生成物の種類
 
@@ -66,6 +95,15 @@ ROM_CODE_LIMIT=0 make bin
 | ROMライタ用の容量合わせ済みバイナリ | `MONITOR_PROFILE=sbcio make rombin ROM_KIND=W27C512` | `build/mc6800-monitor-sbcio-W27C512.bin` |
 | SDFS/68 stage1 | `MONITOR_PROFILE=sbcio_vdg make stage1` | `build/stage1-sbcio-vdg.bin` |
 | SDFS/68本体 | `MONITOR_PROFILE=sbcio_vdg make sdfs` | `build/SDFS-sbcio-vdg.BIN` |
+
+成果物の所属は次の通り。
+
+| 生成・配置 | 所属レイヤー | 用途 |
+| --- | --- | --- |
+| `make bin` / `make rombin` | ROMモニタ | EPROM/EEPROMへ焼く本体。低レベル操作と `BOOT` 入口を持つ |
+| `make stage1` | system SD fixed boot area | ROM `BOOT` から読まれる第1段loader |
+| `make sdfs` | system SD FAT root | `SDFS.BIN` として置く第2段DOS本体 |
+| `tools/mk_sdfs_image.py` | ホストPC上の補助ツール | stage1、`SDFS.BIN`、利用者ファイルをまとめた system SD image を作る |
 
 ## SDFS/68 stage1
 
@@ -90,6 +128,7 @@ stage1 v1の配置は、`sbcio_vdg` が `$C400-$CFFF`、`k6802_vdg` が `$A400-$
 `sdfs` ターゲットは FAT root の `SDFS.BIN` として配置するSDFS/68本体を生成する。出力はprofile suffix付きの `build/SDFS-sbcio-vdg.BIN` / `build/SDFS-k6802-vdg.BIN` で、SDイメージ作成時に root の8.3名 `SDFS.BIN` として格納する。
 
 ROM profileでは `FEATURE_SD` と `FEATURE_FAT` を分ける。`FEATURE_SD=1` はraw SD sector readと `BOOT` の前提、`FEATURE_FAT=1` はROM常駐の `DIR` / `LF` を含める設定である。`sbcio` は従来のROM FATコマンドを残し、`sbcio_vdg` / `k6802_vdg` はROM FATを外して固定LBA stage1 `BOOT` に寄せる。
+stage1と `SDFS.BIN` はROMモニタの一部ではなく、system SD側へ置く別成果物である。
 
 ## ROM_KIND
 

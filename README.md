@@ -6,6 +6,34 @@ MC6800 向けの小型 ROM モニタプロジェクトです。
 
 MIKBUG 全体の完全互換は狙いませんが、電大版 BASIC が利用する文字入出力エントリーポイント互換は重視します。
 
+## レイヤー構成
+
+このプロジェクトでは、ROM モニタと SDFS/68 を別レイヤーとして扱います。
+ROM モニタは電源投入直後に必ず使える低レベル操作、復旧口、マシン語デバッガであり、SDFS/68 は system SD から起動する第2段DOSです。
+
+```mermaid
+flowchart TD
+    ROM["ROM Monitor<br/>メモリ操作 / 実行 / デバッグ"]
+    BOOT["ROM BOOT<br/>SDFS/68起動入口"]
+    STAGE1["stage1<br/>fixed boot area"]
+    SDFS["SDFS.BIN<br/>第2段DOS"]
+    USER["User Program<br/>RAM上の利用者プログラム"]
+
+    ROM --> BOOT
+    BOOT --> STAGE1
+    STAGE1 --> SDFS
+    SDFS --> USER
+    SDFS -->|"EXIT"| ROM
+```
+
+ROM 単体では、メモリダンプ、メモリ変更、指定アドレス実行、ブレークポイント、簡易逆アセンブルなどを扱います。
+通常のSDファイル操作やDOS風の `DIR`、`TYPE`、`RUN`、`LOAD`、`EXIT` は SDFS/68 側へ寄せます。
+そのため、SDFS/68 を使う通常運用には stage1 と `SDFS.BIN` を含む system SD が必要です。
+
+過渡的な互換機能として、`sbcio` profile には ROM 常駐FATの `DIR` / `LF` を残しています。
+これは `BOOT + SDFS/68` 本線へ移る前の互換入口であり、新しいファイル操作機能をROMへ増やす方針ではありません。
+ROM 常駐FATの `DIR` / `LF` は `SDFS.BIN` を含む system SD を必要としませんが、FAT32形式のSDカード自体は必要です。
+
 ## 現在の前提
 
 - CPU: MC6800
@@ -26,6 +54,7 @@ MIKBUG 全体の完全互換は狙いませんが、電大版 BASIC が利用す
 
 - [docs/README.md](/Users/kuninet/git/MC6800_monitor/docs/README.md): docs 全体の目次
 - [docs/usage/monitor_commands.md](/Users/kuninet/git/MC6800_monitor/docs/usage/monitor_commands.md): ROM モニタのコマンドリファレンス
+- [docs/usage/sdfs68_system_sd.md](/Users/kuninet/git/MC6800_monitor/docs/usage/sdfs68_system_sd.md): SDFS/68 と system SD の方針
 - [docs/requirements/monitor_requirements.md](/Users/kuninet/git/MC6800_monitor/docs/requirements/monitor_requirements.md): 要件定義
 - [docs/design/memory_map.md](/Users/kuninet/git/MC6800_monitor/docs/design/memory_map.md): 初版メモリマップ案
 - [docs/design/architecture.md](/Users/kuninet/git/MC6800_monitor/docs/design/architecture.md): モニタ全体のアーキテクチャ

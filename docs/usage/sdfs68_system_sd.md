@@ -1,8 +1,26 @@
 # SDFS/68 システムSDカード方針
 
 この文書は、SDFS/68 用のシステムSDカードを作るための初期方針をまとめる。
+ここに書く `DIR`、`TYPE`、`RUN`、`LOAD`、`L`、`EXIT` は、ROMモニタの `] ` プロンプトで使うコマンドではなく、SDFS/68起動後の `SDFS> ` プロンプトで使うコマンドである。
 
 SDFS/68 は、ROM モニタの `BOOT` から起動する第2段システムである。ROM は固定LBAからstage1 loaderを読み、stage1がFAT root の `SDFS.BIN` を読み込む。
+ROM単体ではメモリ変更、メモリダンプ、指定アドレス実行、マシン語デバッグを行い、通常のSDファイル操作はSDFS/68へ寄せる。
+
+```mermaid
+flowchart TD
+    NORMAL["通常運用"]
+    BOOT["] BOOT"]
+    SDFS["SDFS>"]
+    DIR["DIR"]
+    RUN["RUN filename"]
+    DEBUG["デバッグ運用"]
+    EXIT["SDFS> EXIT"]
+    ROM["] M / D / U / B / R"]
+
+    NORMAL --> BOOT --> SDFS --> DIR --> RUN
+    DEBUG --> EXIT --> ROM
+    ROM --> BOOT
+```
 
 ## 基本方針
 
@@ -13,6 +31,20 @@ SDFS/68 は、ROM モニタの `BOOT` から起動する第2段システムで�
 - 8.3 short filename を前提にする。LFN とサブディレクトリは後続段階で扱う。
 - SDFS/68はROMモニタの拡張コマンドではなく、小さい第2段DOSとして扱う。
 - ROMモニタは救命具、デバッガ、復旧口として残し、SDFS/68内にモニタ機能を再実装しない。
+
+## system SD が必要な範囲
+
+| 操作 | system SD | 所属 |
+| --- | --- | --- |
+| ROMモニタ起動、`D` / `M` / `G` / `L` / `B` / `C` / `R` / `U` | 不要 | ROMモニタ |
+| ROM `BOOT` でSDFS/68へ移行 | 必要 | ROM入口 + stage1 |
+| SDFS/68の `DIR` / `TYPE` / `RUN` / `LOAD` / `EXIT` | 必要 | SDFS/68 |
+| `sbcio` profileのROM常駐FAT `DIR` / `LF` | SDFS/68用system SDは不要。ただしFAT32 SDカードは必要 | ROM互換FAT |
+
+`sbcio` profileのROM常駐FATは互換機能であり、SDFS/68本線ではない。
+ここで不要としているのは、fixed boot area のstage1と root の `SDFS.BIN` を含むSDFS/68用system SDである。
+ROM常駐FAT `DIR` / `LF` を使う場合でも、FAT32形式のSDカード自体は別途必要である。
+`sbcio_vdg` / `k6802_vdg` ではROM常駐FATを外し、`BOOT` でSDFS/68へ移行してからSD上ファイルを扱う。
 
 ## システムSDイメージ生成
 
@@ -87,6 +119,9 @@ SDFS/68 v1 は最小シェルとして `SDFS> ` プロンプトを表示する�
 | `L filename` | FAT root の8.3 short filenameファイルをS-RecordまたはIntel HEXとしてロードする |
 | `Dhhhh` | 16bit hexadecimal address の1 byteを表示する。ロード確認用の最小コマンド |
 
+SDFS/68 v1 の `L filename` は、ROMモニタの `L` コマンドをそのままSD対応にしたものではない。
+ROM `BOOT` 後にSDFS/68上で動くロード手段であり、stage1 boot servicesを使ってroot上のファイルを読む。
+
 例:
 
 ```text
@@ -121,6 +156,7 @@ SDFS/68 v2では、DOS風の通常操作を本線にする。
 通常実行は `RUN` を使う。`LOAD` / `L` はロード確認やデバッグ用の補助コマンドとして扱う。
 
 メモリ変更、ブレークポイント、逆アセンブルなどの低レベルデバッグはSDFS/68に取り込まず、`EXIT` でROMモニタへ戻って行う。
+ROMへ戻った後は `] ` プロンプトで `M`、`D`、`U`、`B`、`R` などを使い、必要に応じて再度 `BOOT` する。
 
 ## 将来拡張
 

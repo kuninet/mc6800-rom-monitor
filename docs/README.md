@@ -24,11 +24,15 @@
 
 ## 現在の主要ドキュメント
 
+ROMモニタとSDFS/68は別レイヤーとして読む。
+[usage/monitor_commands.md](usage/monitor_commands.md) はROMモニタの `] ` プロンプトで使うコマンド、[usage/sdfs68_system_sd.md](usage/sdfs68_system_sd.md) はSDFS/68の `SDFS> ` プロンプトとsystem SDの方針を扱う。
+ROM常駐FAT `DIR` / `LF` は互換機能であり、`BOOT + SDFS/68` が今後の通常運用の本線である。
+
 - [requirements/monitor_requirements.md](requirements/monitor_requirements.md)
 - [development/workflow.md](development/workflow.md): Issue/PR、テスト、レビューの開発運用ルール
 - [development/project_context.md](development/project_context.md): 新規コンテキスト向けのプロジェクト引き継ぎ情報
 - [usage/monitor_commands.md](usage/monitor_commands.md): ROM モニタのコマンドリファレンス
-- [usage/sdfs68_system_sd.md](usage/sdfs68_system_sd.md): SDFS/68 システムSDカードの初期方針
+- [usage/sdfs68_system_sd.md](usage/sdfs68_system_sd.md): SDFS/68 と system SD の初期方針
 - [design/memory_map.md](design/memory_map.md)
 - [design/architecture.md](design/architecture.md)
 - [plans/implementation_plan.md](plans/implementation_plan.md)
@@ -49,6 +53,7 @@
 - [plans/issue-130_sdfs68_loader.md](plans/issue-130_sdfs68_loader.md): SDFS/68 v1 HEX/S-recordロード
 - [plans/issue-sdfs68_responsibility_boundary.md](plans/issue-sdfs68_responsibility_boundary.md): SDFS/68とROMモニタの責務境界
 - [plans/issue-sdfs68_v2_roadmap.md](plans/issue-sdfs68_v2_roadmap.md): SDFS/68 v2 第2段DOS基本操作ロードマップ
+- [plans/issue-144_rom_sdfs_docs_boundary.md](plans/issue-144_rom_sdfs_docs_boundary.md): ROMモニタとSDFS/68責務境界のユーザー向け文書整理
 - [testing/sbc6800_bringup.md](testing/sbc6800_bringup.md)
 - [testing/sbc_io_sd_bringup.md](testing/sbc_io_sd_bringup.md): SBC-IO と microSD SPI モジュールで SD/FAT を実機確認する手順
 - [testing/sbc6800_datapack.md](testing/sbc6800_datapack.md): SBC6800 データパックの扱いと互換確認

@@ -12,6 +12,9 @@
 - `base` profileは引き続きSDなしの最小ROMとする。
 - 新しいSDFS/68機能、I2C、RTC、OLED、AUTOEXEC、subdirectory、FAT writeはROMへ戻さず、SDFS/68側の後続Issueで扱う。
 
+このIssueの主目的はROM常駐FATを本線として育てることではなく、SDFS/68移行後に残るROM FAT機能を互換入口として位置づけ直すことである。
+SD上ファイルの通常操作は、`BOOT` 後のSDFS/68側へ寄せる。
+
 ## profileの意味
 
 | profile | ROM側の位置づけ | `FEATURE_SD` | `FEATURE_FAT` | `DIR` / `LF` | `BOOT` |
@@ -40,4 +43,5 @@
 
 ## 後続
 
-ROM常駐FAT `DIR` / `LF` を完全削除する判断はしない。`sbcio` profileを互換入口として残し、SDFS/68 v2以降で `DIR`、`TYPE`、AUTOEXEC、subdirectoryなどを育てる。
+ROM常駐FAT `DIR` / `LF` を完全削除する判断はしない。`sbcio` profileを互換入口として残す。
+ただし、新しい `DIR`、`TYPE`、AUTOEXEC、subdirectoryなどはROMへ戻さず、SDFS/68 v2以降で育てる。

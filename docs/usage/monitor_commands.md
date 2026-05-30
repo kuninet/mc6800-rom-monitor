@@ -14,13 +14,18 @@
 
 ## コマンド一覧
 
+この一覧はROMモニタのプロンプト `] ` で使うコマンドである。
+SDFS/68 起動後の `SDFS> ` で使う `DIR`、`TYPE`、`RUN`、`LOAD`、`EXIT` は別レイヤーのコマンドであり、このROMコマンド一覧には含めない。
+
+### ROM本線コマンド
+
+ROM単体で使える低レベル操作、復旧口、マシン語デバッグ用のコマンドである。
+
 | コマンド | 用途 |
 | --- | --- |
 | `D` | 継続アドレスから 64 バイト分をダンプする |
 | `Dssss` | `ssss` から 64 バイト分をダンプする |
 | `Dssss-eeee` | `ssss` から `eeee` までをダンプする |
-| `DIR` | SDカード上のroot directoryにある8.3通常ファイルを表示する。`FEATURE_FAT=1` のROMだけで有効 |
-| `BOOT` | 固定LBAからSDFS/68 stage1 loaderを読み込んで、第2段システムへ移行する。`FEATURE_SD=1` かつ stage1対応RAM構成のROMで有効 |
 | `Mssss` | `ssss` からメモリを変更する |
 | `MAP` | 現在のビルドが想定する主要メモリ配置を表示する |
 | `RAMTEST ssss-eeee` | 許可された明示範囲のRAMを破壊テストする |
@@ -28,7 +33,6 @@
 | `KEYTEST` | `FEATURE_KEYBOARD=1` のROMで2nd ACIAのキーボード受信文字を表示する |
 | `Gssss` | `ssss` へジャンプして実行する |
 | `L` | S-Record または Intel HEX をロードする |
-| `LF filename` | SDカード上の8.3名ファイルを検索して開く。`FEATURE_FAT=1` のROMだけで有効 |
 | `H` | コマンド一覧を表示する |
 | `Fssss-eeee vv` | `ssss` から `eeee` までを `vv` で埋める |
 | `B` | 現在のブレークポイント状態を表示する |
@@ -37,6 +41,34 @@
 | `Cssss` | `ssss` のブレークポイントを解除する |
 | `R` | SWI ブレーク停止後に再開する |
 | `Ussss` | `ssss` から簡易逆アセンブル表示する |
+
+### SDFS/68起動入口
+
+`BOOT` はROM上のファイル操作コマンドではなく、system SD上のstage1を起動してSDFS/68へ制御を渡す入口である。
+
+| コマンド | 用途 |
+| --- | --- |
+| `BOOT` | 固定LBAからSDFS/68 stage1 loaderを読み込んで、第2段システムへ移行する。`FEATURE_SD=1` かつ stage1対応RAM構成のROMで有効 |
+
+### ROM常駐FAT互換コマンド
+
+`DIR` / `LF` は `FEATURE_FAT=1` のROMだけに残す互換機能である。
+`sbcio_vdg` / `k6802_vdg` のような `BOOT + SDFS/68` 本線profileではROMに入れず、SD上ファイルの通常操作はSDFS/68側で行う。
+
+| コマンド | 用途 |
+| --- | --- |
+| `DIR` | SDカード上のroot directoryにある8.3通常ファイルを表示する。`FEATURE_FAT=1` のROMだけで有効 |
+| `LF filename` | SDカード上の8.3名ファイルを検索して開く。`FEATURE_FAT=1` のROMだけで有効 |
+
+### コマンドの所属
+
+| 所属 | コマンド | 位置づけ |
+| --- | --- | --- |
+| ROM本線 | `D`、`M`、`G`、`L`、`B`、`C`、`R`、`U` など | ROM単体で使う低レベル操作とデバッグ |
+| ROM常駐FAT互換 | `DIR`、`LF filename` | `sbcio` profileに残す過渡的な互換入口 |
+| SDFS/68起動入口 | `BOOT` | system SD上のstage1と `SDFS.BIN` へ渡す入口 |
+| SDFS/68 | `DIR`、`TYPE`、`RUN`、`LOAD`、`EXIT` | `SDFS> ` で使う第2段DOSのコマンド |
+| stage1内部 | boot services | ユーザーが直接入力しないSDFS/68起動用サービス |
 
 ## メモリダンプ
 
@@ -267,7 +299,9 @@ OK
 
 ファイル名の前後の空白は無視する。subdirectory、LFN、wildcardは対象外である。
 LOAD後の自動実行は行わない。必要に応じて `Gssss` で開始アドレスへジャンプする。
-`FEATURE_FAT=0` のROMでは `LF` のコマンド本体をROMに入れず、未対応コマンドとして `?` を返す。`FEATURE_SD=1` / `FEATURE_FAT=0` のprofileでは、SDからのロードは `BOOT` でSDFS/68を起動し、SDFS/68側の `L filename` を使う。
+`FEATURE_FAT=0` のROMでは `LF` のコマンド本体をROMに入れず、未対応コマンドとして `?` を返す。
+`FEATURE_SD=1` / `FEATURE_FAT=0` のprofileでは、SD上ファイルの通常ロードはROMでは行わない。
+`BOOT` でSDFS/68を起動してから、SDFS/68側の `L filename` または `LOAD filename` を使う。
 
 SDFS/68はROMモニタとは別の第2段システムとして扱う。SDFS/68側の `DIR`、`TYPE`、`RUN`、`LOAD`、`EXIT` は [SDFS/68 システムSDカード方針](sdfs68_system_sd.md) に記載する。
 
@@ -275,6 +309,8 @@ SDFS/68はROMモニタとは別の第2段システムとして扱う。SDFS/68�
 
 `DIR` は `FEATURE_FAT=1` のROMで、SDカード上のroot directoryにある8.3通常ファイルを表示する。
 LFN、削除entry、volume label、subdirectoryは表示しない。
+ROM側の `DIR` とSDFS/68側の `DIR` は名前が同じでも別機能である。
+ROM側 `DIR` は `sbcio` profileの互換機能、SDFS/68側 `DIR` は `SDFS> ` で使う通常運用コマンドとして扱う。
 
 ```text
 ] DIR
