@@ -2,7 +2,7 @@
 
         include "../include/hardware.inc"
 
-SDFS_VERSION    equ 1
+SDFS_FORMAT_VERSION equ 1
 SDFS_HDR_SIZE   equ 16
 SDFS_S1_VERSION equ 1
 SDFS_S1_COUNT   equ 6
@@ -15,7 +15,7 @@ SDFS_S1_COUNT   equ 6
 
 SDFS_HEADER:
         fcc     "SDFS68"
-        fcb     SDFS_VERSION
+        fcb     SDFS_FORMAT_VERSION
         fcb     SDFS_HDR_SIZE
         fdb     SDFS_ENTRY
         fdb     SDFS_END-SDFS_LOAD_BASE
@@ -53,6 +53,13 @@ SDFS_LOAD_OK:
 SDFS_CHECK_DUMP:
         cmpa    #'D'
         bne     SDFS_COMMAND_ERROR
+        jsr     SDFS_CMD_IS_DIR
+        bcs     SDFS_CHECK_DUMP_BYTE
+        jsr     SDFS_CMD_DIR
+        bcc     SDFS_PROMPT_NEXT
+        jsr     SDFS_SHOW_ERROR
+        bra     SDFS_PROMPT_NEXT
+SDFS_CHECK_DUMP_BYTE:
         jsr     SDFS_CMD_DUMP_BYTE
         bcc     SDFS_PROMPT_NEXT
         jsr     SDFS_SHOW_ERROR
@@ -116,6 +123,164 @@ SDFS_CMD_DUMP_BYTE:
         rts
 SDFS_CMD_DUMP_FAIL:
         sec
+        rts
+
+SDFS_CMD_IS_DIR:
+        ldab    LINE_LEN
+        cmpb    #3
+        bne     SDFS_CMD_IS_DIR_FAIL
+        ldaa    LINE_BUF+1
+        jsr     SDFS_TO_UPPER
+        cmpa    #'I'
+        bne     SDFS_CMD_IS_DIR_FAIL
+        ldaa    LINE_BUF+2
+        jsr     SDFS_TO_UPPER
+        cmpa    #'R'
+        bne     SDFS_CMD_IS_DIR_FAIL
+        clc
+        rts
+SDFS_CMD_IS_DIR_FAIL:
+        sec
+        rts
+
+SDFS_CMD_DIR:
+        jsr     SDFS_K_DIR_ROOT
+        rts
+
+SDFS_K_DIR_ROOT:
+        jsr     SDFS_API_MOUNT
+        bcs     SDFS_K_DIR_FAIL
+        jsr     SDFS_K_COPY_ROOT_TO_CUR
+SDFS_K_DIR_CLUSTER_LOOP:
+        jsr     SDFS_CLUSTER_TO_SD_LBA
+        ldx     #SD_SECTOR_BUF
+        jsr     SDFS_API_READ_SECTOR
+        bcs     SDFS_K_DIR_FAIL
+        ldx     #SD_SECTOR_BUF
+        stx     FAT_ENTRY_PTR
+        ldaa    #16
+        staa    FAT_DIR_COUNT
+SDFS_K_DIR_ENTRY_LOOP:
+        ldx     FAT_ENTRY_PTR
+        ldaa    0,x
+        beq     SDFS_K_DIR_DONE
+        cmpa    #$E5
+        beq     SDFS_K_DIR_NEXT_ENTRY
+        ldaa    11,x
+        anda    #$0F
+        cmpa    #$0F
+        beq     SDFS_K_DIR_NEXT_ENTRY
+        ldaa    11,x
+        anda    #$18
+        bne     SDFS_K_DIR_NEXT_ENTRY
+        jsr     SDFS_K_PRINT_DIR_ENTRY
+SDFS_K_DIR_NEXT_ENTRY:
+        jsr     SDFS_K_ADVANCE_ENTRY_PTR
+        dec     FAT_DIR_COUNT
+        bne     SDFS_K_DIR_ENTRY_LOOP
+        jsr     SDFS_NEXT_CLUSTER
+        bcs     SDFS_K_DIR_DONE
+        jsr     SDFS_COPY_NEXT_TO_CUR
+        bra     SDFS_K_DIR_CLUSTER_LOOP
+SDFS_K_DIR_DONE:
+        clc
+        rts
+SDFS_K_DIR_FAIL:
+        sec
+        rts
+
+SDFS_K_COPY_ROOT_TO_CUR:
+        ldaa    FAT_ROOT_CLUS0
+        staa    FAT_CUR_CLUS0
+        ldaa    FAT_ROOT_CLUS1
+        staa    FAT_CUR_CLUS1
+        ldaa    FAT_ROOT_CLUS2
+        staa    FAT_CUR_CLUS2
+        ldaa    FAT_ROOT_CLUS3
+        staa    FAT_CUR_CLUS3
+        rts
+
+SDFS_K_ADVANCE_ENTRY_PTR:
+        ldx     FAT_ENTRY_PTR
+        ldab    #32
+SDFS_K_ADVANCE_ENTRY_PTR_LOOP:
+        inx
+        decb
+        bne     SDFS_K_ADVANCE_ENTRY_PTR_LOOP
+        stx     FAT_ENTRY_PTR
+        rts
+
+SDFS_K_PRINT_DIR_ENTRY:
+        ldx     FAT_ENTRY_PTR
+        ldab    #8
+SDFS_K_PRINT_DIR_NAME_LOOP:
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        beq     SDFS_K_PRINT_DIR_NAME_DONE
+        jsr     SDFS_PUTC
+        inx
+        decb
+        bne     SDFS_K_PRINT_DIR_NAME_LOOP
+SDFS_K_PRINT_DIR_NAME_DONE:
+        jsr     SDFS_K_DIR_EXT_HAS_CHAR
+        bcs     SDFS_K_PRINT_DIR_NO_EXT
+        ldaa    #'.'
+        jsr     SDFS_PUTC
+        ldx     FAT_ENTRY_PTR
+        ldab    #8
+SDFS_K_PRINT_DIR_EXT_SKIP:
+        inx
+        decb
+        bne     SDFS_K_PRINT_DIR_EXT_SKIP
+        ldab    #3
+SDFS_K_PRINT_DIR_EXT_LOOP:
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        beq     SDFS_K_PRINT_DIR_EXT_DONE
+        jsr     SDFS_PUTC
+        inx
+        decb
+        bne     SDFS_K_PRINT_DIR_EXT_LOOP
+SDFS_K_PRINT_DIR_EXT_DONE:
+SDFS_K_PRINT_DIR_NO_EXT:
+        ldaa    #CHR_SPACE
+        jsr     SDFS_PUTC
+        ldaa    #'A'
+        jsr     SDFS_PUTC
+        ldaa    #CHR_SPACE
+        jsr     SDFS_PUTC
+        ldx     FAT_ENTRY_PTR
+        ldaa    31,x
+        jsr     SDFS_PRINT_HEX8
+        ldaa    30,x
+        jsr     SDFS_PRINT_HEX8
+        ldaa    29,x
+        jsr     SDFS_PRINT_HEX8
+        ldaa    28,x
+        jsr     SDFS_PRINT_HEX8
+        ldaa    #CHR_CR
+        jsr     SDFS_PUTC
+        rts
+
+SDFS_K_DIR_EXT_HAS_CHAR:
+        ldx     FAT_ENTRY_PTR
+        ldab    #8
+SDFS_K_DIR_EXT_SKIP:
+        inx
+        decb
+        bne     SDFS_K_DIR_EXT_SKIP
+        ldab    #3
+SDFS_K_DIR_EXT_CHECK_LOOP:
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        bne     SDFS_K_DIR_EXT_FOUND
+        inx
+        decb
+        bne     SDFS_K_DIR_EXT_CHECK_LOOP
+        sec
+        rts
+SDFS_K_DIR_EXT_FOUND:
+        clc
         rts
 
 SDFS_CHECK_S1:
@@ -1124,7 +1289,7 @@ SDFS_PUTC_DONE:
 
 TXT_BANNER:
         fcb     CHR_CR
-        fcc     "SDFS/68 V1"
+        fcc     "SDFS/68 V1.2 #138"
         fcb     CHR_CR,0
 
 TXT_PROMPT:
