@@ -3,6 +3,7 @@
 ROM_BASE         equ $E000
 ROM_END          equ $FFFF
 MONITOR_BASE     equ $E200
+MONITOR_REENTRY  equ MONITOR_BASE+$000D
 
         include "../build/monitor_config.inc"
 

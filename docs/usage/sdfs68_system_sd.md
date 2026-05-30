@@ -142,8 +142,8 @@ SDFS/68 v1 はloaderの書き込み先アドレスを保護しない。`SDFS.BIN
 ## SDFS/68 v2 コマンド
 
 SDFS/68 v2では、DOS風の通常操作を本線にする。
-ただし `DIR` 追加時点ではメジャーバージョンを変えるほどのアーキテクチャ変更ではないため、起動時は `SDFS/68 V1.2 #138` のように表示する。
-`#138` は元Issue番号をbuild番号相当として扱う。
+ただし現時点ではメジャーバージョンを変えるほどのアーキテクチャ変更ではないため、起動時は `SDFS/68 V1.2 #142` のように表示する。
+`#142` は元Issue番号をbuild番号相当として扱う。
 SDFS.BIN headerのversion byteはstage1が読むバイナリ形式versionであり、起動表示のバージョンとは別に扱う。
 
 | コマンド | 用途 |
@@ -155,7 +155,7 @@ SDFS.BIN headerのversion byteはstage1が読むバイナリ形式versionであ�
 | `LOAD filename` | 予定。ファイルをロードする。自動実行しない |
 | `L filename` | 実装済み。現時点では `LOAD filename` の短縮ではなく、S-Record / Intel HEXロード用コマンド |
 | `Dhhhh` | 実装済み。16bit hexadecimal address の1 byteを表示する |
-| `EXIT` | 予定。ROMモニタへ戻る |
+| `EXIT` | 実装済み。ROMモニタへ戻る |
 
 `DIR` はSDFS/68本体がstage1の既存低レベルサービスを使ってroot directoryを走査する。
 stage1に `DIR` 専用APIは追加せず、ROM側の `DIR` も呼ばない。
@@ -177,6 +177,8 @@ subdirectory、wildcard、属性詳細表示、FAT writeは対象外である。
 
 メモリ変更、ブレークポイント、逆アセンブルなどの低レベルデバッグはSDFS/68に取り込まず、`EXIT` でROMモニタへ戻って行う。
 ROMへ戻った後は `] ` プロンプトで `M`、`D`、`U`、`B`、`R` などを使い、必要に応じて再度 `BOOT` する。
+`EXIT` はROMモニタの再入口へ戻る通常終了口であり、SDFS/68へ戻る常駐復帰機構ではない。
+ACIAは再初期化せず、ROMモニタの `] ` プロンプトへ戻る。
 
 ## 将来拡張
 

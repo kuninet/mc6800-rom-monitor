@@ -131,7 +131,7 @@ def test_stage1_boot_runs_built_sdfs_binary() -> None:
         assert rc == 0 and "[TIMEOUT]" not in stderr, (
             f"emulator failed for {profile}: rc={rc} stderr={stderr!r}"
         )
-        assert "SDFS/68 V1.2 #138" in stdout, f"missing SDFS banner for {profile}: {stdout!r}"
+        assert "SDFS/68 V1.2 #142" in stdout, f"missing SDFS banner for {profile}: {stdout!r}"
         assert "SDFS> " in stdout, f"missing SDFS prompt for {profile}: {stdout!r}"
     print("[PASS] test_stage1_boot_runs_built_sdfs_binary")
 
@@ -302,6 +302,27 @@ def test_sdfs_dir_requires_exact_command_and_dump_still_works() -> None:
     assert "?" in stdout, f"DIR with extra argument was accepted: {stdout!r}"
     assert stdout.count("SDFS> ") >= 3, f"prompt did not recover: {stdout!r}"
     print("[PASS] test_sdfs_dir_requires_exact_command_and_dump_still_works")
+
+
+def test_sdfs_exit_returns_to_monitor_and_boots_again() -> None:
+    profile = "sbcio_vdg"
+    _run_make(profile, "bin")
+    _run_make(profile, "stage1")
+    _run_make(profile, "sdfs")
+    suffix = EXPECTED[profile]["suffix"]
+    stage1 = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+    sdfs = (PROJECT_ROOT / "build" / f"SDFS{suffix}.BIN").read_bytes()
+    image = build_sdfs_image(stage1_data=stage1, sdfs_data=sdfs, extra_files=[])
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
+        input_text="BOOT\rEXIT\rBOOT\rX",
+        sd_image=image,
+        max_cycles=180_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert stdout.count("SDFS/68 V1.2 #142") >= 2, f"EXIT did not allow BOOT again: {stdout!r}"
+    assert stdout.count("] ") >= 2, f"monitor prompt did not return after EXIT: {stdout!r}"
+    print("[PASS] test_sdfs_exit_returns_to_monitor_and_boots_again")
 
 
 def test_sdfs_loader_errors_return_to_prompt() -> None:
@@ -594,6 +615,7 @@ def main() -> None:
         test_sdfs_dir_scans_root_chain,
         test_sdfs_dir_returns_prompt_on_empty_followup_root_cluster,
         test_sdfs_dir_requires_exact_command_and_dump_still_works,
+        test_sdfs_exit_returns_to_monitor_and_boots_again,
         test_sdfs_loader_errors_return_to_prompt,
         test_sdfs_rejects_missing_boot_services,
         test_sdfs_rejects_bad_boot_services_headers,
