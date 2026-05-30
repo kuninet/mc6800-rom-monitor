@@ -52,7 +52,7 @@ SDFS_LOAD_OK:
         bra     SDFS_PROMPT_NEXT
 SDFS_CHECK_DUMP:
         cmpa    #'D'
-        bne     SDFS_COMMAND_ERROR
+        bne     SDFS_CHECK_EXIT
         jsr     SDFS_CMD_IS_DIR
         bcs     SDFS_CHECK_DUMP_BYTE
         jsr     SDFS_CMD_DIR
@@ -63,6 +63,13 @@ SDFS_CHECK_DUMP_BYTE:
         jsr     SDFS_CMD_DUMP_BYTE
         bcc     SDFS_PROMPT_NEXT
         jsr     SDFS_SHOW_ERROR
+        bra     SDFS_PROMPT_NEXT
+SDFS_CHECK_EXIT:
+        cmpa    #'E'
+        bne     SDFS_COMMAND_ERROR
+        jsr     SDFS_CMD_IS_EXIT
+        bcs     SDFS_COMMAND_ERROR
+        jmp     SDFS_CMD_EXIT
 SDFS_PROMPT_NEXT:
         jsr     SDFS_PRINT_PROMPT
         bra     SDFS_LOOP
@@ -142,6 +149,32 @@ SDFS_CMD_IS_DIR:
 SDFS_CMD_IS_DIR_FAIL:
         sec
         rts
+
+SDFS_CMD_IS_EXIT:
+        ldab    LINE_LEN
+        cmpb    #4
+        bne     SDFS_CMD_IS_EXIT_FAIL
+        ldaa    LINE_BUF+1
+        jsr     SDFS_TO_UPPER
+        cmpa    #'X'
+        bne     SDFS_CMD_IS_EXIT_FAIL
+        ldaa    LINE_BUF+2
+        jsr     SDFS_TO_UPPER
+        cmpa    #'I'
+        bne     SDFS_CMD_IS_EXIT_FAIL
+        ldaa    LINE_BUF+3
+        jsr     SDFS_TO_UPPER
+        cmpa    #'T'
+        bne     SDFS_CMD_IS_EXIT_FAIL
+        clc
+        rts
+SDFS_CMD_IS_EXIT_FAIL:
+        sec
+        rts
+
+SDFS_CMD_EXIT:
+        lds     #STACK_TOP
+        jmp     MONITOR_REENTRY
 
 SDFS_CMD_DIR:
         jsr     SDFS_K_DIR_ROOT
@@ -1289,7 +1322,7 @@ SDFS_PUTC_DONE:
 
 TXT_BANNER:
         fcb     CHR_CR
-        fcc     "SDFS/68 V1.2 #138"
+        fcc     "SDFS/68 V1.2 #142"
         fcb     CHR_CR,0
 
 TXT_PROMPT:
