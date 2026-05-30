@@ -13,7 +13,15 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "tools"))
 
-from fat32_image import Fat32File  # noqa: E402
+from fat32_image import (  # noqa: E402
+    EOC,
+    SECTOR_SIZE,
+    Fat32File,
+    Fat32Layout,
+    root_entry,
+    write_cluster,
+    write_sector,
+)
 from mk_sdfs_image import build_sdfs_image  # noqa: E402
 
 EMU_PATH = PROJECT_ROOT / "emu" / "sbc6800_emu.py"
@@ -62,7 +70,7 @@ def test_sdfs_profiles_build_and_match_header() -> None:
         )
         assert len(data) <= symbols["SDFS_LOAD_LIMIT"] - symbols["SDFS_LOAD_BASE"] + 1
         assert data[0:6] == b"SDFS68"
-        assert data[6] == 1, "SDFS version mismatch"
+        assert data[6] == 1, "SDFS binary format version mismatch"
         assert data[7] == 16, "SDFS header size mismatch"
         entry = (data[8] << 8) | data[9]
         size = (data[10] << 8) | data[11]
@@ -123,7 +131,7 @@ def test_stage1_boot_runs_built_sdfs_binary() -> None:
         assert rc == 0 and "[TIMEOUT]" not in stderr, (
             f"emulator failed for {profile}: rc={rc} stderr={stderr!r}"
         )
-        assert "SDFS/68 V1" in stdout, f"missing SDFS banner for {profile}: {stdout!r}"
+        assert "SDFS/68 V1.2 #138" in stdout, f"missing SDFS banner for {profile}: {stdout!r}"
         assert "SDFS> " in stdout, f"missing SDFS prompt for {profile}: {stdout!r}"
     print("[PASS] test_stage1_boot_runs_built_sdfs_binary")
 
@@ -159,6 +167,141 @@ def test_sdfs_loads_srec_and_ihex_files() -> None:
         assert "0202 4E" in stdout, f"EOF-without-newline HEX did not load for {profile}: {stdout!r}"
         assert stdout.count("OK") >= 3, f"missing load success messages for {profile}: {stdout!r}"
     print("[PASS] test_sdfs_loads_srec_and_ihex_files")
+
+
+def test_sdfs_dir_lists_root_files_and_skips_non_files() -> None:
+    for profile, expected in EXPECTED.items():
+        _run_make(profile, "bin")
+        _run_make(profile, "stage1")
+        _run_make(profile, "sdfs")
+        suffix = expected["suffix"]
+        stage1 = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+        sdfs = (PROJECT_ROOT / "build" / f"SDFS{suffix}.BIN").read_bytes()
+        image = build_sdfs_image(
+            stage1_data=stage1,
+            sdfs_data=sdfs,
+            extra_files=[
+                _file("HELLO.S", _srec_file(0x0200, b"S")),
+                _file("HELLO.HEX", _ihex_file(0x0201, b"I")),
+                _file("README.TXT", b"HELLO\r\n"),
+                _raw_file(b"SKIPVOL    ", b"", attr=0x08),
+                _raw_file(b"SKIPDIR    ", b"", attr=0x10),
+                _raw_file(b"SKIPLFN    ", b"", attr=0x0F),
+                _raw_file(bytes([0xE5]) + b"DEL    TXT", b"", attr=0x20),
+            ],
+        )
+        stdout, stderr, rc = _run_emu_with_sd(
+            rom_path=PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
+            input_text="BOOT\rDIR\rX",
+            sd_image=image,
+            max_cycles=160_000_000,
+        )
+        assert rc == 0 and "[TIMEOUT]" not in stderr, (
+            f"emulator failed for {profile}: rc={rc} stderr={stderr!r}"
+        )
+        assert "SDFS.BIN A " in stdout, f"SDFS.BIN missing from DIR for {profile}: {stdout!r}"
+        assert "HELLO.S A " in stdout, f"HELLO.S missing from DIR for {profile}: {stdout!r}"
+        assert "HELLO.HEX A " in stdout, f"HELLO.HEX missing from DIR for {profile}: {stdout!r}"
+        assert "README.TXT A 00000007" in stdout, (
+            f"README.TXT missing or size mismatch for {profile}: {stdout!r}"
+        )
+        assert "SKIPVOL" not in stdout, f"volume label leaked into DIR for {profile}: {stdout!r}"
+        assert "SKIPDIR" not in stdout, f"directory entry leaked into DIR for {profile}: {stdout!r}"
+        assert "SKIPLFN" not in stdout, f"LFN entry leaked into DIR for {profile}: {stdout!r}"
+        assert "DEL.TXT" not in stdout, f"deleted entry leaked into DIR for {profile}: {stdout!r}"
+        assert stdout.count("SDFS> ") >= 2, f"DIR did not return to prompt for {profile}: {stdout!r}"
+    print("[PASS] test_sdfs_dir_lists_root_files_and_skips_non_files")
+
+
+def test_sdfs_dir_scans_root_chain() -> None:
+    profile = "sbcio_vdg"
+    _run_make(profile, "bin")
+    _run_make(profile, "stage1")
+    _run_make(profile, "sdfs")
+    suffix = EXPECTED[profile]["suffix"]
+    stage1 = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+    sdfs = (PROJECT_ROOT / "build" / f"SDFS{suffix}.BIN").read_bytes()
+    image = bytearray(
+        build_sdfs_image(
+            stage1_data=stage1,
+            sdfs_data=sdfs,
+            extra_files=[
+                _file("HELLO.S", _srec_file(0x0200, b"S")),
+                _file("HELLO.HEX", _ihex_file(0x0201, b"I")),
+            ],
+        )
+    )
+    layout = _layout_from_image(image)
+    root_extra_cluster = 64
+    _set_fat_entry(image, layout, layout.root_cluster, root_extra_cluster)
+    _set_fat_entry(image, layout, root_extra_cluster, EOC)
+    _fill_root_tail_with_skipped_entries(image, layout)
+    extra = bytearray(SECTOR_SIZE * layout.sectors_per_cluster)
+    extra[0:32] = root_entry(b"LATE    TXT", 0x20, root_extra_cluster + 1, 4)
+    extra[32] = 0x00
+    write_cluster(image, layout, root_extra_cluster, extra)
+
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
+        input_text="BOOT\rDIR\rX",
+        sd_image=bytes(image),
+        max_cycles=160_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert "HELLO.S A " in stdout, f"first root cluster entry missing: {stdout!r}"
+    assert "LATE.TXT A 00000004" in stdout, f"root chain entry missing: {stdout!r}"
+    assert stdout.count("SDFS> ") >= 2, f"DIR did not return to prompt: {stdout!r}"
+    print("[PASS] test_sdfs_dir_scans_root_chain")
+
+
+def test_sdfs_dir_returns_prompt_on_empty_followup_root_cluster() -> None:
+    profile = "sbcio_vdg"
+    _run_make(profile, "bin")
+    _run_make(profile, "stage1")
+    _run_make(profile, "sdfs")
+    suffix = EXPECTED[profile]["suffix"]
+    stage1 = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+    sdfs = (PROJECT_ROOT / "build" / f"SDFS{suffix}.BIN").read_bytes()
+    image = bytearray(build_sdfs_image(stage1_data=stage1, sdfs_data=sdfs, extra_files=[]))
+    layout = _layout_from_image(image)
+    empty_cluster = 65
+    _set_fat_entry(image, layout, layout.root_cluster, empty_cluster)
+    _set_fat_entry(image, layout, empty_cluster, EOC)
+    _fill_root_tail_with_skipped_entries(image, layout)
+    write_cluster(image, layout, empty_cluster, bytes(SECTOR_SIZE * layout.sectors_per_cluster))
+
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
+        input_text="BOOT\rDIR\rX",
+        sd_image=bytes(image),
+        max_cycles=160_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert "SDFS.BIN A " in stdout, f"root entry missing before followup cluster: {stdout!r}"
+    assert stdout.count("SDFS> ") >= 2, f"DIR did not recover to prompt: {stdout!r}"
+    print("[PASS] test_sdfs_dir_returns_prompt_on_empty_followup_root_cluster")
+
+
+def test_sdfs_dir_requires_exact_command_and_dump_still_works() -> None:
+    profile = "sbcio_vdg"
+    _run_make(profile, "bin")
+    _run_make(profile, "stage1")
+    _run_make(profile, "sdfs")
+    suffix = EXPECTED[profile]["suffix"]
+    stage1 = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+    sdfs = (PROJECT_ROOT / "build" / f"SDFS{suffix}.BIN").read_bytes()
+    image = build_sdfs_image(stage1_data=stage1, sdfs_data=sdfs, extra_files=[])
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
+        input_text="BOOT\rDIR X\rD0100\rX",
+        sd_image=image,
+        max_cycles=140_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert "0100 " in stdout, f"Dhhhh dispatch was broken: {stdout!r}"
+    assert "?" in stdout, f"DIR with extra argument was accepted: {stdout!r}"
+    assert stdout.count("SDFS> ") >= 3, f"prompt did not recover: {stdout!r}"
+    print("[PASS] test_sdfs_dir_requires_exact_command_and_dump_still_works")
 
 
 def test_sdfs_loader_errors_return_to_prompt() -> None:
@@ -342,6 +485,61 @@ def _file(name: str, data: bytes) -> Fat32File:
     return Fat32File(name83, data)
 
 
+def _raw_file(name83: bytes, data: bytes, *, attr: int) -> Fat32File:
+    return Fat32File(name83, data, attr=attr)
+
+
+def _layout_from_image(image: bytes | bytearray) -> Fat32Layout:
+    volume_start = int.from_bytes(image[454:458], "little")
+    vbr = volume_start * SECTOR_SIZE
+    total_volume_sectors = int.from_bytes(image[vbr + 32 : vbr + 36], "little")
+    reserved_sectors = int.from_bytes(image[vbr + 14 : vbr + 16], "little")
+    fat_count = image[vbr + 16]
+    fat_size_sectors = int.from_bytes(image[vbr + 36 : vbr + 40], "little")
+    sectors_per_cluster = image[vbr + 13]
+    root_cluster = int.from_bytes(image[vbr + 44 : vbr + 48], "little")
+    fat_lba = volume_start + reserved_sectors
+    data_start_lba = fat_lba + fat_count * fat_size_sectors
+    return Fat32Layout(
+        volume_start_lba=volume_start,
+        fat_lba=fat_lba,
+        root_dir_lba=data_start_lba + (root_cluster - 2) * sectors_per_cluster,
+        data_start_lba=data_start_lba,
+        total_volume_sectors=total_volume_sectors,
+        reserved_sectors=reserved_sectors,
+        fat_count=fat_count,
+        fat_size_sectors=fat_size_sectors,
+        sectors_per_cluster=sectors_per_cluster,
+        root_cluster=root_cluster,
+    )
+
+
+def _set_fat_entry(image: bytearray, layout: Fat32Layout, cluster: int, value: int) -> None:
+    offset = cluster * 4
+    sector_index = offset // SECTOR_SIZE
+    sector_offset = offset % SECTOR_SIZE
+    for copy_index in range(layout.fat_count):
+        lba = layout.fat_lba + copy_index * layout.fat_size_sectors + sector_index
+        start = lba * SECTOR_SIZE
+        sector = bytearray(image[start : start + SECTOR_SIZE])
+        sector[sector_offset : sector_offset + 4] = value.to_bytes(4, "little")
+        write_sector(image, lba, sector)
+
+
+def _fill_root_tail_with_skipped_entries(image: bytearray, layout: Fat32Layout) -> None:
+    root_lba = layout.root_dir_lba
+    start = root_lba * SECTOR_SIZE
+    root = bytearray(image[start : start + SECTOR_SIZE * layout.sectors_per_cluster])
+    for index in range(SECTOR_SIZE * layout.sectors_per_cluster // 32):
+        entry_start = index * 32
+        if root[entry_start] == 0x00:
+            for fill_index in range(index, SECTOR_SIZE * layout.sectors_per_cluster // 32):
+                fill_start = fill_index * 32
+                root[fill_start : fill_start + 32] = root_entry(b"SKIP    TMP", 0x08, 0, 0)
+            break
+    write_cluster(image, layout, layout.root_cluster, root)
+
+
 def _srec_file(address: int, data: bytes, trailing_newline: bool = True) -> bytes:
     count = len(data) + 3
     values = [count, (address >> 8) & 0xFF, address & 0xFF, *data]
@@ -392,6 +590,10 @@ def main() -> None:
         test_sdfs_api_wrappers_target_stage1_jump_table,
         test_stage1_boot_runs_built_sdfs_binary,
         test_sdfs_loads_srec_and_ihex_files,
+        test_sdfs_dir_lists_root_files_and_skips_non_files,
+        test_sdfs_dir_scans_root_chain,
+        test_sdfs_dir_returns_prompt_on_empty_followup_root_cluster,
+        test_sdfs_dir_requires_exact_command_and_dump_still_works,
         test_sdfs_loader_errors_return_to_prompt,
         test_sdfs_rejects_missing_boot_services,
         test_sdfs_rejects_bad_boot_services_headers,

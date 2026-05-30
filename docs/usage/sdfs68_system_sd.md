@@ -139,19 +139,39 @@ SDFS/68 v1 のloaderは ROM loader と同じ制限を持つ。S-Recordは `S1` /
 
 SDFS/68 v1 はloaderの書き込み先アドレスを保護しない。`SDFS.BIN` 本体、stage1、SD/FAT work、stack、VDG VRAMなどを壊すファイルも指定できるため、当面は作成者がロード先を管理する。
 
-## SDFS/68 v2 予定コマンド
+## SDFS/68 v2 コマンド
 
 SDFS/68 v2では、DOS風の通常操作を本線にする。
+ただし `DIR` 追加時点ではメジャーバージョンを変えるほどのアーキテクチャ変更ではないため、起動時は `SDFS/68 V1.2 #138` のように表示する。
+`#138` は元Issue番号をbuild番号相当として扱う。
+SDFS.BIN headerのversion byteはstage1が読むバイナリ形式versionであり、起動表示のバージョンとは別に扱う。
 
 | コマンド | 用途 |
 | --- | --- |
-| `DIR` | FAT root の8.3通常ファイルを表示する |
-| `TYPE filename` | テキストファイルをコンソールへ表示する |
-| `RUN filename` | ファイルをロードし、entryが取れれば実行する |
-| `RUN addr` | 指定アドレスへジャンプする |
-| `LOAD filename` | ファイルをロードする。自動実行しない |
-| `L filename` | `LOAD filename` の短縮エイリアス |
-| `EXIT` | ROMモニタへ戻る |
+| `DIR` | 実装済み。FAT root の8.3通常ファイルを表示する |
+| `TYPE filename` | 予定。テキストファイルをコンソールへ表示する |
+| `RUN filename` | 予定。ファイルをロードし、entryが取れれば実行する |
+| `RUN addr` | 予定。指定アドレスへジャンプする |
+| `LOAD filename` | 予定。ファイルをロードする。自動実行しない |
+| `L filename` | 実装済み。現時点では `LOAD filename` の短縮ではなく、S-Record / Intel HEXロード用コマンド |
+| `Dhhhh` | 実装済み。16bit hexadecimal address の1 byteを表示する |
+| `EXIT` | 予定。ROMモニタへ戻る |
+
+`DIR` はSDFS/68本体がstage1の既存低レベルサービスを使ってroot directoryを走査する。
+stage1に `DIR` 専用APIは追加せず、ROM側の `DIR` も呼ばない。
+
+表示例:
+
+```text
+SDFS> DIR
+SDFS.BIN A 0000092F
+HELLO.S A 0000004A
+HELLO.HEX A 00000022
+```
+
+`DIR` が表示するのは、root directory直下の8.3 short filename通常ファイルだけである。
+LFN、volume label、directory、deleted entryは表示しない。
+subdirectory、wildcard、属性詳細表示、FAT writeは対象外である。
 
 通常実行は `RUN` を使う。`LOAD` / `L` はロード確認やデバッグ用の補助コマンドとして扱う。
 
