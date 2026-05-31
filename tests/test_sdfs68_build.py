@@ -131,7 +131,7 @@ def test_stage1_boot_runs_built_sdfs_binary() -> None:
         assert rc == 0 and "[TIMEOUT]" not in stderr, (
             f"emulator failed for {profile}: rc={rc} stderr={stderr!r}"
         )
-        assert "SDFS/68 V1.2 #142" in stdout, f"missing SDFS banner for {profile}: {stdout!r}"
+        assert "SDFS/68 V1.2 #141" in stdout, f"missing SDFS banner for {profile}: {stdout!r}"
         assert "SDFS> " in stdout, f"missing SDFS prompt for {profile}: {stdout!r}"
     print("[PASS] test_stage1_boot_runs_built_sdfs_binary")
 
@@ -155,7 +155,7 @@ def test_sdfs_loads_srec_and_ihex_files() -> None:
         )
         stdout, stderr, rc = _run_emu_with_sd(
             rom_path=PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
-            input_text="BOOT\rL HELLO.S\rD0200\rL HELLO.HEX\rD0201\rL EOF.HEX\rD0202\rX",
+            input_text="BOOT\rLOAD HELLO.S\rD0200\rL HELLO.HEX\rD0201\rLOAD EOF.HEX\rD0202\rX",
             sd_image=image,
             max_cycles=160_000_000,
         )
@@ -320,7 +320,7 @@ def test_sdfs_exit_returns_to_monitor_and_boots_again() -> None:
         max_cycles=180_000_000,
     )
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
-    assert stdout.count("SDFS/68 V1.2 #142") >= 2, f"EXIT did not allow BOOT again: {stdout!r}"
+    assert stdout.count("SDFS/68 V1.2 #141") >= 2, f"EXIT did not allow BOOT again: {stdout!r}"
     assert stdout.count("] ") >= 2, f"monitor prompt did not return after EXIT: {stdout!r}"
     print("[PASS] test_sdfs_exit_returns_to_monitor_and_boots_again")
 
@@ -343,13 +343,14 @@ def test_sdfs_loader_errors_return_to_prompt() -> None:
     )
     stdout, stderr, rc = _run_emu_with_sd(
         rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
-        input_text="BOOT\rL MISSING.S\rL BAD.HEX\rL NOEND.S\rX",
+        input_text="BOOT\rLOAD MISSING.S\rLOADHELLO.S\rL BAD.HEX\rL NOEND.S\rX",
         sd_image=image,
         max_cycles=140_000_000,
     )
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
-    assert "MISSING.S" in stdout and "BAD.HEX" in stdout and "NOEND.S" in stdout
-    assert stdout.count("SDFS> ") >= 4, f"SDFS prompt did not recover after errors: {stdout!r}"
+    assert "MISSING.S" in stdout and "LOADHELLO.S" in stdout
+    assert "BAD.HEX" in stdout and "NOEND.S" in stdout
+    assert stdout.count("SDFS> ") >= 5, f"SDFS prompt did not recover after errors: {stdout!r}"
     assert "?" in stdout, f"missing loader error output: {stdout!r}"
     print("[PASS] test_sdfs_loader_errors_return_to_prompt")
 
