@@ -74,10 +74,17 @@ SDFS_CHECK_DUMP_BYTE:
         bra     SDFS_PROMPT_NEXT
 SDFS_CHECK_EXIT:
         cmpa    #'E'
-        bne     SDFS_COMMAND_ERROR
+        bne     SDFS_CHECK_RUN
         jsr     SDFS_CMD_IS_EXIT
         bcs     SDFS_COMMAND_ERROR
         jmp     SDFS_CMD_EXIT
+SDFS_CHECK_RUN:
+        cmpa    #'R'
+        bne     SDFS_COMMAND_ERROR
+        jsr     SDFS_CMD_RUN_ADDR
+        bcc     SDFS_PROMPT_NEXT
+        jsr     SDFS_SHOW_ERROR
+        bra     SDFS_PROMPT_NEXT
 SDFS_PROMPT_NEXT:
         jsr     SDFS_PRINT_PROMPT
         bra     SDFS_LOOP
@@ -235,6 +242,32 @@ SDFS_CMD_IS_EXIT_FAIL:
 SDFS_CMD_EXIT:
         lds     #STACK_TOP
         jmp     MONITOR_REENTRY
+
+SDFS_CMD_RUN_ADDR:
+        ldab    LINE_LEN
+        cmpb    #5
+        blo     SDFS_CMD_RUN_ADDR_FAIL
+        ldaa    LINE_BUF+1
+        jsr     SDFS_TO_UPPER
+        cmpa    #'U'
+        bne     SDFS_CMD_RUN_ADDR_FAIL
+        ldaa    LINE_BUF+2
+        jsr     SDFS_TO_UPPER
+        cmpa    #'N'
+        bne     SDFS_CMD_RUN_ADDR_FAIL
+        ldaa    LINE_BUF+3
+        cmpa    #CHR_SPACE
+        bne     SDFS_CMD_RUN_ADDR_FAIL
+        subb    #3
+        ldx     #LINE_BUF+3
+        jsr     SDFS_PARSE_HEX16
+        bcs     SDFS_CMD_RUN_ADDR_FAIL
+        lds     #STACK_TOP
+        ldx     HEX_VALUE_HI
+        jmp     0,x
+SDFS_CMD_RUN_ADDR_FAIL:
+        sec
+        rts
 
 SDFS_CMD_DIR:
         jsr     SDFS_K_DIR_ROOT
@@ -1382,7 +1415,7 @@ SDFS_PUTC_DONE:
 
 TXT_BANNER:
         fcb     CHR_CR
-        fcc     "SDFS/68 V1.2 #141"
+        fcc     "SDFS/68 V1.2 #149"
         fcb     CHR_CR,0
 
 TXT_PROMPT:
