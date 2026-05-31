@@ -125,7 +125,7 @@ ROM `BOOT` 後にSDFS/68上で動くロード手段であり、stage1 boot servi
 例:
 
 ```text
-SDFS> L HELLO.S
+SDFS> LOAD HELLO.S
 OK
 SDFS> L HELLO.HEX
 OK
@@ -142,8 +142,8 @@ SDFS/68 v1 はloaderの書き込み先アドレスを保護しない。`SDFS.BIN
 ## SDFS/68 v2 コマンド
 
 SDFS/68 v2では、DOS風の通常操作を本線にする。
-ただし現時点ではメジャーバージョンを変えるほどのアーキテクチャ変更ではないため、起動時は `SDFS/68 V1.2 #142` のように表示する。
-`#142` は元Issue番号をbuild番号相当として扱う。
+ただし現時点ではメジャーバージョンを変えるほどのアーキテクチャ変更ではないため、起動時は `SDFS/68 V1.2 #141` のように表示する。
+`#141` は元Issue番号をbuild番号相当として扱う。
 SDFS.BIN headerのversion byteはstage1が読むバイナリ形式versionであり、起動表示のバージョンとは別に扱う。
 
 | コマンド | 用途 |
@@ -152,8 +152,8 @@ SDFS.BIN headerのversion byteはstage1が読むバイナリ形式versionであ�
 | `TYPE filename` | 予定。テキストファイルをコンソールへ表示する |
 | `RUN filename` | 予定。ファイルをロードし、entryが取れれば実行する |
 | `RUN addr` | 予定。指定アドレスへジャンプする |
-| `LOAD filename` | 予定。ファイルをロードする。自動実行しない |
-| `L filename` | 実装済み。現時点では `LOAD filename` の短縮ではなく、S-Record / Intel HEXロード用コマンド |
+| `LOAD filename` | 実装済み。ファイルをロードする。自動実行しない |
+| `L filename` | 実装済み。`LOAD filename` の短縮エイリアス |
 | `Dhhhh` | 実装済み。16bit hexadecimal address の1 byteを表示する |
 | `EXIT` | 実装済み。ROMモニタへ戻る |
 
@@ -174,6 +174,7 @@ LFN、volume label、directory、deleted entryは表示しない。
 subdirectory、wildcard、属性詳細表示、FAT writeは対象外である。
 
 通常実行は `RUN` を使う。`LOAD` / `L` はロード確認やデバッグ用の補助コマンドとして扱う。
+`LOAD` はロードのみを行い、自動ジャンプしない。
 
 メモリ変更、ブレークポイント、逆アセンブルなどの低レベルデバッグはSDFS/68に取り込まず、`EXIT` でROMモニタへ戻って行う。
 ROMへ戻った後は `] ` プロンプトで `M`、`D`、`U`、`B`、`R` などを使い、必要に応じて再度 `BOOT` する。

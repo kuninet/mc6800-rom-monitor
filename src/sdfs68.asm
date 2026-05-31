@@ -42,7 +42,15 @@ SDFS_LOOP:
         jsr     SDFS_TO_UPPER
         cmpa    #'L'
         bne     SDFS_CHECK_DUMP
-        jsr     SDFS_CMD_LOAD
+        jsr     SDFS_CMD_IS_LOAD_LONG
+        bcc     SDFS_DO_LOAD_LONG
+        jsr     SDFS_CMD_IS_LOAD_LONG_PREFIX
+        bcc     SDFS_COMMAND_ERROR
+        jsr     SDFS_CMD_LOAD_ALIAS
+        bra     SDFS_LOAD_RESULT
+SDFS_DO_LOAD_LONG:
+        jsr     SDFS_CMD_LOAD_LONG
+SDFS_LOAD_RESULT:
         bcc     SDFS_LOAD_OK
         jsr     SDFS_SHOW_LOADER_ERROR
         bra     SDFS_PROMPT_NEXT
@@ -77,14 +85,66 @@ SDFS_COMMAND_ERROR:
         jsr     SDFS_SHOW_ERROR
         bra     SDFS_PROMPT_NEXT
 
-SDFS_CMD_LOAD:
-        clr     LOADER_MODE
-        clr     LOADER_STAGE
+SDFS_CMD_LOAD_ALIAS:
         ldab    LINE_LEN
         cmpb    #2
-        blo     SDFS_CMD_LOAD_FAIL
+        blo     SDFS_CMD_LOAD_FAIL_NEAR
         subb    #1
         ldx     #LINE_BUF+1
+        jmp     SDFS_K_LOAD_FILE
+
+SDFS_CMD_LOAD_LONG:
+        ldab    LINE_LEN
+        cmpb    #5
+        blo     SDFS_CMD_LOAD_FAIL_NEAR
+        ldaa    LINE_BUF+4
+        cmpa    #CHR_SPACE
+        bne     SDFS_CMD_LOAD_FAIL_NEAR
+        subb    #4
+        ldx     #LINE_BUF+4
+        jmp     SDFS_K_LOAD_FILE
+SDFS_CMD_LOAD_FAIL_NEAR:
+        jmp     SDFS_CMD_LOAD_FAIL
+
+SDFS_CMD_IS_LOAD_LONG:
+        ldab    LINE_LEN
+        cmpb    #4
+        blo     SDFS_CMD_IS_LOAD_LONG_FAIL
+        ldaa    LINE_BUF+1
+        jsr     SDFS_TO_UPPER
+        cmpa    #'O'
+        bne     SDFS_CMD_IS_LOAD_LONG_FAIL
+        ldaa    LINE_BUF+2
+        jsr     SDFS_TO_UPPER
+        cmpa    #'A'
+        bne     SDFS_CMD_IS_LOAD_LONG_FAIL
+        ldaa    LINE_BUF+3
+        jsr     SDFS_TO_UPPER
+        cmpa    #'D'
+        bne     SDFS_CMD_IS_LOAD_LONG_FAIL
+        clc
+        rts
+SDFS_CMD_IS_LOAD_LONG_FAIL:
+        sec
+        rts
+
+SDFS_CMD_IS_LOAD_LONG_PREFIX:
+        ldab    LINE_LEN
+        cmpb    #2
+        blo     SDFS_CMD_IS_LOAD_LONG_PREFIX_FAIL
+        ldaa    LINE_BUF+1
+        jsr     SDFS_TO_UPPER
+        cmpa    #'O'
+        bne     SDFS_CMD_IS_LOAD_LONG_PREFIX_FAIL
+        clc
+        rts
+SDFS_CMD_IS_LOAD_LONG_PREFIX_FAIL:
+        sec
+        rts
+
+SDFS_K_LOAD_FILE:
+        clr     LOADER_MODE
+        clr     LOADER_STAGE
         jsr     SDFS_PARSE_FILENAME_83
         bcs     SDFS_CMD_LOAD_FAIL
         jsr     SDFS_API_MOUNT
@@ -1322,7 +1382,7 @@ SDFS_PUTC_DONE:
 
 TXT_BANNER:
         fcb     CHR_CR
-        fcc     "SDFS/68 V1.2 #142"
+        fcc     "SDFS/68 V1.2 #141"
         fcb     CHR_CR,0
 
 TXT_PROMPT:
