@@ -486,6 +486,71 @@ def test_sdfs_run_file_requires_srec_entry() -> None:
     print("[PASS] test_sdfs_run_file_requires_srec_entry")
 
 
+def test_sdfs_line_editing_backspace_delete_and_lowercase() -> None:
+    profile = "sbcio_vdg"
+    _run_make(profile, "bin")
+    _run_make(profile, "stage1")
+    _run_make(profile, "sdfs")
+    suffix = EXPECTED[profile]["suffix"]
+    stage1 = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+    sdfs = (PROJECT_ROOT / "build" / f"SDFS{suffix}.BIN").read_bytes()
+    hello_program = bytes(
+        [
+            0xCE,
+            0x01,
+            0x07,
+            0xBD,
+            0xE0,
+            0x7E,
+            0x3F,
+            0x0D,
+            0x0A,
+            *b"HELLO, WORLD",
+            0x0D,
+            0x0A,
+            0x04,
+        ]
+    )
+    image = build_sdfs_image(
+        stage1_data=stage1,
+        sdfs_data=sdfs,
+        extra_files=[_file("HELLO.S", _srec_file(0x0100, hello_program, entry_address=0x0100))],
+    )
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
+        input_text="\b\x7fBOOT\rDIRX\b\rDIRX\x7f\rrun hello.s\rX",
+        sd_image=image,
+        max_cycles=220_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert "SDFS.BIN A " in stdout, f"DIR after BS/DEL editing did not run: {stdout!r}"
+    assert stdout.count("SDFS.BIN A ") >= 2, f"both edited DIR commands did not run: {stdout!r}"
+    assert "HELLO, WORLD" in stdout, f"lowercase run hello.s did not execute: {stdout!r}"
+    assert "\b \b" in stdout, f"BS/DEL did not emit visible erase sequence: {stdout!r}"
+    print("[PASS] test_sdfs_line_editing_backspace_delete_and_lowercase")
+
+
+def test_sdfs_line_input_ignores_overlong_command() -> None:
+    profile = "sbcio_vdg"
+    _run_make(profile, "bin")
+    _run_make(profile, "stage1")
+    _run_make(profile, "sdfs")
+    suffix = EXPECTED[profile]["suffix"]
+    stage1 = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+    sdfs = (PROJECT_ROOT / "build" / f"SDFS{suffix}.BIN").read_bytes()
+    image = build_sdfs_image(stage1_data=stage1, sdfs_data=sdfs, extra_files=[])
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
+        input_text="BOOT\r" + ("A" * 140) + "\rDIR\rX",
+        sd_image=image,
+        max_cycles=180_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert "?" in stdout, f"overlong command did not report an error: {stdout!r}"
+    assert "SDFS.BIN A " in stdout, f"prompt did not recover after overlong command: {stdout!r}"
+    print("[PASS] test_sdfs_line_input_ignores_overlong_command")
+
+
 def test_sdfs_loader_errors_return_to_prompt() -> None:
     profile = "sbcio_vdg"
     _run_make(profile, "bin")
@@ -790,6 +855,8 @@ def main() -> None:
         test_sdfs_run_addr_rejects_bad_arguments,
         test_sdfs_run_srec_file_executes_entry_address,
         test_sdfs_run_file_requires_srec_entry,
+        test_sdfs_line_editing_backspace_delete_and_lowercase,
+        test_sdfs_line_input_ignores_overlong_command,
         test_sdfs_loader_errors_return_to_prompt,
         test_sdfs_rejects_missing_boot_services,
         test_sdfs_rejects_bad_boot_services_headers,

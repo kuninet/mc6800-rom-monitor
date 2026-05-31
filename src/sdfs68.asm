@@ -517,9 +517,9 @@ SDFS_READ_LINE_LOOP:
         cmpa    #CHR_CR
         beq     SDFS_READ_LINE_DONE
         cmpa    #CHR_BS
-        beq     SDFS_READ_LINE_BACKSPACE
+        beq     SDFS_READ_LINE_BACKSPACE_BS
         cmpa    #CHR_DEL
-        beq     SDFS_READ_LINE_BACKSPACE
+        beq     SDFS_READ_LINE_BACKSPACE_DEL
         cmpa    #CHR_SPACE
         blo     SDFS_READ_LINE_LOOP
         ldab    LINE_LEN
@@ -531,14 +531,36 @@ SDFS_READ_LINE_LOOP:
         stx     LINE_PTR
         inc     LINE_LEN
         bra     SDFS_READ_LINE_LOOP
+SDFS_READ_LINE_BACKSPACE_BS:
+        jsr     SDFS_READ_LINE_BACKSPACE
+        bcs     SDFS_READ_LINE_LOOP
+        ldaa    #CHR_SPACE
+        jsr     MIKBUG_OUTCH
+        ldaa    #CHR_BS
+        jsr     MIKBUG_OUTCH
+        bra     SDFS_READ_LINE_LOOP
+SDFS_READ_LINE_BACKSPACE_DEL:
+        jsr     SDFS_READ_LINE_BACKSPACE
+        bcs     SDFS_READ_LINE_LOOP
+        ldaa    #CHR_BS
+        jsr     MIKBUG_OUTCH
+        ldaa    #CHR_SPACE
+        jsr     MIKBUG_OUTCH
+        ldaa    #CHR_BS
+        jsr     MIKBUG_OUTCH
+        bra     SDFS_READ_LINE_LOOP
 SDFS_READ_LINE_BACKSPACE:
         tst     LINE_LEN
-        beq     SDFS_READ_LINE_LOOP
+        beq     SDFS_READ_LINE_BACKSPACE_EMPTY
         ldx     LINE_PTR
         dex
         stx     LINE_PTR
         dec     LINE_LEN
-        bra     SDFS_READ_LINE_LOOP
+        clc
+        rts
+SDFS_READ_LINE_BACKSPACE_EMPTY:
+        sec
+        rts
 SDFS_READ_LINE_DONE:
         ldaa    #CHR_CR
         jsr     SDFS_PUTC
