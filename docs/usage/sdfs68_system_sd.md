@@ -12,7 +12,7 @@ flowchart TD
     BOOT["] BOOT"]
     SDFS["SDFS>"]
     DIR["DIR"]
-    RUN["RUN filename"]
+    RUN["RUN addr"]
     DEBUG["デバッグ運用"]
     EXIT["SDFS> EXIT"]
     ROM["] M / D / U / B / R"]
@@ -142,8 +142,8 @@ SDFS/68 v1 はloaderの書き込み先アドレスを保護しない。`SDFS.BIN
 ## SDFS/68 v2 コマンド
 
 SDFS/68 v2では、DOS風の通常操作を本線にする。
-ただし現時点ではメジャーバージョンを変えるほどのアーキテクチャ変更ではないため、起動時は `SDFS/68 V1.2 #141` のように表示する。
-`#141` は元Issue番号をbuild番号相当として扱う。
+ただし現時点ではメジャーバージョンを変えるほどのアーキテクチャ変更ではないため、起動時は `SDFS/68 V1.2 #149` のように表示する。
+`#149` は元Issue番号をbuild番号相当として扱う。
 SDFS.BIN headerのversion byteはstage1が読むバイナリ形式versionであり、起動表示のバージョンとは別に扱う。
 
 | コマンド | 用途 |
@@ -151,7 +151,7 @@ SDFS.BIN headerのversion byteはstage1が読むバイナリ形式versionであ�
 | `DIR` | 実装済み。FAT root の8.3通常ファイルを表示する |
 | `TYPE filename` | 予定。テキストファイルをコンソールへ表示する |
 | `RUN filename` | 予定。ファイルをロードし、entryが取れれば実行する |
-| `RUN addr` | 予定。指定アドレスへジャンプする |
+| `RUN addr` | 実装済み。16bit hexadecimal address へジャンプする |
 | `LOAD filename` | 実装済み。ファイルをロードする。自動実行しない |
 | `L filename` | 実装済み。`LOAD filename` の短縮エイリアス |
 | `Dhhhh` | 実装済み。16bit hexadecimal address の1 byteを表示する |
@@ -173,8 +173,20 @@ HELLO.HEX A 00000022
 LFN、volume label、directory、deleted entryは表示しない。
 subdirectory、wildcard、属性詳細表示、FAT writeは対象外である。
 
-通常実行は `RUN` を使う。`LOAD` / `L` はロード確認やデバッグ用の補助コマンドとして扱う。
+通常実行は `RUN` を使う。現時点で実装済みなのは `RUN addr` であり、`RUN filename` は後続Issueで扱う。
+`LOAD` / `L` はロード確認やデバッグ用の補助コマンドとして扱う。
 `LOAD` はロードのみを行い、自動ジャンプしない。
+
+例:
+
+```text
+SDFS> LOAD HELLO.S
+OK
+SDFS> RUN 0100
+```
+
+`RUN addr` は指定アドレスへ直接ジャンプする。プログラム終了後にSDFS/68へ戻る保証はない。
+ROMモニタの `G addr` 相当の実行入口として扱う。
 
 メモリ変更、ブレークポイント、逆アセンブルなどの低レベルデバッグはSDFS/68に取り込まず、`EXIT` でROMモニタへ戻って行う。
 ROMへ戻った後は `] ` プロンプトで `M`、`D`、`U`、`B`、`R` などを使い、必要に応じて再度 `BOOT` する。
