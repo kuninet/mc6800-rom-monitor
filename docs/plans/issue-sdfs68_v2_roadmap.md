@@ -10,7 +10,7 @@ SDFS/68 v1は、`BOOT -> stage1 -> SDFS.BIN -> L filename` まで完了した。
 
 - `DIR`: root directoryを表示する。
 - `TYPE filename`: root上のテキストファイルを表示する。
-- `RUN filename`: ファイルをロードし、entryが取れれば実行する。
+- `RUN filename`: S-Recordファイルをロードし、entry recordが取れれば実行する。
 - `RUN addr`: 指定アドレスへジャンプする。
 - `LOAD filename`: ロードのみを行う開発補助コマンド。
 - `L filename`: `LOAD filename` の短縮エイリアス。
@@ -43,7 +43,8 @@ SDFS/68 v1は、`BOOT -> stage1 -> SDFS.BIN -> L filename` まで完了した。
 - `DIR` はroot上の8.3通常ファイルを表示する。
 - `TYPE` は短いテキストファイルを表示し、存在しないファイルでプロンプトへ戻る。
 - `RUN addr` は指定アドレスへジャンプする。
-- `RUN filename` はentryありファイルをロードして実行する。
+- `RUN filename` はentry recordありS-Recordファイルをロードして実行する。
+- Intel HEXは `RUN filename` の対象外とし、`LOAD filename` と `RUN addr` の組み合わせで実行する。
 - `LOAD` / `L` は同じロード結果になる。
 - `EXIT` 後にROMモニタの `] ` プロンプトへ戻り、再度 `BOOT` できる。
 - 既存の `make bin`、`make stage1`、`make sdfs`、`test_sdfs68_build.py`、`test_mk_sdfs_image.py`、`test_sd_fixture.py` を維持する。

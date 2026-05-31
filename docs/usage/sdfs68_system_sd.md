@@ -142,15 +142,15 @@ SDFS/68 v1 はloaderの書き込み先アドレスを保護しない。`SDFS.BIN
 ## SDFS/68 v2 コマンド
 
 SDFS/68 v2では、DOS風の通常操作を本線にする。
-ただし現時点ではメジャーバージョンを変えるほどのアーキテクチャ変更ではないため、起動時は `SDFS/68 V1.2 #149` のように表示する。
-`#149` は元Issue番号をbuild番号相当として扱う。
+ただし現時点ではメジャーバージョンを変えるほどのアーキテクチャ変更ではないため、起動時は `SDFS/68 V1.2 #150` のように表示する。
+`#150` は元Issue番号をbuild番号相当として扱う。
 SDFS.BIN headerのversion byteはstage1が読むバイナリ形式versionであり、起動表示のバージョンとは別に扱う。
 
 | コマンド | 用途 |
 | --- | --- |
 | `DIR` | 実装済み。FAT root の8.3通常ファイルを表示する |
 | `TYPE filename` | 予定。テキストファイルをコンソールへ表示する |
-| `RUN filename` | 予定。ファイルをロードし、entryが取れれば実行する |
+| `RUN filename` | 実装済み。S-Recordファイルをロードし、entry recordがあれば実行する |
 | `RUN addr` | 実装済み。16bit hexadecimal address へジャンプする |
 | `LOAD filename` | 実装済み。ファイルをロードする。自動実行しない |
 | `L filename` | 実装済み。`LOAD filename` の短縮エイリアス |
@@ -173,17 +173,20 @@ HELLO.HEX A 00000022
 LFN、volume label、directory、deleted entryは表示しない。
 subdirectory、wildcard、属性詳細表示、FAT writeは対象外である。
 
-通常実行は `RUN` を使う。現時点で実装済みなのは `RUN addr` であり、`RUN filename` は後続Issueで扱う。
+通常実行は `RUN` を使う。
 `LOAD` / `L` はロード確認やデバッグ用の補助コマンドとして扱う。
 `LOAD` はロードのみを行い、自動ジャンプしない。
 
 例:
 
 ```text
-SDFS> LOAD HELLO.S
-OK
-SDFS> RUN 0100
+SDFS> RUN HELLO.S
 ```
+
+`RUN filename` はS-Record専用である。
+`S9` / `S8` のentry recordがある場合だけ、ロード後にそのアドレスへジャンプする。
+Intel HEXはアセンブラがstart address recordを出さない環境が多いため、SDFS/68 V1.2では `RUN filename` の対象外とする。
+Intel HEXを実行したい場合は、`LOAD filename` でロードしてから `RUN addr` で明示アドレスへジャンプする。
 
 `RUN addr` は指定アドレスへ直接ジャンプする。プログラム終了後にSDFS/68へ戻る保証はない。
 ROMモニタの `G addr` 相当の実行入口として扱う。
