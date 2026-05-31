@@ -61,6 +61,12 @@ def test_sdfs_profiles_build_and_match_header() -> None:
             "SDFS_LOAD_LIMIT",
             "SDFS_ENTRY",
             "SDFS_END",
+            "LOADER_PARSE_PTR",
+            "DUMP_END",
+            "FAT_VOLUME_LBA0",
+            "FAT_SECTOR_IN_CLUS",
+            "SDFS_RUN_ENTRY",
+            "SDFS_RUN_ENTRY_SET",
         )
         assert symbols["SDFS_LOAD_BASE"] == expected["SDFS_LOAD_BASE"], (
             f"{profile} SDFS_LOAD_BASE mismatch"
@@ -77,6 +83,13 @@ def test_sdfs_profiles_build_and_match_header() -> None:
         assert entry == symbols["SDFS_ENTRY"], "SDFS entry mismatch"
         assert size == len(data), "SDFS image size mismatch"
         assert data[12:16] == bytes(4), "SDFS reserved bytes must be zero"
+        work_base = expected["SDFS_LOAD_BASE"] & 0xE000
+        assert symbols["LOADER_PARSE_PTR"] == work_base + 0x0272
+        assert symbols["DUMP_END"] == work_base + 0x0274
+        assert symbols["FAT_VOLUME_LBA0"] == work_base + 0x02A3
+        assert symbols["FAT_SECTOR_IN_CLUS"] == work_base + 0x02E2
+        assert symbols["SDFS_RUN_ENTRY"] == work_base + 0x02E3
+        assert symbols["SDFS_RUN_ENTRY_SET"] == work_base + 0x02E5
     print("[PASS] test_sdfs_profiles_build_and_match_header")
 
 
@@ -131,7 +144,7 @@ def test_stage1_boot_runs_built_sdfs_binary() -> None:
         assert rc == 0 and "[TIMEOUT]" not in stderr, (
             f"emulator failed for {profile}: rc={rc} stderr={stderr!r}"
         )
-        assert "SDFS/68 V1.2 #149" in stdout, f"missing SDFS banner for {profile}: {stdout!r}"
+        assert "SDFS/68 V1.2 #150" in stdout, f"missing SDFS banner for {profile}: {stdout!r}"
         assert "SDFS> " in stdout, f"missing SDFS prompt for {profile}: {stdout!r}"
     print("[PASS] test_stage1_boot_runs_built_sdfs_binary")
 
@@ -320,7 +333,7 @@ def test_sdfs_exit_returns_to_monitor_and_boots_again() -> None:
         max_cycles=180_000_000,
     )
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
-    assert stdout.count("SDFS/68 V1.2 #149") >= 2, f"EXIT did not allow BOOT again: {stdout!r}"
+    assert stdout.count("SDFS/68 V1.2 #150") >= 2, f"EXIT did not allow BOOT again: {stdout!r}"
     assert stdout.count("] ") >= 2, f"monitor prompt did not return after EXIT: {stdout!r}"
     print("[PASS] test_sdfs_exit_returns_to_monitor_and_boots_again")
 
@@ -387,6 +400,77 @@ def test_sdfs_run_addr_rejects_bad_arguments() -> None:
     assert stdout.count("?") >= 4, f"bad RUN arguments were not rejected: {stdout!r}"
     assert stdout.count("SDFS> ") >= 5, f"prompt did not recover after bad RUN arguments: {stdout!r}"
     print("[PASS] test_sdfs_run_addr_rejects_bad_arguments")
+
+
+def test_sdfs_run_srec_file_executes_entry_address() -> None:
+    profile = "sbcio_vdg"
+    _run_make(profile, "bin")
+    _run_make(profile, "stage1")
+    _run_make(profile, "sdfs")
+    suffix = EXPECTED[profile]["suffix"]
+    stage1 = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+    sdfs = (PROJECT_ROOT / "build" / f"SDFS{suffix}.BIN").read_bytes()
+    hello_program = bytes(
+        [
+            0xCE,
+            0x01,
+            0x07,
+            0xBD,
+            0xE0,
+            0x7E,
+            0x3F,
+            0x0D,
+            0x0A,
+            *b"HELLO, WORLD",
+            0x0D,
+            0x0A,
+            0x04,
+        ]
+    )
+    image = build_sdfs_image(
+        stage1_data=stage1,
+        sdfs_data=sdfs,
+        extra_files=[_file("HELLO.S", _srec_file(0x0100, hello_program, entry_address=0x0100))],
+    )
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
+        input_text="BOOT\rRUN HELLO.S\rX",
+        sd_image=image,
+        max_cycles=180_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert "OK" not in stdout, f"RUN filename should not print LOAD success: {stdout!r}"
+    assert "HELLO, WORLD" in stdout, f"RUN HELLO.S did not execute entry address: {stdout!r}"
+    assert "BRK 0106" in stdout, f"program did not return to monitor via SWI: {stdout!r}"
+    print("[PASS] test_sdfs_run_srec_file_executes_entry_address")
+
+
+def test_sdfs_run_file_requires_srec_entry() -> None:
+    profile = "sbcio_vdg"
+    _run_make(profile, "bin")
+    _run_make(profile, "stage1")
+    _run_make(profile, "sdfs")
+    suffix = EXPECTED[profile]["suffix"]
+    stage1 = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+    sdfs = (PROJECT_ROOT / "build" / f"SDFS{suffix}.BIN").read_bytes()
+    image = build_sdfs_image(
+        stage1_data=stage1,
+        sdfs_data=sdfs,
+        extra_files=[
+            _file("HELLO.HEX", _ihex_file(0x0100, b"\x3F")),
+            _file("BAD.S", b"S10601003F0000B9\r\n"),
+        ],
+    )
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
+        input_text="BOOT\rRUN HELLO.HEX\rRUN BAD.S\rX",
+        sd_image=image,
+        max_cycles=120_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert stdout.count("?") >= 2, f"RUN files without S-record entry were accepted: {stdout!r}"
+    assert stdout.count("SDFS> ") >= 3, f"prompt did not recover after bad RUN files: {stdout!r}"
+    print("[PASS] test_sdfs_run_file_requires_srec_entry")
 
 
 def test_sdfs_loader_errors_return_to_prompt() -> None:
@@ -626,12 +710,20 @@ def _fill_root_tail_with_skipped_entries(image: bytearray, layout: Fat32Layout) 
     write_cluster(image, layout, layout.root_cluster, root)
 
 
-def _srec_file(address: int, data: bytes, trailing_newline: bool = True) -> bytes:
+def _srec_file(
+    address: int,
+    data: bytes,
+    trailing_newline: bool = True,
+    entry_address: int = 0,
+) -> bytes:
     count = len(data) + 3
     values = [count, (address >> 8) & 0xFF, address & 0xFF, *data]
     checksum = (~sum(values)) & 0xFF
     record = "S1" + "".join(f"{value:02X}" for value in [*values, checksum])
-    text = record + "\r\nS9030000FC"
+    entry_values = [3, (entry_address >> 8) & 0xFF, entry_address & 0xFF]
+    entry_checksum = (~sum(entry_values)) & 0xFF
+    entry_record = "S9" + "".join(f"{value:02X}" for value in [*entry_values, entry_checksum])
+    text = record + "\r\n" + entry_record
     if trailing_newline:
         text += "\r\n"
     return text.encode("ascii")
@@ -683,6 +775,8 @@ def main() -> None:
         test_sdfs_exit_returns_to_monitor_and_boots_again,
         test_sdfs_run_addr_executes_loaded_program,
         test_sdfs_run_addr_rejects_bad_arguments,
+        test_sdfs_run_srec_file_executes_entry_address,
+        test_sdfs_run_file_requires_srec_entry,
         test_sdfs_loader_errors_return_to_prompt,
         test_sdfs_rejects_missing_boot_services,
         test_sdfs_rejects_bad_boot_services_headers,

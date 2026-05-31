@@ -81,7 +81,7 @@ SDFS_CHECK_EXIT:
 SDFS_CHECK_RUN:
         cmpa    #'R'
         bne     SDFS_COMMAND_ERROR
-        jsr     SDFS_CMD_RUN_ADDR
+        jsr     SDFS_CMD_RUN
         bcc     SDFS_PROMPT_NEXT
         jsr     SDFS_SHOW_ERROR
         bra     SDFS_PROMPT_NEXT
@@ -152,6 +152,7 @@ SDFS_CMD_IS_LOAD_LONG_PREFIX_FAIL:
 SDFS_K_LOAD_FILE:
         clr     LOADER_MODE
         clr     LOADER_STAGE
+        clr     SDFS_RUN_ENTRY_SET
         jsr     SDFS_PARSE_FILENAME_83
         bcs     SDFS_CMD_LOAD_FAIL
         jsr     SDFS_API_MOUNT
@@ -243,29 +244,43 @@ SDFS_CMD_EXIT:
         lds     #STACK_TOP
         jmp     MONITOR_REENTRY
 
-SDFS_CMD_RUN_ADDR:
+SDFS_CMD_RUN:
         ldab    LINE_LEN
         cmpb    #5
-        blo     SDFS_CMD_RUN_ADDR_FAIL
+        blo     SDFS_CMD_RUN_FAIL
         ldaa    LINE_BUF+1
         jsr     SDFS_TO_UPPER
         cmpa    #'U'
-        bne     SDFS_CMD_RUN_ADDR_FAIL
+        bne     SDFS_CMD_RUN_FAIL
         ldaa    LINE_BUF+2
         jsr     SDFS_TO_UPPER
         cmpa    #'N'
-        bne     SDFS_CMD_RUN_ADDR_FAIL
+        bne     SDFS_CMD_RUN_FAIL
         ldaa    LINE_BUF+3
         cmpa    #CHR_SPACE
-        bne     SDFS_CMD_RUN_ADDR_FAIL
+        bne     SDFS_CMD_RUN_FAIL
         subb    #3
         ldx     #LINE_BUF+3
         jsr     SDFS_PARSE_HEX16
-        bcs     SDFS_CMD_RUN_ADDR_FAIL
+        bcs     SDFS_CMD_RUN_FILE
         lds     #STACK_TOP
         ldx     HEX_VALUE_HI
         jmp     0,x
-SDFS_CMD_RUN_ADDR_FAIL:
+SDFS_CMD_RUN_FILE:
+        ldab    LINE_LEN
+        subb    #3
+        ldx     #LINE_BUF+3
+        jsr     SDFS_K_LOAD_FILE
+        bcs     SDFS_CMD_RUN_FAIL
+        ldaa    LOADER_MODE
+        cmpa    #LOAD_MODE_SREC
+        bne     SDFS_CMD_RUN_FAIL
+        ldaa    SDFS_RUN_ENTRY_SET
+        beq     SDFS_CMD_RUN_FAIL
+        lds     #STACK_TOP
+        ldx     SDFS_RUN_ENTRY
+        jmp     0,x
+SDFS_CMD_RUN_FAIL:
         sec
         rts
 
@@ -1215,6 +1230,12 @@ SDFS_READ_SREC_CHECKSUM:
         clc
         rts
 SDFS_READ_SREC_EOF:
+        ldaa    LOADER_ADDR
+        staa    SDFS_RUN_ENTRY
+        ldaa    LOADER_ADDR+1
+        staa    SDFS_RUN_ENTRY+1
+        ldaa    #1
+        staa    SDFS_RUN_ENTRY_SET
         ldaa    #1
         clc
         rts
@@ -1415,7 +1436,7 @@ SDFS_PUTC_DONE:
 
 TXT_BANNER:
         fcb     CHR_CR
-        fcc     "SDFS/68 V1.2 #149"
+        fcc     "SDFS/68 V1.2 #150"
         fcb     CHR_CR,0
 
 TXT_PROMPT:
