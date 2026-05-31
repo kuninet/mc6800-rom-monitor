@@ -307,13 +307,8 @@ SDFS_K_DIR_ENTRY_LOOP:
         beq     SDFS_K_DIR_DONE
         cmpa    #$E5
         beq     SDFS_K_DIR_NEXT_ENTRY
-        ldaa    11,x
-        anda    #$0F
-        cmpa    #$0F
-        beq     SDFS_K_DIR_NEXT_ENTRY
-        ldaa    11,x
-        anda    #$18
-        bne     SDFS_K_DIR_NEXT_ENTRY
+        jsr     SDFS_K_DIR_ENTRY_VISIBLE
+        bcs     SDFS_K_DIR_NEXT_ENTRY
         jsr     SDFS_K_PRINT_DIR_ENTRY
 SDFS_K_DIR_NEXT_ENTRY:
         jsr     SDFS_K_ADVANCE_ENTRY_PTR
@@ -422,6 +417,32 @@ SDFS_K_DIR_EXT_CHECK_LOOP:
         rts
 SDFS_K_DIR_EXT_FOUND:
         clc
+        rts
+
+SDFS_K_DIR_ENTRY_VISIBLE:
+        ldx     FAT_ENTRY_PTR
+        ldaa    11,x
+        anda    #$1E
+        bne     SDFS_K_DIR_ENTRY_SKIP
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        beq     SDFS_K_DIR_ENTRY_SKIP
+        ldab    #11
+SDFS_K_DIR_NAME_CHAR_LOOP:
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        beq     SDFS_K_DIR_NAME_CHAR_OK
+        blo     SDFS_K_DIR_ENTRY_SKIP
+        cmpa    #$7F
+        bhs     SDFS_K_DIR_ENTRY_SKIP
+SDFS_K_DIR_NAME_CHAR_OK:
+        inx
+        decb
+        bne     SDFS_K_DIR_NAME_CHAR_LOOP
+        clc
+        rts
+SDFS_K_DIR_ENTRY_SKIP:
+        sec
         rts
 
 SDFS_CHECK_S1:

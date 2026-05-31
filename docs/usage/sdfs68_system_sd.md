@@ -169,8 +169,10 @@ HELLO.S A 0000004A
 HELLO.HEX A 00000022
 ```
 
-`DIR` が表示するのは、root directory直下の8.3 short filename通常ファイルだけである。
-LFN、volume label、directory、deleted entryは表示しない。
+`DIR` が表示するのは、root directory直下の8.3 short filename通常ユーザーファイルだけである。
+LFN、volume label、directory、hidden、system、deleted entryは表示しない。
+ファイル名に制御文字や非ASCIIが混じるentryも表示しない。
+MacでSDカードをマウントしたときにできるAppleDouble風の副産物は、hidden属性付きの短縮名として見える場合があり、SDFS/68の `DIR` では表示しない。
 subdirectory、wildcard、属性詳細表示、FAT writeは対象外である。
 
 通常実行は `RUN` を使う。
