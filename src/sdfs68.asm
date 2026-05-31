@@ -152,7 +152,7 @@ SDFS_CMD_IS_LOAD_LONG_PREFIX_FAIL:
 SDFS_K_LOAD_FILE:
         clr     LOADER_MODE
         clr     LOADER_STAGE
-        clr     LOADER_ENTRY_SET
+        clr     SDFS_RUN_ENTRY_SET
         jsr     SDFS_PARSE_FILENAME_83
         bcs     SDFS_CMD_LOAD_FAIL
         jsr     SDFS_API_MOUNT
@@ -275,10 +275,10 @@ SDFS_CMD_RUN_FILE:
         ldaa    LOADER_MODE
         cmpa    #LOAD_MODE_SREC
         bne     SDFS_CMD_RUN_FAIL
-        ldaa    LOADER_ENTRY_SET
+        ldaa    SDFS_RUN_ENTRY_SET
         beq     SDFS_CMD_RUN_FAIL
         lds     #STACK_TOP
-        ldx     LOADER_ENTRY
+        ldx     SDFS_RUN_ENTRY
         jmp     0,x
 SDFS_CMD_RUN_FAIL:
         sec
@@ -1231,11 +1231,11 @@ SDFS_READ_SREC_CHECKSUM:
         rts
 SDFS_READ_SREC_EOF:
         ldaa    LOADER_ADDR
-        staa    LOADER_ENTRY
+        staa    SDFS_RUN_ENTRY
         ldaa    LOADER_ADDR+1
-        staa    LOADER_ENTRY+1
+        staa    SDFS_RUN_ENTRY+1
         ldaa    #1
-        staa    LOADER_ENTRY_SET
+        staa    SDFS_RUN_ENTRY_SET
         ldaa    #1
         clc
         rts

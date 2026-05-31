@@ -61,6 +61,12 @@ def test_sdfs_profiles_build_and_match_header() -> None:
             "SDFS_LOAD_LIMIT",
             "SDFS_ENTRY",
             "SDFS_END",
+            "LOADER_PARSE_PTR",
+            "DUMP_END",
+            "FAT_VOLUME_LBA0",
+            "FAT_SECTOR_IN_CLUS",
+            "SDFS_RUN_ENTRY",
+            "SDFS_RUN_ENTRY_SET",
         )
         assert symbols["SDFS_LOAD_BASE"] == expected["SDFS_LOAD_BASE"], (
             f"{profile} SDFS_LOAD_BASE mismatch"
@@ -77,6 +83,13 @@ def test_sdfs_profiles_build_and_match_header() -> None:
         assert entry == symbols["SDFS_ENTRY"], "SDFS entry mismatch"
         assert size == len(data), "SDFS image size mismatch"
         assert data[12:16] == bytes(4), "SDFS reserved bytes must be zero"
+        work_base = expected["SDFS_LOAD_BASE"] & 0xE000
+        assert symbols["LOADER_PARSE_PTR"] == work_base + 0x0272
+        assert symbols["DUMP_END"] == work_base + 0x0274
+        assert symbols["FAT_VOLUME_LBA0"] == work_base + 0x02A3
+        assert symbols["FAT_SECTOR_IN_CLUS"] == work_base + 0x02E2
+        assert symbols["SDFS_RUN_ENTRY"] == work_base + 0x02E3
+        assert symbols["SDFS_RUN_ENTRY_SET"] == work_base + 0x02E5
     print("[PASS] test_sdfs_profiles_build_and_match_header")
 
 
