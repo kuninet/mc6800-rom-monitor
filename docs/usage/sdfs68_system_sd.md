@@ -157,6 +157,10 @@ SDFS.BIN headerのversion byteはstage1が読むバイナリ形式versionであ�
 | `Dhhhh` | 実装済み。16bit hexadecimal address の1 byteを表示する |
 | `EXIT` | 実装済み。ROMモニタへ戻る |
 
+SDFS/68の行入力はROMモニタ相当に寄せ、BS / DELで入力中の1文字を削除できる。
+行頭でのBS / DELは無視する。
+コマンド名と8.3ファイル名は小文字でも入力できる。
+
 `DIR` はSDFS/68本体がstage1の既存低レベルサービスを使ってroot directoryを走査する。
 stage1に `DIR` 専用APIは追加せず、ROM側の `DIR` も呼ばない。
 
