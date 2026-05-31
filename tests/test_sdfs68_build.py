@@ -195,11 +195,18 @@ def test_sdfs_dir_lists_root_files_and_skips_non_files() -> None:
             sdfs_data=sdfs,
             extra_files=[
                 _file("HELLO.S", _srec_file(0x0200, b"S")),
+                _file("HELLO2.S", _srec_file(0x0203, b"2")),
                 _file("HELLO.HEX", _ihex_file(0x0201, b"I")),
                 _file("README.TXT", b"HELLO\r\n"),
                 _raw_file(b"SKIPVOL    ", b"", attr=0x08),
                 _raw_file(b"SKIPDIR    ", b"", attr=0x10),
                 _raw_file(b"SKIPLFN    ", b"", attr=0x0F),
+                _raw_file(b"SKIPHID TXT", b"", attr=0x22),
+                _raw_file(b"SKIPSYS TXT", b"", attr=0x24),
+                _raw_file(b"_SDF~4  BIN", b"", attr=0x22),
+                _raw_file(b"_HELL~9 S  ", b"", attr=0x22),
+                _raw_file(b"\x01BAD    TXT", b"", attr=0x20),
+                _raw_file(b"\x80BAD    TXT", b"", attr=0x20),
                 _raw_file(bytes([0xE5]) + b"DEL    TXT", b"", attr=0x20),
             ],
         )
@@ -214,6 +221,7 @@ def test_sdfs_dir_lists_root_files_and_skips_non_files() -> None:
         )
         assert "SDFS.BIN A " in stdout, f"SDFS.BIN missing from DIR for {profile}: {stdout!r}"
         assert "HELLO.S A " in stdout, f"HELLO.S missing from DIR for {profile}: {stdout!r}"
+        assert "HELLO2.S A " in stdout, f"HELLO2.S missing from DIR for {profile}: {stdout!r}"
         assert "HELLO.HEX A " in stdout, f"HELLO.HEX missing from DIR for {profile}: {stdout!r}"
         assert "README.TXT A 00000007" in stdout, (
             f"README.TXT missing or size mismatch for {profile}: {stdout!r}"
@@ -221,6 +229,11 @@ def test_sdfs_dir_lists_root_files_and_skips_non_files() -> None:
         assert "SKIPVOL" not in stdout, f"volume label leaked into DIR for {profile}: {stdout!r}"
         assert "SKIPDIR" not in stdout, f"directory entry leaked into DIR for {profile}: {stdout!r}"
         assert "SKIPLFN" not in stdout, f"LFN entry leaked into DIR for {profile}: {stdout!r}"
+        assert "SKIPHID" not in stdout, f"hidden entry leaked into DIR for {profile}: {stdout!r}"
+        assert "SKIPSYS" not in stdout, f"system entry leaked into DIR for {profile}: {stdout!r}"
+        assert "_SDF~4.BIN" not in stdout, f"AppleDouble entry leaked into DIR for {profile}: {stdout!r}"
+        assert "_HELL~9.S" not in stdout, f"AppleDouble entry leaked into DIR for {profile}: {stdout!r}"
+        assert "BAD.TXT" not in stdout, f"invalid name entry leaked into DIR for {profile}: {stdout!r}"
         assert "DEL.TXT" not in stdout, f"deleted entry leaked into DIR for {profile}: {stdout!r}"
         assert stdout.count("SDFS> ") >= 2, f"DIR did not return to prompt for {profile}: {stdout!r}"
     print("[PASS] test_sdfs_dir_lists_root_files_and_skips_non_files")
@@ -463,13 +476,13 @@ def test_sdfs_run_file_requires_srec_entry() -> None:
     )
     stdout, stderr, rc = _run_emu_with_sd(
         rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
-        input_text="BOOT\rRUN HELLO.HEX\rRUN BAD.S\rX",
+        input_text="BOOT\rRUN KHELL\rRUN HELLO.HEX\rRUN BAD.S\rX",
         sd_image=image,
         max_cycles=120_000_000,
     )
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
-    assert stdout.count("?") >= 2, f"RUN files without S-record entry were accepted: {stdout!r}"
-    assert stdout.count("SDFS> ") >= 3, f"prompt did not recover after bad RUN files: {stdout!r}"
+    assert stdout.count("?") >= 3, f"RUN files without S-record entry were accepted: {stdout!r}"
+    assert stdout.count("SDFS> ") >= 4, f"prompt did not recover after bad RUN files: {stdout!r}"
     print("[PASS] test_sdfs_run_file_requires_srec_entry")
 
 
