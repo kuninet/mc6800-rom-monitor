@@ -10,7 +10,7 @@
 
 | 軸 | 意味 |
 | --- | --- |
-| `MEMORY_CONFIG` | RAM容量、ユーザーRAM、モニタワークRAM、スタック、SD/FATワークの配置 |
+| `MEMORY_CONFIG` | RAM容量、ユーザーRAM、モニタワークRAM、スタック、SD workの配置 |
 | `BOARD_IO` | SBC-IOなど、外部I/O基板やI/Oデコードの有無 |
 | `FEATURE_SD` | raw SD sector readと固定LBA stage1 `BOOT` をROMへ入れるか |
 | `FEATURE_FAT` | ROM常駐のFAT32 `DIR` / `LF` を入れるか |
@@ -55,7 +55,7 @@ VDGはSBC-IOとは独立した外部表示装備として扱い、VRAM範囲は 
 
 ただし、I2CはRTC、EEPROM、OLED/LCDなど個別デバイス処理を含めるとROM容量を急速に消費する。8KB ROM互換を維持する間は、`FEATURE_I2C=1` を「I2C関連コードを無条件にROMへ押し込む入口」として使わない。ROM側へ入れる場合でも、最小BOOTや診断用の薄い入口に限定し、I2Cバスドライバ本体や個別デバイス機能はシリアル `L`、ROM常駐FATがある構成の `LF`、または `SDFS.BIN` など第2段のRAMロード機能として検証する。
 
-`FEATURE_SD=1` はraw SD sector readと固定LBA stage1 `BOOT` の前提を表す。ROM常駐のFAT32 `DIR` / `LF` は `FEATURE_FAT=1` として分ける。VDG + キーボード + BOOTを優先するprofileでは、ROM容量確保のため `FEATURE_SD=1` / `FEATURE_FAT=0` を基本にする。
+`FEATURE_SD=1` はraw SD sector readと固定LBA stage1 `BOOT` の前提を表す。ROM常駐のFAT32 `DIR` / `LF` は `FEATURE_FAT=1` として分ける。標準profileではROM容量確保と責務整理のため `FEATURE_FAT=0` を基本にし、`base` / `sbcio` は `FEATURE_SD=0`、VDG付きprofileだけを `FEATURE_SD=1` / `FEATURE_FAT=0` にする。
 
 ## 既存profileの展開
 
@@ -64,7 +64,7 @@ VDGはSBC-IOとは独立した外部表示装備として扱い、VRAM範囲は 
 | `MONITOR_PROFILE` | `MEMORY_CONFIG` | `BOARD_IO` | `FEATURE_SD` | `FEATURE_FAT` | `FEATURE_VDG` | `FEATURE_KEYBOARD` | `FEATURE_I2C` | 補足 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `base` | `base8k` | `none` | `0` | `0` | `0` | `0` | `0` | SBC6800互換の最小構成 |
-| `sbcio` | `ram64_c000_work` | `sbcio` | `1` | `1` | `0` | `1` | `0` | SBC-IO RAM拡張とSD/FAT、2nd ACIAキーボード |
+| `sbcio` | `ram64_c000_work` | `sbcio` | `0` | `0` | `0` | `1` | `0` | SBC-IO RAM拡張と2nd ACIAキーボード。SDなし |
 | `sbcio_vdg` | `ram64_c000_work` | `sbcio` | `1` | `0` | `1` | `1` | `0` | SBC-IO構成でVRAM `$A000-$BFFF`、ROM FATなし |
 | `k6802_vdg` | `ram64_a000_work` | `sbcio` | `1` | `0` | `1` | `1` | `0` | K6802-SBC向けにワークRAM `$A000-$BFFF`、VRAM `$C000-$DFFF`、ROM FATなし |
 
@@ -76,7 +76,7 @@ VDGはSBC-IOとは独立した外部表示装備として扱い、VRAM範囲は 
 profileプリセットに加えて、構成軸の直接指定を正式入口として使える。
 
 ```sh
-make bin MEMORY_CONFIG=ram64_a000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_VDG=0
+make bin MEMORY_CONFIG=ram64_a000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_FAT=0 FEATURE_VDG=0
 ```
 
 `MONITOR_PROFILE` は既存互換のプリセット入口として残し、指定されたprofileから次の既定値を展開する。
@@ -86,7 +86,7 @@ make bin MEMORY_CONFIG=ram64_a000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_VDG=0
 | --- | --- | --- |
 | `MEMORY_CONFIG` | `base8k` / `ram64_c000_work` / `ram64_a000_work` | メモリ配置 |
 | `BOARD_IO` | `none` / `sbcio` | 外部I/O装備 |
-| `FEATURE_SD` | `0` / `1` | SD/FAT機能をROMへ入れるか |
+| `FEATURE_SD` | `0` / `1` | raw SD sector readと固定LBA `BOOT` をROMへ入れるか |
 | `FEATURE_FAT` | `0` / `1` | ROM常駐のFAT32 `DIR` / `LF` を入れるか |
 | `FEATURE_VDG` | `0` / `1` | K68-VDG機能をROMへ入れるか |
 | `FEATURE_KEYBOARD` | `0` / `1` | 2nd ACIAキーボード機能をROMへ入れるか |
@@ -98,7 +98,7 @@ make bin MEMORY_CONFIG=ram64_a000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_VDG=0
 直接指定ビルドでは、`BUILD_CONFIG_NAME` があれば `build/mc6800-monitor-<BUILD_CONFIG_NAME>.bin` を生成し、未指定の場合は `MEMORY_CONFIG`、`BOARD_IO`、各 `FEATURE_*`、`VDG_VRAM_CONFIG` から一意なsuffixを生成する。
 
 ```sh
-make bin MEMORY_CONFIG=ram64_a000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_VDG=1 FEATURE_KEYBOARD=1 VDG_VRAM_CONFIG=c000 BUILD_CONFIG_NAME=axis-k6802
+make bin MEMORY_CONFIG=ram64_a000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_FAT=0 FEATURE_VDG=1 FEATURE_KEYBOARD=1 VDG_VRAM_CONFIG=c000 BUILD_CONFIG_NAME=axis-k6802
 ```
 
 上の例では `build/mc6800-monitor-axis-k6802.bin` を生成する。

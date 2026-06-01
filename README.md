@@ -30,9 +30,9 @@ ROM 単体では、メモリダンプ、メモリ変更、指定アドレス実�
 通常のSDファイル操作やDOS風の `DIR`、`TYPE`、`RUN`、`LOAD`、`EXIT` は SDFS/68 側へ寄せます。
 そのため、SDFS/68 を使う通常運用には stage1 と `SDFS.BIN` を含む system SD が必要です。
 
-過渡的な互換機能として、`sbcio` profile には ROM 常駐FATの `DIR` / `LF` を残しています。
-これは `BOOT + SDFS/68` 本線へ移る前の互換入口であり、新しいファイル操作機能をROMへ増やす方針ではありません。
-ROM 常駐FATの `DIR` / `LF` は `SDFS.BIN` を含む system SD を必要としませんが、FAT32形式のSDカード自体は必要です。
+標準profileでは、ROM常駐FATの `DIR` / `LF` は本線から外しています。
+`base` と `sbcio` はSDなしのROMモニタ、`sbcio_vdg` と `k6802_vdg` はraw SD `BOOT` でSDFS/68へ渡すROMモニタとして扱います。
+過去互換や検証でROM常駐FATが必要な場合だけ、構成軸を直接指定して `FEATURE_SD=1 FEATURE_FAT=1` のROMをビルドします。
 
 ## 現在の前提
 

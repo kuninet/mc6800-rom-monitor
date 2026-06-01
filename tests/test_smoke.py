@@ -207,13 +207,19 @@ def is_k6802_vdg_build() -> bool:
 def is_sd_build() -> bool:
     if os.environ.get("FEATURE_SD") in ("0", "1"):
         return os.environ["FEATURE_SD"] == "1"
-    return is_sbcio_build()
+    profile = os.environ.get("MONITOR_PROFILE")
+    if profile in ("sbcio_vdg", "k6802_vdg"):
+        return True
+    if profile in ("base", "sbcio"):
+        return False
+    stem = BUILD_ROM_PATH.stem
+    return "-sbcio-vdg" in stem or "-k6802-vdg" in stem or "-sd1-" in stem
 
 
 def is_fat_build() -> bool:
     if os.environ.get("FEATURE_FAT") in ("0", "1"):
         return os.environ["FEATURE_FAT"] == "1"
-    return BUILD_ROM_PATH.stem.endswith("-sbcio")
+    return False
 
 
 def is_keyboard_build() -> bool:
@@ -259,12 +265,13 @@ def test_map_command():
             "RAM 0000-7FFF",
             "USER 0000-7FFF",
             "WORK C000-DFFF",
-            "SD C000",
             "MON C200",
             "MIK C300",
             "STK DFFF",
             "KEY 8094-8095",
         ]
+        if is_sd_build():
+            expected.insert(4, "SD C000")
     else:
         expected = [
             "MAP BASE",

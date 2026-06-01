@@ -50,8 +50,8 @@ ROM単体で使える低レベル操作、復旧口、マシン語デバッグ�
 
 ### ROM常駐FAT互換コマンド
 
-`DIR` / `LF` は `FEATURE_FAT=1` のROMだけに残す互換機能である。
-`sbcio_vdg` / `k6802_vdg` のような `BOOT + SDFS/68` 本線profileではROMに入れず、SD上ファイルの通常操作はSDFS/68側で行う。
+`DIR` / `LF` は `FEATURE_FAT=1` を直接指定したROMだけに残す互換機能である。
+標準profileではROMに入れず、SD上ファイルの通常操作はSDFS/68側で行う。
 
 | コマンド | 用途 |
 | --- | --- |
@@ -63,7 +63,7 @@ ROM単体で使える低レベル操作、復旧口、マシン語デバッグ�
 | 所属 | コマンド | 位置づけ |
 | --- | --- | --- |
 | ROM本線 | `D`、`M`、`G`、`L`、`B`、`C`、`R`、`U` など | ROM単体で使う低レベル操作とデバッグ |
-| ROM常駐FAT互換 | `DIR`、`LF filename` | `sbcio` profileに残す過渡的な互換入口 |
+| ROM常駐FAT互換 | `DIR`、`LF filename` | `FEATURE_SD=1 FEATURE_FAT=1` を直接指定したときだけ使う互換入口 |
 | SDFS/68起動入口 | `BOOT` | system SD上のstage1と `SDFS.BIN` へ渡す入口 |
 | SDFS/68 | `DIR`、`TYPE`、`RUN`、`LOAD`、`EXIT` | `SDFS> ` で使う第2段DOSのコマンド |
 | stage1内部 | boot services | ユーザーが直接入力しないSDFS/68起動用サービス |
@@ -153,7 +153,7 @@ ROM E000-FFFF
 
 `base` profileは `FEATURE_SD=0`、`FEATURE_VDG=0`、`FEATURE_KEYBOARD=0` のため、SD、VDG、KEYの行を表示しない。
 
-SBC-IO拡張ROMでは `MAP SBCIO` と表示され、`WORK C000-DFFF`、`SD C000`、`MON C200`、`MIK C300`、`STK DFFF` などの拡張RAM前提の配置になる。`sbcio` profileはROM常駐FATを残すため `DIR` / `LF` が有効である。
+SBC-IO拡張ROMでは `MAP SBCIO` と表示され、`WORK C000-DFFF`、`MON C200`、`MIK C300`、`STK DFFF` などの拡張RAM前提の配置になる。標準の `sbcio` profileはSDなし、ROM常駐FATなしであり、`DIR` / `LF` / `BOOT` は有効にならない。
 `FEATURE_KEYBOARD=1` のROMでは、2nd ACIAキーボード入力候補として `KEY 8094-8095` も表示する。
 
 K68-VDG表示PoC用の `sbcio_vdg` profileでは、SBC-IO拡張ROMの配置に加えて K68-VDG 用の VRAM と設定レジスタを表示する。ROM容量をVDG/キーボード/BOOTへ寄せるため、ROM常駐FATの `DIR` / `LF` は無効で、SDからの第2段起動は `BOOT` を使う。
@@ -295,7 +295,7 @@ OK
 ファイル名の前後の空白は無視する。subdirectory、LFN、wildcardは対象外である。
 LOAD後の自動実行は行わない。必要に応じて `Gssss` で開始アドレスへジャンプする。
 `FEATURE_FAT=0` のROMでは `LF` のコマンド本体をROMに入れず、未対応コマンドとして `?` を返す。
-`FEATURE_SD=1` / `FEATURE_FAT=0` のprofileでは、SD上ファイルの通常ロードはROMでは行わない。
+標準profileでは、SD上ファイルの通常ロードはROMでは行わない。
 `BOOT` でSDFS/68を起動してから、SDFS/68側の `L filename` または `LOAD filename` を使う。
 
 SDFS/68はROMモニタとは別の第2段システムとして扱う。SDFS/68側の `DIR`、`TYPE`、`RUN`、`LOAD`、`EXIT` は [SDFS/68 システムSDカード方針](sdfs68_system_sd.md) に記載する。
@@ -305,7 +305,7 @@ SDFS/68はROMモニタとは別の第2段システムとして扱う。SDFS/68�
 `DIR` は `FEATURE_FAT=1` のROMで、SDカード上のroot directoryにある8.3通常ファイルを表示する。
 LFN、削除entry、volume label、subdirectoryは表示しない。
 ROM側の `DIR` とSDFS/68側の `DIR` は名前が同じでも別機能である。
-ROM側 `DIR` は `sbcio` profileの互換機能、SDFS/68側 `DIR` は `SDFS> ` で使う通常運用コマンドとして扱う。
+ROM側 `DIR` は `FEATURE_SD=1 FEATURE_FAT=1` を直接指定したときだけ使う互換機能、SDFS/68側 `DIR` は `SDFS> ` で使う通常運用コマンドとして扱う。
 
 ```text
 ] DIR
@@ -344,7 +344,7 @@ D DIR M MAP RAMTEST G L LF BOOT B C R U H F
 ]
 ```
 
-`FEATURE_SD=1` かつ `FEATURE_FAT=0` のprofileでは、ROM側FAT互換コマンドではなく `BOOT` を含める。VDG/キーボード診断はROMコマンドではなく、SD上の診断用S-Recordから実行する。
+`FEATURE_SD=1` かつ `FEATURE_FAT=0` のROMでは、ROM側FAT互換コマンドではなく `BOOT` を含める。VDG/キーボード診断はROMコマンドではなく、SD上の診断用S-Recordから実行する。
 
 ```text
 ] H

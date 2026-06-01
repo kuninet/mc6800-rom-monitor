@@ -51,5 +51,4 @@ $2D + $40 = $6D
 ## 検証方針
 
 MAP文字列条件化は全profileへ影響するため、`base`、`sbcio`、`sbcio_vdg`、`k6802_vdg` のsmoke testで確認する。
-`sbcio` はROM常駐FATありprofileなので、SD fixture testも確認する。
-
+#177 以降の `sbcio` はSD/FATなしprofileであり、ROM常駐FATの確認は `FEATURE_SD=1 FEATURE_FAT=1` の直接指定互換構成で行う。

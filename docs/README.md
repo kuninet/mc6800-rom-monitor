@@ -26,7 +26,8 @@
 
 ROMモニタとSDFS/68は別レイヤーとして読む。
 [usage/monitor_commands.md](usage/monitor_commands.md) はROMモニタの `] ` プロンプトで使うコマンド、[usage/sdfs68_system_sd.md](usage/sdfs68_system_sd.md) はSDFS/68の `SDFS> ` プロンプトとsystem SDの方針を扱う。
-ROM常駐FAT `DIR` / `LF` は互換機能であり、`BOOT + SDFS/68` が今後の通常運用の本線である。
+標準profileではROM常駐FAT `DIR` / `LF` を本線から外し、`BOOT + SDFS/68` を通常運用の本線にする。
+ROM常駐FATを確認したい場合は、profileではなく直接構成軸で `FEATURE_SD=1 FEATURE_FAT=1` を指定する。
 
 - [requirements/monitor_requirements.md](requirements/monitor_requirements.md)
 - [development/workflow.md](development/workflow.md): Issue/PR、テスト、レビューの開発運用ルール
@@ -60,6 +61,7 @@ ROM常駐FAT `DIR` / `LF` は互換機能であり、`BOOT + SDFS/68` が今後�
 - [plans/issue-155_sdfs68_line_input.md](plans/issue-155_sdfs68_line_input.md): SDFS/68 行入力改善
 - [plans/issue-167_vdg_console_output.md](plans/issue-167_vdg_console_output.md): VDG console出力
 - [plans/issue-175_rom_size_audit.md](plans/issue-175_rom_size_audit.md): ROM容量削減とデッドコード探索
+- [plans/issue-177_sbcio_profile_cleanup.md](plans/issue-177_sbcio_profile_cleanup.md): sbcio profileのSD/FAT整理
 - [plans/issue-144_rom_sdfs_docs_boundary.md](plans/issue-144_rom_sdfs_docs_boundary.md): ROMモニタとSDFS/68責務境界のユーザー向け文書整理
 - [../diagnostics/README.md](../diagnostics/README.md): SDからロードして使う診断用S-Record
 - [testing/sbc6800_bringup.md](testing/sbc6800_bringup.md)

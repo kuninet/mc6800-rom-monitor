@@ -57,19 +57,19 @@ ROM_CODE_LIMIT=0 make bin
 | 作りたいROM | コマンド | 主な出力 |
 | --- | --- | --- |
 | SBC6800互換の最小ROM | `make bin` | `build/mc6800-monitor.bin` |
-| SBC-IO + SD/FAT + 2nd ACIAキーボード | `MONITOR_PROFILE=sbcio make bin` | `build/mc6800-monitor-sbcio.bin` |
+| SBC-IO + 2nd ACIAキーボード | `MONITOR_PROFILE=sbcio make bin` | `build/mc6800-monitor-sbcio.bin` |
 | SBC-IO + K68-VDG、VRAM `$A000-$BFFF` | `MONITOR_PROFILE=sbcio_vdg make bin` | `build/mc6800-monitor-sbcio-vdg.bin` |
 | K6802-SBC + K68-VDG、VRAM `$C000-$DFFF` | `MONITOR_PROFILE=k6802_vdg make bin` | `build/mc6800-monitor-k6802-vdg.bin` |
 
 ## profileごとの違い
 
-`FEATURE_SD=1` は raw SD sector read と `BOOT` の前提、`FEATURE_FAT=1` はROM常駐FAT `DIR` / `LF` を含める設定である。
-`sbcio` はROM常駐FAT互換profile、`sbcio_vdg` / `k6802_vdg` はROM FATを外して `BOOT + SDFS/68` を本線にするprofileとして扱う。
+`FEATURE_SD=1` は raw SD sector read と `BOOT` の前提、`FEATURE_FAT=1` はROM常駐FAT `DIR` / `LF` を含める直接指定用の互換設定である。
+標準profileではROM FATを本線から外す。`base` / `sbcio` はSDなし、`sbcio_vdg` / `k6802_vdg` はROM FATなしで `BOOT + SDFS/68` を本線にするprofileとして扱う。
 
 | `MONITOR_PROFILE` | 位置づけ | ROM FAT `DIR`/`LF` | `BOOT` | system SD要否 | 主な用途 |
 | --- | --- | --- | --- | --- | --- |
 | `base` | SDなしの最小ROM | なし | なし | 不要 | SBC6800互換の低レベル操作 |
-| `sbcio` | ROM常駐FAT互換profile | あり | あり | ROM FATだけならSDFS/68 system SDは不要。FAT32 SDカード自体は必要 | 既存 `DIR` / `LF` 互換確認 |
+| `sbcio` | SBC-IO RAM拡張profile | なし | なし | 不要 | SBC-IO RAM拡張と2nd ACIAキーボード |
 | `sbcio_vdg` | `BOOT + SDFS/68` 本線profile | なし | あり | 必要 | SBC-IO + K68-VDG + SDFS/68 |
 | `k6802_vdg` | `BOOT + SDFS/68` 本線profile | なし | あり | 必要 | K6802-SBC + K68-VDG + SDFS/68 |
 
@@ -78,7 +78,7 @@ ROM_CODE_LIMIT=0 make bin
 | `MONITOR_PROFILE` | RAM/WORK | SBC-IO | raw SD/BOOT | VDG | KEY hw | VRAM |
 | --- | --- | --- | --- | --- | --- | --- |
 | `base` | `RAM 0000-1FFF`, `WORK 1C00-1FFF` | なし | なし | なし | なし | なし |
-| `sbcio` | `RAM 0000-7FFF`, `WORK C000-DFFF` | あり | あり | なし | あり | なし |
+| `sbcio` | `RAM 0000-7FFF`, `WORK C000-DFFF` | あり | なし | なし | あり | なし |
 | `sbcio_vdg` | `RAM 0000-7FFF`, `WORK C000-DFFF` | あり | あり | あり | あり | `$A000-$BFFF` |
 | `k6802_vdg` | `RAM 0000-7FFF`, `WORK A000-BFFF` | あり | あり | あり | あり | `$C000-$DFFF` |
 
@@ -129,7 +129,7 @@ stage1 v1の配置は、`sbcio_vdg` が `$C400-$CFFF`、`k6802_vdg` が `$A400-$
 
 `sdfs` ターゲットは FAT root の `SDFS.BIN` として配置するSDFS/68本体を生成する。出力はprofile suffix付きの `build/SDFS-sbcio-vdg.BIN` / `build/SDFS-k6802-vdg.BIN` で、SDイメージ作成時に root の8.3名 `SDFS.BIN` として格納する。
 
-ROM profileでは `FEATURE_SD` と `FEATURE_FAT` を分ける。`FEATURE_SD=1` はraw SD sector readと `BOOT` の前提、`FEATURE_FAT=1` はROM常駐の `DIR` / `LF` を含める設定である。`sbcio` は従来のROM FATコマンドを残し、`sbcio_vdg` / `k6802_vdg` はROM FATを外して固定LBA stage1 `BOOT` に寄せる。
+ROM profileでは `FEATURE_SD` と `FEATURE_FAT` を分ける。`FEATURE_SD=1` はraw SD sector readと `BOOT` の前提、`FEATURE_FAT=1` はROM常駐の `DIR` / `LF` を含める設定である。標準profileではROM FATを外し、`sbcio_vdg` / `k6802_vdg` だけを固定LBA stage1 `BOOT` に寄せる。ROM FAT互換を確認したい場合は、直接指定ビルドで `FEATURE_SD=1 FEATURE_FAT=1` を指定する。
 stage1と `SDFS.BIN` はROMモニタの一部ではなく、system SD側へ置く別成果物である。
 
 ## ROM_KIND
@@ -163,7 +163,7 @@ profileにない組み合わせを確認したい場合は、構成軸を直接�
 直接指定では `BUILD_CONFIG_NAME` を付けると、出力名を短くできる。
 
 ```sh
-make bin MEMORY_CONFIG=ram64_a000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_VDG=1 FEATURE_KEYBOARD=1 VDG_VRAM_CONFIG=c000 BUILD_CONFIG_NAME=axis-k6802
+make bin MEMORY_CONFIG=ram64_a000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_FAT=0 FEATURE_VDG=1 FEATURE_KEYBOARD=1 VDG_VRAM_CONFIG=c000 BUILD_CONFIG_NAME=axis-k6802
 ```
 
 出力:
@@ -175,7 +175,7 @@ build/mc6800-monitor-axis-k6802.bin
 `BUILD_CONFIG_NAME` を指定しない場合は、構成軸から長いsuffixを自動生成する。
 
 ```sh
-make bin MEMORY_CONFIG=ram64_a000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_VDG=1 FEATURE_KEYBOARD=1 VDG_VRAM_CONFIG=c000
+make bin MEMORY_CONFIG=ram64_a000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_FAT=0 FEATURE_VDG=1 FEATURE_KEYBOARD=1 VDG_VRAM_CONFIG=c000
 ```
 
 出力例:
@@ -191,6 +191,7 @@ build/mc6800-monitor-ram64_a000_work-sbcio-sd1-vdg1-vramc000-key1-i2c0.bin
 | `MEMORY_CONFIG` | `base8k` / `ram64_c000_work` / `ram64_a000_work` |
 | `BOARD_IO` | `none` / `sbcio` |
 | `FEATURE_SD` | `0` / `1` |
+| `FEATURE_FAT` | `0` / `1` |
 | `FEATURE_VDG` | `0` / `1` |
 | `FEATURE_KEYBOARD` | `0` / `1` |
 | `FEATURE_I2C` | `0` / `1` |
@@ -204,10 +205,10 @@ build/mc6800-monitor-ram64_a000_work-sbcio-sd1-vdg1-vramc000-key1-i2c0.bin
 
 | profile相当 | コマンド |
 | --- | --- |
-| `base` | `make bin MEMORY_CONFIG=base8k BOARD_IO=none FEATURE_SD=0 FEATURE_VDG=0 FEATURE_KEYBOARD=0 BUILD_CONFIG_NAME=axis-base` |
-| `sbcio` | `make bin MEMORY_CONFIG=ram64_c000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_VDG=0 FEATURE_KEYBOARD=1 BUILD_CONFIG_NAME=axis-sbcio` |
-| `sbcio_vdg` | `make bin MEMORY_CONFIG=ram64_c000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_VDG=1 FEATURE_KEYBOARD=1 VDG_VRAM_CONFIG=a000 BUILD_CONFIG_NAME=axis-sbcio-vdg` |
-| `k6802_vdg` | `make bin MEMORY_CONFIG=ram64_a000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_VDG=1 FEATURE_KEYBOARD=1 VDG_VRAM_CONFIG=c000 BUILD_CONFIG_NAME=axis-k6802` |
+| `base` | `make bin MEMORY_CONFIG=base8k BOARD_IO=none FEATURE_SD=0 FEATURE_FAT=0 FEATURE_VDG=0 FEATURE_KEYBOARD=0 BUILD_CONFIG_NAME=axis-base` |
+| `sbcio` | `make bin MEMORY_CONFIG=ram64_c000_work BOARD_IO=sbcio FEATURE_SD=0 FEATURE_FAT=0 FEATURE_VDG=0 FEATURE_KEYBOARD=1 BUILD_CONFIG_NAME=axis-sbcio` |
+| `sbcio_vdg` | `make bin MEMORY_CONFIG=ram64_c000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_FAT=0 FEATURE_VDG=1 FEATURE_KEYBOARD=1 VDG_VRAM_CONFIG=a000 BUILD_CONFIG_NAME=axis-sbcio-vdg` |
+| `k6802_vdg` | `make bin MEMORY_CONFIG=ram64_a000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_FAT=0 FEATURE_VDG=1 FEATURE_KEYBOARD=1 VDG_VRAM_CONFIG=c000 BUILD_CONFIG_NAME=axis-k6802` |
 
 ## 独自profileを追加する手順
 
@@ -217,13 +218,13 @@ build/mc6800-monitor-ram64_a000_work-sbcio-sd1-vdg1-vramc000-key1-i2c0.bin
 1. 直接指定でビルドする。
 
 ```sh
-make bin MEMORY_CONFIG=ram64_a000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_VDG=1 FEATURE_KEYBOARD=1 VDG_VRAM_CONFIG=c000 BUILD_CONFIG_NAME=my-board
+make bin MEMORY_CONFIG=ram64_a000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_FAT=0 FEATURE_VDG=1 FEATURE_KEYBOARD=1 VDG_VRAM_CONFIG=c000 BUILD_CONFIG_NAME=my-board
 ```
 
 2. `MAP`、`H`、必要なコマンドをエミュレータまたは実機で確認する。
 
 ```sh
-MEMORY_CONFIG=ram64_a000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_VDG=1 FEATURE_KEYBOARD=1 VDG_VRAM_CONFIG=c000 MONITOR_ROM_PATH=build/mc6800-monitor-my-board.bin REQUIRE_BUILD_ROM=1 python3 tests/test_smoke.py
+MEMORY_CONFIG=ram64_a000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_FAT=0 FEATURE_VDG=1 FEATURE_KEYBOARD=1 VDG_VRAM_CONFIG=c000 MONITOR_ROM_PATH=build/mc6800-monitor-my-board.bin REQUIRE_BUILD_ROM=1 python3 tests/test_smoke.py
 ```
 
 3. 問題なければ [Makefile](../../Makefile) の `MONITOR_PROFILE` 分岐へ追加する。
@@ -236,6 +237,7 @@ PROFILE_TARGET_SUFFIX := -my-board
 PROFILE_MEMORY_CONFIG := ram64_a000_work
 PROFILE_BOARD_IO := sbcio
 PROFILE_FEATURE_SD := 1
+PROFILE_FEATURE_FAT := 0
 PROFILE_FEATURE_VDG := 1
 PROFILE_FEATURE_KEYBOARD := 1
 PROFILE_FEATURE_I2C := 0
@@ -260,7 +262,7 @@ build/mc6800-monitor-my-board.bin
 MONITOR_PROFILE=my_board REQUIRE_BUILD_ROM=1 python3 tests/test_smoke.py
 ```
 
-SD/FATを有効にしたprofileでは、SD fixtureも確認する。
+SD/BOOTを有効にしたprofileでは、SD fixtureも確認する。
 
 ```sh
 MONITOR_PROFILE=my_board REQUIRE_BUILD_ROM=1 python3 tests/test_sd_fixture.py
@@ -296,6 +298,6 @@ MONITOR_PROFILE=k6802_vdg REQUIRE_BUILD_ROM=1 python3 tests/test_sd_fixture.py
 直接指定ビルドの出力をテストする場合は、`MONITOR_ROM_PATH` と構成軸を合わせて指定する。
 
 ```sh
-make bin MEMORY_CONFIG=ram64_a000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_VDG=1 FEATURE_KEYBOARD=1 VDG_VRAM_CONFIG=c000 BUILD_CONFIG_NAME=axis-k6802
-MEMORY_CONFIG=ram64_a000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_VDG=1 FEATURE_KEYBOARD=1 VDG_VRAM_CONFIG=c000 MONITOR_ROM_PATH=build/mc6800-monitor-axis-k6802.bin REQUIRE_BUILD_ROM=1 python3 tests/test_smoke.py
+make bin MEMORY_CONFIG=ram64_a000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_FAT=0 FEATURE_VDG=1 FEATURE_KEYBOARD=1 VDG_VRAM_CONFIG=c000 BUILD_CONFIG_NAME=axis-k6802
+MEMORY_CONFIG=ram64_a000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_FAT=0 FEATURE_VDG=1 FEATURE_KEYBOARD=1 VDG_VRAM_CONFIG=c000 MONITOR_ROM_PATH=build/mc6800-monitor-axis-k6802.bin REQUIRE_BUILD_ROM=1 python3 tests/test_smoke.py
 ```

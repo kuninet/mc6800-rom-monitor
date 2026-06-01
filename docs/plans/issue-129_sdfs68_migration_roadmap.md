@@ -39,12 +39,13 @@ SDFS/68本体のシェルやHEX/S-record loaderは含めない。
 ### #128 ROM FAT整理
 
 #128 は #130 完了後に実施する。`sbcio_vdg` / `k6802_vdg` は `BOOT + SDFS/68` 本線として固め、`sbcio` のROM FAT `DIR` / `LF` は互換扱いとして残すか、別profile化するかを判断する。
+#177 ではこの判断を一段進め、`sbcio` 標準profileからSD/FATを外し、ROM FATは直接指定互換構成でだけ使う方針にした。
 
 ## profile方針
 
 - `sbcio_vdg` / `k6802_vdg` は `FEATURE_SD=1` / `FEATURE_FAT=0` の `BOOT + SDFS/68` 本線に寄せる。
-- `sbcio` は当面ROM常駐FAT互換profileとして扱う。
-- `sbcio` のROM FATを維持するか分離するかは、SDFS/68のHEX/S-record loaderが動いた後に #128 で判断する。
+- `sbcio` は `FEATURE_SD=0` / `FEATURE_FAT=0` とし、SBC-IO RAM拡張 + 2nd ACIAキーボードprofileとして扱う。
+- ROM FATを使う場合は、profileではなく直接構成軸で `FEATURE_SD=1 FEATURE_FAT=1` を指定する。
 
 ## 対象外
 
@@ -58,4 +59,3 @@ SDFS/68本体のシェルやHEX/S-record loaderは含めない。
 - #102 では `SDFS.BIN` 単体ビルドと、stage1から最小SDFS/68へ制御が渡ることを確認する。
 - #130 では `.S` / `.HEX` 正常ロードと、壊れたHEX、終端なし、存在しないファイルの異常系を確認する。
 - #128 では `FEATURE_FAT=0/1` の `DIR` / `LF` / `BOOT` / help表示とprofile別ROMサイズを確認する。
-
