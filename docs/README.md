@@ -60,6 +60,7 @@ ROM常駐FAT `DIR` / `LF` は互換機能であり、`BOOT + SDFS/68` が今後�
 - [plans/issue-155_sdfs68_line_input.md](plans/issue-155_sdfs68_line_input.md): SDFS/68 行入力改善
 - [plans/issue-167_vdg_console_output.md](plans/issue-167_vdg_console_output.md): VDG console出力
 - [plans/issue-144_rom_sdfs_docs_boundary.md](plans/issue-144_rom_sdfs_docs_boundary.md): ROMモニタとSDFS/68責務境界のユーザー向け文書整理
+- [../diagnostics/README.md](../diagnostics/README.md): SDからロードして使う診断用S-Record
 - [testing/sbc6800_bringup.md](testing/sbc6800_bringup.md)
 - [testing/sbc_io_sd_bringup.md](testing/sbc_io_sd_bringup.md): SBC-IO と microSD SPI モジュールで SD/FAT を実機確認する手順
 - [testing/sbc6800_datapack.md](testing/sbc6800_datapack.md): SBC6800 データパックの扱いと互換確認

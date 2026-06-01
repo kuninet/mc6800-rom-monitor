@@ -24,6 +24,8 @@
 - 初期PoCのコマンドは `KEYTEST` とし、2nd ACIAから1文字受信して1st ACIAへ `KEY xx c` を表示するだけに限定する。
 - 通常のモニタ入力、MIKBUG互換 `INEEE`、BASIC入力の2nd ACIA切替は後続Issueに分ける。
 
+後続の #167 ではROM容量を優先し、ROM常駐 `KEYTEST` は外した。受信確認は `diagnostics/KEYTEST.S` をSDからロードして実行する。
+
 ## 検証方針
 
 - エミュレータに2nd ACIA入力 `--key-input` を追加し、1st ACIAの `--input` と独立して扱えることを確認する。

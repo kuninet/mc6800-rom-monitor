@@ -38,19 +38,6 @@ ACIA_GETC:
         ldaa    ACIA_DATA
         rts
 
- if MONITOR_FEATURE_KEYBOARD
-ACIA2_WAIT_RX:
-        ldaa    ACIA2_CTRL
-        bita    #ACIA_STAT_RDRF
-        beq     ACIA2_WAIT_RX
-        rts
-
-ACIA2_GETC:
-        bsr     ACIA2_WAIT_RX
-        ldaa    ACIA2_DATA
-        rts
- endif
-
 MIKBUG_OUTEEE_IMPL:
  if MONITOR_FEATURE_VDG
         psha

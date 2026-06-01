@@ -41,6 +41,6 @@ K68-VDG表示PoCでは `VDGTEST` により、K68-VDGの制御レジスタ `$8110
 - `MONITOR_PROFILE=k6802_vdg make bin`
 - `REQUIRE_BUILD_ROM=1 python3 tests/test_smoke.py`
 - VDG有効profileでは、起動メッセージ、プロンプト、入力echoがVRAMへ入ることをsmoke testで確認する。
-- `VDGTEST` が従来通り画面クリアと固定文字列表示を行うことを確認する。
+- ROM常駐の `VDGTEST` / `KEYTEST` は容量節約のため外し、Git管理下の `diagnostics/*.S` をSDから実行する方針にする。
 
-実機では、VDG有効ROMで電源投入後に `MC6800 MONITOR` がVDG画面にも表示され、UARTから `H` / `MAP` / `VDGTEST` を実行して画面表示が追従することを確認する。
+実機では、VDG有効ROMで電源投入後に `MC6800 MONITOR` がVDG画面にも表示され、UARTから `H` / `MAP` を実行して画面表示が追従することを確認する。

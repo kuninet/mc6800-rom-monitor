@@ -168,28 +168,10 @@ def test_error_display():
 
 def test_help_command():
     stdout, stderr, rc = run_emu("H\r\r")
-    if is_fat_build() and is_vdg_build() and is_keyboard_build():
-        expected = "D DIR M MAP RAMTEST VDGTEST KEYTEST G L LF BOOT B C R U H F"
-    elif is_fat_build() and is_vdg_build():
-        expected = "D DIR M MAP RAMTEST VDGTEST G L LF BOOT B C R U H F"
-    elif is_fat_build() and is_keyboard_build():
-        expected = "D DIR M MAP RAMTEST KEYTEST G L LF BOOT B C R U H F"
-    elif is_fat_build():
+    if is_fat_build():
         expected = "D DIR M MAP RAMTEST G L LF BOOT B C R U H F"
-    elif is_sd_build() and is_vdg_build() and is_keyboard_build():
-        expected = "D M MAP RAMTEST VDGTEST KEYTEST G L BOOT B C R U H F"
-    elif is_sd_build() and is_vdg_build():
-        expected = "D M MAP RAMTEST VDGTEST G L BOOT B C R U H F"
-    elif is_sd_build() and is_keyboard_build():
-        expected = "D M MAP RAMTEST KEYTEST G L BOOT B C R U H F"
     elif is_sd_build():
         expected = "D M MAP RAMTEST G L BOOT B C R U H F"
-    elif is_vdg_build() and is_keyboard_build():
-        expected = "D M MAP RAMTEST VDGTEST KEYTEST G L B C R U H F"
-    elif is_vdg_build():
-        expected = "D M MAP RAMTEST VDGTEST G L B C R U H F"
-    elif is_keyboard_build():
-        expected = "D M MAP RAMTEST KEYTEST G L B C R U H F"
     else:
         expected = "D M MAP RAMTEST G L B C R U H F"
     assert expected in stdout, f"missing help command list: {stdout!r}"
@@ -302,28 +284,11 @@ def test_map_command():
     print("[PASS] test_map_command")
 
 
-def test_vdgtest_command():
-    vram_start = "C000" if is_k6802_vdg_build() else "A000"
-    vram_dump_end = "C017" if is_k6802_vdg_build() else "A017"
-    vram_next = "C010" if is_k6802_vdg_build() else "A010"
-    stdout, stderr, rc = run_emu(
-        "F8110-8110 5A\rVDGTEST\rD8110-8110\r\r",
-        max_cycles=10_000_000,
-        dump_memory=f"{vram_start}-{vram_dump_end}",
-    )
+def test_diagnostic_commands_are_externalized():
+    stdout, stderr, rc = run_emu("VDGTEST\rKEYTEST\r\r", key_input="A", max_cycles=10_000_000)
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
-    if is_vdg_build():
-        assert "OK" in stdout, f"VDGTEST should report OK: {stdout!r}"
-        assert "8110 00" in stdout, f"VDGTEST should write VDG mode to 8110: {stdout!r}"
-        assert f"{vram_start} 4D 43 76 78 70 70 60 4D 4F 4E 49 54 4F 52 60 4B" in stdout, (
-            f"VDGTEST should write message at {vram_start}: {stdout!r}"
-        )
-        assert f"{vram_next} 76 78 6D 56 44 47 4F 4B" in stdout, (
-            f"VDGTEST should mirror OK after the test message: {stdout!r}"
-        )
-    else:
-        assert "?" in stdout, f"non-VDG builds should reject VDGTEST: {stdout!r}"
-    print("[PASS] test_vdgtest_command")
+    assert stdout.count("?") >= 2, f"diagnostic commands should not stay in ROM: {stdout!r}"
+    print("[PASS] test_diagnostic_commands_are_externalized")
 
 
 def test_vdg_console_mirrors_monitor_output():
@@ -368,15 +333,7 @@ def test_vdg_console_mirrors_dump_output():
 def test_keytest_command():
     stdout, stderr, rc = run_emu("KEYTEST\r\r", key_input="A", max_cycles=10_000_000)
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
-    if is_keyboard_build():
-        assert "KEY 41 A" in stdout, f"KEYTEST should report keyboard byte: {stdout!r}"
-    else:
-        assert "?" in stdout, f"base should reject KEYTEST: {stdout!r}"
-
-    stdout, stderr, rc = run_emu("KEYTEST\r\r", key_input="\r", max_cycles=10_000_000)
-    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
-    if is_keyboard_build():
-        assert "KEY 0D ." in stdout, f"KEYTEST should show control byte as dot: {stdout!r}"
+    assert "?" in stdout, f"KEYTEST should be externalized from ROM: {stdout!r}"
     print("[PASS] test_keytest_command")
 
 
@@ -623,7 +580,7 @@ def main():
         test_error_display,
         test_help_command,
         test_map_command,
-        test_vdgtest_command,
+        test_diagnostic_commands_are_externalized,
         test_vdg_console_mirrors_monitor_output,
         test_vdg_console_mirrors_dump_output,
         test_keytest_command,
