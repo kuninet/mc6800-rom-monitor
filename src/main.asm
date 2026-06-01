@@ -1303,15 +1303,10 @@ VDG_WRAP_CURSOR_DONE:
         rts
 
 VDG_ASCII_TO_CHAR:
-        cmpa    #'-'
-        beq     VDG_ASCII_TO_HYPHEN
         cmpa    #$40
         bhs     VDG_ASCII_TO_CHAR_DONE
         adda    #$40
 VDG_ASCII_TO_CHAR_DONE:
-        rts
-VDG_ASCII_TO_HYPHEN:
-        ldaa    #$6D
         rts
  endif
 
@@ -2304,8 +2299,11 @@ TXT_RAMTEST_PREFIX: fcc     "RAMTEST "
                     fcb     $04
 TXT_RAMTEST_NG:     fcc     "NG "
                     fcb     $04
+ if MONITOR_PROFILE_BASE
 TXT_MAP_BASE:       fcc     "MAP BASE"
                     fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_BASE8K
 TXT_MAP_BASE_RAM:   fcc     "RAM 0000-1FFF"
                     fcb     $04
 TXT_MAP_BASE_USER:  fcc     "USER 0000-1FFF"
@@ -2318,47 +2316,88 @@ TXT_MAP_BASE_SD:    fcc     "SD 1C00"
  endif
 TXT_MAP_BASE_MON:   fcc     "MON 1E00"
                     fcb     $04
-TXT_MAP_SBCIO:      fcc     "MAP SBCIO"
-                    fcb     $04
+ endif
+ if MONITOR_PROFILE_SBCIO
+ if MONITOR_FEATURE_VDG
 TXT_MAP_SBCIO_VDG:  fcc     "MAP SBCIO VDG"
                     fcb     $04
+ else
+TXT_MAP_SBCIO:      fcc     "MAP SBCIO"
+                    fcb     $04
+ endif
+ endif
+ if MONITOR_PROFILE_K6802_VDG
 TXT_MAP_K6802_VDG:  fcc     "MAP K6802 VDG"
                     fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_C000_WORK
 TXT_MAP_SBCIO_RAM:  fcc     "RAM 0000-7FFF"
                     fcb     $04
 TXT_MAP_SBCIO_USER: fcc     "USER 0000-7FFF"
                     fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_A000_WORK
+TXT_MAP_SBCIO_RAM:  fcc     "RAM 0000-7FFF"
+                    fcb     $04
+TXT_MAP_SBCIO_USER: fcc     "USER 0000-7FFF"
+                    fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_C000_WORK
 TXT_MAP_SBCIO_WORK: fcc     "WORK C000-DFFF"
                     fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_A000_WORK
 TXT_MAP_K6802_WORK: fcc     "WORK A000-BFFF"
                     fcb     $04
+ endif
  if MONITOR_FEATURE_SD
+ if BUILD_MEMORY_CONFIG_RAM64_C000_WORK
 TXT_MAP_SBCIO_SD:   fcc     "SD C000"
                     fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_A000_WORK
 TXT_MAP_K6802_SD:   fcc     "SD A000"
                     fcb     $04
  endif
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_C000_WORK
 TXT_MAP_SBCIO_MON:  fcc     "MON C200"
                     fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_A000_WORK
 TXT_MAP_K6802_MON:  fcc     "MON A200"
                     fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_BASE8K
 TXT_MAP_BASE_MIK:   fcc     "MIK 1F00"
                     fcb     $04
 TXT_MAP_BASE_STK:   fcc     "STK 1F42"
                     fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_C000_WORK
 TXT_MAP_SBCIO_MIK:  fcc     "MIK C300"
                     fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_A000_WORK
 TXT_MAP_K6802_MIK:  fcc     "MIK A300"
                     fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_C000_WORK
 TXT_MAP_SBCIO_STK:  fcc     "STK DFFF"
                     fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_A000_WORK
 TXT_MAP_K6802_STK:  fcc     "STK BFFF"
                     fcb     $04
+ endif
  if MONITOR_FEATURE_VDG
-TXT_MAP_VDG_VRAM:   fcc     "VRAM A000-BFFF"
-                    fcb     $04
+ if BUILD_VDG_VRAM_C000
 TXT_MAP_K6802_VRAM: fcc     "VRAM C000-DFFF"
                     fcb     $04
+ else
+TXT_MAP_VDG_VRAM:   fcc     "VRAM A000-BFFF"
+                    fcb     $04
+ endif
 TXT_MAP_VDG_CTL:    fcc     "VDG 8110"
                     fcb     $04
  endif
