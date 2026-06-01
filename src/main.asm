@@ -1311,7 +1311,7 @@ VDG_ASCII_TO_CHAR:
 VDG_ASCII_TO_CHAR_DONE:
         rts
 VDG_ASCII_TO_HYPHEN:
-        ldaa    #'-'
+        ldaa    #$6D
         rts
  endif
 

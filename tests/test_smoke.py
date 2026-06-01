@@ -343,7 +343,7 @@ def test_vdg_console_mirrors_modify_prompt():
         dump_memory=f"{vram_start}-{vram_dump_end}",
     )
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
-    assert f"{mod_line} 70 71 70 70 7A 60 70 70 60 2D 60 6E" in stdout, (
+    assert f"{mod_line} 70 71 70 70 7A 60 70 70 60 6D 60 6E" in stdout, (
         f"VDG console should mirror M command prompt punctuation: {stdout!r}"
     )
     print("[PASS] test_vdg_console_mirrors_modify_prompt")
