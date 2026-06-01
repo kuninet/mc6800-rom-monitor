@@ -322,7 +322,7 @@ CMD_DUMP_ASCII_LOOP:
 CMD_DUMP_ASCII_DOT:
         ldaa    #'.'
 CMD_DUMP_ASCII_PUTC:
-        jsr     ACIA_PUTC
+        jsr     MON_OUTEEE
         inx
         decb
         bra     CMD_DUMP_ASCII_LOOP
@@ -1270,10 +1270,10 @@ CMD_VDGTEST:
         bne     CMD_VDGTEST_ERR
         jsr     VDG_INIT
 CMD_VDGTEST_WRITE:
+        ldx     #VDG_VRAM_START
+        stx     VDG_CURSOR
         ldx     #TXT_VDGTEST_MESSAGE
         stx     DUMP_END
-        ldx     #VDG_VRAM_START
-        stx     DUMP_ADDR
 CMD_VDGTEST_WRITE_LOOP:
         ldx     DUMP_END
         ldaa    0,x
@@ -1281,14 +1281,9 @@ CMD_VDGTEST_WRITE_LOOP:
         beq     CMD_VDGTEST_OK
         inx
         stx     DUMP_END
-        ldx     DUMP_ADDR
-        staa    0,x
-        inx
-        stx     DUMP_ADDR
+        jsr     VDG_PUTC
         bra     CMD_VDGTEST_WRITE_LOOP
 CMD_VDGTEST_OK:
-        ldx     DUMP_ADDR
-        stx     VDG_CURSOR
         ldx     #TXT_OK
         jsr     MAP_PRINT_LINE
         jmp     MAIN_LOOP
@@ -1329,6 +1324,7 @@ VDG_PUTC:
         beq     VDG_PUTC_BS
         cmpa    #CHR_SPACE
         blo     VDG_PUTC_DONE
+        jsr     VDG_ASCII_TO_CHAR
         ldx     VDG_CURSOR
         staa    0,x
         inx
@@ -1366,6 +1362,13 @@ VDG_WRAP_CURSOR:
         ldx     #VDG_VRAM_START
         stx     VDG_CURSOR
 VDG_WRAP_CURSOR_DONE:
+        rts
+
+VDG_ASCII_TO_CHAR:
+        cmpa    #$40
+        bhs     VDG_ASCII_TO_CHAR_DONE
+        adda    #$40
+VDG_ASCII_TO_CHAR_DONE:
         rts
  endif
 
@@ -2110,7 +2113,7 @@ PRINT_NIBBLE:
 PRINT_NIBBLE_AF:
         adda    #'A'-10
 PRINT_NIBBLE_OUT:
-        jsr     ACIA_PUTC
+        jsr     MON_OUTEEE
         rts
 
 PRINT_HEX16:

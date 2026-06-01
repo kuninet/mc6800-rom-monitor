@@ -315,10 +315,10 @@ def test_vdgtest_command():
     if is_vdg_build():
         assert "OK" in stdout, f"VDGTEST should report OK: {stdout!r}"
         assert "8110 00" in stdout, f"VDGTEST should write VDG mode to 8110: {stdout!r}"
-        assert f"{vram_start} 4D 43 36 38 30 30 20 4D 4F 4E 49 54 4F 52 20 4B" in stdout, (
+        assert f"{vram_start} 4D 43 76 78 70 70 60 4D 4F 4E 49 54 4F 52 60 4B" in stdout, (
             f"VDGTEST should write message at {vram_start}: {stdout!r}"
         )
-        assert f"{vram_next} 36 38 2D 56 44 47 4F 4B" in stdout, (
+        assert f"{vram_next} 76 78 6D 56 44 47 4F 4B" in stdout, (
             f"VDGTEST should mirror OK after the test message: {stdout!r}"
         )
     else:
@@ -339,11 +339,30 @@ def test_vdg_console_mirrors_monitor_output():
         dump_memory=f"{vram_start}-{vram_dump_end}",
     )
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
-    assert f"{vram_start} 4D 43 36 38 30 30 20 4D 4F 4E 49 54 4F 52" in stdout, (
+    assert f"{vram_start} 4D 43 76 78 70 70 60 4D 4F 4E 49 54 4F 52" in stdout, (
         f"VDG console should mirror startup banner into VRAM: {stdout!r}"
     )
-    assert f"{vram_prompt_line} 5D 20" in stdout, f"VDG console should mirror prompt: {stdout!r}"
+    assert f"{vram_prompt_line} 5D 60" in stdout, f"VDG console should mirror prompt: {stdout!r}"
     print("[PASS] test_vdg_console_mirrors_monitor_output")
+
+
+def test_vdg_console_mirrors_dump_output():
+    if not is_vdg_build():
+        print("[PASS] test_vdg_console_mirrors_dump_output")
+        return
+    vram_start = "C000" if is_k6802_vdg_build() else "A000"
+    vram_dump_end = "C07F" if is_k6802_vdg_build() else "A07F"
+    dump_line = "C040" if is_k6802_vdg_build() else "A040"
+    stdout, stderr, rc = run_emu(
+        "D0100\r\r",
+        max_cycles=10_000_000,
+        dump_memory=f"{vram_start}-{vram_dump_end}",
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert f"{dump_line} 70 71 70 70 60 70 70 60" in stdout, (
+        f"VDG console should mirror D command hex output as MC6847 text codes: {stdout!r}"
+    )
+    print("[PASS] test_vdg_console_mirrors_dump_output")
 
 
 def test_keytest_command():
@@ -606,6 +625,7 @@ def main():
         test_map_command,
         test_vdgtest_command,
         test_vdg_console_mirrors_monitor_output,
+        test_vdg_console_mirrors_dump_output,
         test_keytest_command,
         test_ramtest_command,
         test_breakpoint_query,
