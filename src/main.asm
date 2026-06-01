@@ -756,7 +756,7 @@ CMD_MOD_LOOP:
         ldx     MOD_ADDR
         jsr     PRINT_HEX16
         ldaa    #':'
-        jsr     ACIA_PUTC
+        jsr     MON_OUTEEE
         jsr     PRINT_SPACE
 
         ldx     MOD_ADDR
@@ -764,7 +764,7 @@ CMD_MOD_LOOP:
         jsr     PRINT_HEX8
         jsr     PRINT_SPACE
         ldaa    #'-'
-        jsr     ACIA_PUTC
+        jsr     MON_OUTEEE
         jsr     PRINT_SPACE
 
         jsr     READ_LINE

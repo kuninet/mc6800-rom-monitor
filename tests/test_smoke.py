@@ -330,6 +330,25 @@ def test_vdg_console_mirrors_dump_output():
     print("[PASS] test_vdg_console_mirrors_dump_output")
 
 
+def test_vdg_console_mirrors_modify_prompt():
+    if not is_vdg_build():
+        print("[PASS] test_vdg_console_mirrors_modify_prompt")
+        return
+    vram_start = "C000" if is_k6802_vdg_build() else "A000"
+    vram_dump_end = "C07F" if is_k6802_vdg_build() else "A07F"
+    mod_line = "C040" if is_k6802_vdg_build() else "A040"
+    stdout, stderr, rc = run_emu(
+        "M0100\r.\r\r",
+        max_cycles=10_000_000,
+        dump_memory=f"{vram_start}-{vram_dump_end}",
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert f"{mod_line} 70 71 70 70 7A 60 70 70 60 2D 60 6E" in stdout, (
+        f"VDG console should mirror M command prompt punctuation: {stdout!r}"
+    )
+    print("[PASS] test_vdg_console_mirrors_modify_prompt")
+
+
 def test_keytest_command():
     stdout, stderr, rc = run_emu("KEYTEST\r\r", key_input="A", max_cycles=10_000_000)
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
@@ -583,6 +602,7 @@ def main():
         test_diagnostic_commands_are_externalized,
         test_vdg_console_mirrors_monitor_output,
         test_vdg_console_mirrors_dump_output,
+        test_vdg_console_mirrors_modify_prompt,
         test_keytest_command,
         test_ramtest_command,
         test_breakpoint_query,
