@@ -48,7 +48,13 @@ def rom_path() -> Path:
     return FIXTURE_ROM_PATH
 
 
-def run_emu(input_text: str, max_cycles: int = 5_000_000, timeout: int = 10, key_input: str | None = None):
+def run_emu(
+    input_text: str,
+    max_cycles: int = 5_000_000,
+    timeout: int = 10,
+    key_input: str | None = None,
+    dump_memory: str | None = None,
+):
     input_bytes = input_text.encode("ascii")
 
     with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
@@ -72,6 +78,8 @@ def run_emu(input_text: str, max_cycles: int = 5_000_000, timeout: int = 10, key
         ]
         if key_input_file is not None:
             cmd.extend(["--key-input", key_input_file])
+        if dump_memory is not None:
+            cmd.extend(["--dump-memory", dump_memory])
         result = subprocess.run(
             cmd,
             capture_output=True,
@@ -160,28 +168,10 @@ def test_error_display():
 
 def test_help_command():
     stdout, stderr, rc = run_emu("H\r\r")
-    if is_fat_build() and is_vdg_build() and is_keyboard_build():
-        expected = "D DIR M MAP RAMTEST VDGTEST KEYTEST G L LF BOOT B C R U H F"
-    elif is_fat_build() and is_vdg_build():
-        expected = "D DIR M MAP RAMTEST VDGTEST G L LF BOOT B C R U H F"
-    elif is_fat_build() and is_keyboard_build():
-        expected = "D DIR M MAP RAMTEST KEYTEST G L LF BOOT B C R U H F"
-    elif is_fat_build():
+    if is_fat_build():
         expected = "D DIR M MAP RAMTEST G L LF BOOT B C R U H F"
-    elif is_sd_build() and is_vdg_build() and is_keyboard_build():
-        expected = "D M MAP RAMTEST VDGTEST KEYTEST G L BOOT B C R U H F"
-    elif is_sd_build() and is_vdg_build():
-        expected = "D M MAP RAMTEST VDGTEST G L BOOT B C R U H F"
-    elif is_sd_build() and is_keyboard_build():
-        expected = "D M MAP RAMTEST KEYTEST G L BOOT B C R U H F"
     elif is_sd_build():
         expected = "D M MAP RAMTEST G L BOOT B C R U H F"
-    elif is_vdg_build() and is_keyboard_build():
-        expected = "D M MAP RAMTEST VDGTEST KEYTEST G L B C R U H F"
-    elif is_vdg_build():
-        expected = "D M MAP RAMTEST VDGTEST G L B C R U H F"
-    elif is_keyboard_build():
-        expected = "D M MAP RAMTEST KEYTEST G L B C R U H F"
     else:
         expected = "D M MAP RAMTEST G L B C R U H F"
     assert expected in stdout, f"missing help command list: {stdout!r}"
@@ -294,41 +284,75 @@ def test_map_command():
     print("[PASS] test_map_command")
 
 
-def test_vdgtest_command():
+def test_diagnostic_commands_are_externalized():
+    stdout, stderr, rc = run_emu("VDGTEST\rKEYTEST\r\r", key_input="A", max_cycles=10_000_000)
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert stdout.count("?") >= 2, f"diagnostic commands should not stay in ROM: {stdout!r}"
+    print("[PASS] test_diagnostic_commands_are_externalized")
+
+
+def test_vdg_console_mirrors_monitor_output():
+    if not is_vdg_build():
+        print("[PASS] test_vdg_console_mirrors_monitor_output")
+        return
     vram_start = "C000" if is_k6802_vdg_build() else "A000"
-    vram_dump_end = "C017" if is_k6802_vdg_build() else "A017"
-    vram_next = "C010" if is_k6802_vdg_build() else "A010"
+    vram_dump_end = "C02F" if is_k6802_vdg_build() else "A02F"
+    vram_prompt_line = "C020" if is_k6802_vdg_build() else "A020"
     stdout, stderr, rc = run_emu(
-        f"F8110-8110 5A\rVDGTEST\rD8110-8110\rD{vram_start}-{vram_dump_end}\r\r",
+        "\r",
         max_cycles=10_000_000,
+        dump_memory=f"{vram_start}-{vram_dump_end}",
     )
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
-    if is_vdg_build():
-        assert "OK" in stdout, f"VDGTEST should report OK: {stdout!r}"
-        assert "8110 00" in stdout, f"VDGTEST should write VDG mode to 8110: {stdout!r}"
-        assert f"{vram_start} 4D 43 36 38 30 30 20 4D 4F 4E 49 54 4F 52 20 4B" in stdout, (
-            f"VDGTEST should write message at {vram_start}: {stdout!r}"
-        )
-        assert f"{vram_next} 36 38 2D 56 44 47 60 60" in stdout, (
-            f"VDGTEST should leave cleared screen bytes after message: {stdout!r}"
-        )
-    else:
-        assert "?" in stdout, f"non-VDG builds should reject VDGTEST: {stdout!r}"
-    print("[PASS] test_vdgtest_command")
+    assert f"{vram_start} 4D 43 76 78 70 70 60 4D 4F 4E 49 54 4F 52" in stdout, (
+        f"VDG console should mirror startup banner into VRAM: {stdout!r}"
+    )
+    assert f"{vram_prompt_line} 5D 60" in stdout, f"VDG console should mirror prompt: {stdout!r}"
+    print("[PASS] test_vdg_console_mirrors_monitor_output")
+
+
+def test_vdg_console_mirrors_dump_output():
+    if not is_vdg_build():
+        print("[PASS] test_vdg_console_mirrors_dump_output")
+        return
+    vram_start = "C000" if is_k6802_vdg_build() else "A000"
+    vram_dump_end = "C07F" if is_k6802_vdg_build() else "A07F"
+    dump_line = "C040" if is_k6802_vdg_build() else "A040"
+    stdout, stderr, rc = run_emu(
+        "D0100\r\r",
+        max_cycles=10_000_000,
+        dump_memory=f"{vram_start}-{vram_dump_end}",
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert f"{dump_line} 70 71 70 70 60 70 70 60" in stdout, (
+        f"VDG console should mirror D command hex output as MC6847 text codes: {stdout!r}"
+    )
+    print("[PASS] test_vdg_console_mirrors_dump_output")
+
+
+def test_vdg_console_mirrors_modify_prompt():
+    if not is_vdg_build():
+        print("[PASS] test_vdg_console_mirrors_modify_prompt")
+        return
+    vram_start = "C000" if is_k6802_vdg_build() else "A000"
+    vram_dump_end = "C07F" if is_k6802_vdg_build() else "A07F"
+    mod_line = "C040" if is_k6802_vdg_build() else "A040"
+    stdout, stderr, rc = run_emu(
+        "M0100\r.\r\r",
+        max_cycles=10_000_000,
+        dump_memory=f"{vram_start}-{vram_dump_end}",
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert f"{mod_line} 70 71 70 70 7A 60 70 70 60 6D 60 6E" in stdout, (
+        f"VDG console should mirror M command prompt punctuation: {stdout!r}"
+    )
+    print("[PASS] test_vdg_console_mirrors_modify_prompt")
 
 
 def test_keytest_command():
     stdout, stderr, rc = run_emu("KEYTEST\r\r", key_input="A", max_cycles=10_000_000)
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
-    if is_keyboard_build():
-        assert "KEY 41 A" in stdout, f"KEYTEST should report keyboard byte: {stdout!r}"
-    else:
-        assert "?" in stdout, f"base should reject KEYTEST: {stdout!r}"
-
-    stdout, stderr, rc = run_emu("KEYTEST\r\r", key_input="\r", max_cycles=10_000_000)
-    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
-    if is_keyboard_build():
-        assert "KEY 0D ." in stdout, f"KEYTEST should show control byte as dot: {stdout!r}"
+    assert "?" in stdout, f"KEYTEST should be externalized from ROM: {stdout!r}"
     print("[PASS] test_keytest_command")
 
 
@@ -575,7 +599,10 @@ def main():
         test_error_display,
         test_help_command,
         test_map_command,
-        test_vdgtest_command,
+        test_diagnostic_commands_are_externalized,
+        test_vdg_console_mirrors_monitor_output,
+        test_vdg_console_mirrors_dump_output,
+        test_vdg_console_mirrors_modify_prompt,
         test_keytest_command,
         test_ramtest_command,
         test_breakpoint_query,

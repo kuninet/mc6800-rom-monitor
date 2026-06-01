@@ -116,8 +116,8 @@ make bin MEMORY_CONFIG=ram64_a000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_VDG=1
 機能コードは、構成軸に従ってASLの `if` / `else` / `endif` で条件アセンブルする。
 
 - `FEATURE_SD=0` では、`DIR`、`LF`、SD、FAT32関連コードと文字列をROMから除外する。
-- `FEATURE_VDG=0` では、`VDGTEST`、VDG関連コード、VDG用文字列をROMから除外する。
-- `FEATURE_KEYBOARD=0` では、2nd ACIA初期化、`KEYTEST`、関連文字列をROMから除外する。
+- `FEATURE_VDG=1` では、通常出力のVDG複製だけをROMへ入れる。固定表示確認は `diagnostics/VDGA000.S` / `VDGC000.S` をSDから実行する。
+- `FEATURE_KEYBOARD=1` では、2nd ACIA初期化とMAP表示だけをROMへ入れる。受信確認は `diagnostics/KEYTEST.S` をSDから実行する。
 - `FEATURE_I2C=0` では、I2Cドライバ、I2Cコマンド、関連文字列をROMから除外する。
 
 無効な機能はdispatch上で未定義コマンドになり、従来どおり `?` を返す。

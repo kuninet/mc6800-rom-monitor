@@ -29,8 +29,6 @@ ROM単体で使える低レベル操作、復旧口、マシン語デバッグ�
 | `Mssss` | `ssss` からメモリを変更する |
 | `MAP` | 現在のビルドが想定する主要メモリ配置を表示する |
 | `RAMTEST ssss-eeee` | 許可された明示範囲のRAMを破壊テストする |
-| `VDGTEST` | `FEATURE_VDG=1` のROMでK68-VDG画面をクリアし固定文字列を表示する |
-| `KEYTEST` | `FEATURE_KEYBOARD=1` のROMで2nd ACIAのキーボード受信文字を表示する |
 | `Gssss` | `ssss` へジャンプして実行する |
 | `L` | S-Record または Intel HEX をロードする |
 | `H` | コマンド一覧を表示する |
@@ -196,33 +194,30 @@ ROM E000-FFFF
 ]
 ```
 
-## K68-VDG表示PoC
+## K68-VDG表示
 
-`VDGTEST` は `FEATURE_VDG=1` のROM専用の表示確認コマンドである。K68-VDG の設定レジスタ `$8110` に VDG mode `$00` を書き込み、画面範囲を `$60` でクリアした後、VRAM先頭から `MC6800 MONITOR K68-VDG` を書く。
-`sbcio_vdg` では `$A000-$A1FF` をクリアして `$A000` へ書き、`k6802_vdg` では `$C000-$C1FF` をクリアして `$C000` へ書く。
+`FEATURE_VDG=1` のROMでは、起動メッセージ、プロンプト、通常の文字出力をUARTとK68-VDG画面の両方へ出す。
+K68-VDG の設定レジスタは `$8110`、VRAMは `sbcio_vdg` で `$A000-$BFFF`、`k6802_vdg` で `$C000-$DFFF` を使う。
+
+ROM容量を節約するため、画面クリアと固定文字列表示だけの `VDGTEST` コマンドはROMから外した。
+必要な場合は `diagnostics/VDGA000.S` または `diagnostics/VDGC000.S` をSDへ置き、SDFS/68から `RUN` する。
 
 ```text
-] VDGTEST
-OK
-]
+SDFS> RUN VDGA000.S
 ```
 
-`FEATURE_VDG=0` のROMでは `VDGTEST` のコマンド本体をROMに入れず、未対応コマンドとして `?` を返す。
+## 2nd ACIAキーボード入力
 
-## 2nd ACIAキーボード入力PoC
-
-`KEYTEST` は `FEATURE_KEYBOARD=1` のROM専用の受信確認コマンドである。
-SBC-IOの2nd ACIA `$8094-$8095` へ接続したKKBD-USBなどのUARTキーボードI/Fから1文字を受信し、1st ACIAの保守コンソールへ16進値と表示可能文字を出力する。
-制御文字は表示文字を `.` に置き換える。
+SBC-IOの2nd ACIA `$8094-$8095` は、KKBD-USBなどのUARTキーボードI/F接続先として扱う。
+ROM容量を節約するため、受信確認だけの `KEYTEST` コマンドはROMから外した。
+必要な場合は `diagnostics/KEYTEST.S` をSDへ置き、SDFS/68から `RUN` する。
 
 ```text
-] KEYTEST
+SDFS> RUN KEYTEST.S
 KEY 41 A
-]
 ```
 
-`FEATURE_KEYBOARD=0` のROMでは `KEYTEST` のコマンド本体をROMに入れず、未対応コマンドとして `?` を返す。
-`KEYTEST` はPoC確認用であり、通常のモニタ入力、MIKBUG互換 `INEEE`、BASIC入力を2nd ACIAへ切り替えない。
+通常のモニタ入力、MIKBUG互換 `INEEE`、BASIC入力は、まだ2nd ACIAへ切り替えない。これは後続Issueで扱う。
 
 ## RAM確認
 
@@ -349,19 +344,11 @@ D DIR M MAP RAMTEST G L LF BOOT B C R U H F
 ]
 ```
 
-`FEATURE_KEYBOARD=1` のROMでは `KEYTEST` を含めて表示する。次はSD/FATなしの例である。
+`FEATURE_SD=1` かつ `FEATURE_FAT=0` のprofileでは、ROM側FAT互換コマンドではなく `BOOT` を含める。VDG/キーボード診断はROMコマンドではなく、SD上の診断用S-Recordから実行する。
 
 ```text
 ] H
-D M MAP RAMTEST KEYTEST G L B C R U H F
-]
-```
-
-`FEATURE_VDG=1` かつ `FEATURE_KEYBOARD=1` のROMでは `VDGTEST` と `KEYTEST` を含めて表示する。`FEATURE_SD=1` かつ `FEATURE_FAT=0` のprofileでは、ROM側FAT互換コマンドではなく `BOOT` を含める。
-
-```text
-] H
-D M MAP RAMTEST VDGTEST KEYTEST G L BOOT B C R U H F
+D M MAP RAMTEST G L BOOT B C R U H F
 ]
 ```
 

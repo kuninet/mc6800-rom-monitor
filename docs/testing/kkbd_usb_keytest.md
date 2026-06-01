@@ -1,8 +1,8 @@
-# KKBD-USB 2nd ACIA KEYTEST実機確認手順
+# KKBD-USB 2nd ACIA実機確認手順
 
 ## 目的
 
-SBC-IOの2nd ACIA `$8094/$8095` にKKBD-USBを接続し、ROMモニタの `KEYTEST` コマンドでUSBキーボード由来のUART入力を確認する。
+SBC-IOの2nd ACIA `$8094/$8095` にKKBD-USBを接続し、SDからロードする `diagnostics/KEYTEST.S` でUSBキーボード由来のUART入力を確認する。
 
 ## 前提
 
@@ -14,7 +14,7 @@ SBC-IOの2nd ACIA `$8094/$8095` にKKBD-USBを接続し、ROMモニタの `KEYTE
 
 ## ROM作成
 
-SBC-IO RAM拡張profileで確認する。
+SBC-IO RAM拡張profileで確認する。ROM常駐の `KEYTEST` コマンドは容量節約のため外している。
 
 ```sh
 MONITOR_PROFILE=sbcio make bin
@@ -52,28 +52,29 @@ ROM E000-FFFF
 ]
 ```
 
-3. `KEYTEST` を実行する。
-4. USBキーボードで `A` を押し、次のように表示されることを確認する。
+3. `diagnostics/KEYTEST.S` をsystem SDへコピーする。
+4. `BOOT` でSDFS/68を起動し、`RUN KEYTEST.S` を実行する。
+5. USBキーボードで `A` を押し、次のように表示されることを確認する。
 
 ```text
-] KEYTEST
+SDFS> RUN KEYTEST.S
+KEY WAIT
 KEY 41 A
-]
 ```
 
-5. 必要に応じて `Enter` を押し、制御文字が `.` として表示されることを確認する。
+6. 必要に応じて再実行して `Enter` を押し、制御文字が `.` として表示されることを確認する。
 
 ```text
-] KEYTEST
+SDFS> RUN KEYTEST.S
+KEY WAIT
 KEY 0D .
-]
 ```
 
 ## 追加確認
 
-- `KEYTEST` 後も1st ACIAの保守コンソールで通常コマンドを入力できること。
-- `base` profileでは `KEYTEST` が `?` を返すこと。
-- VDG有効profileでは、`VDGTEST` と `KEYTEST` の両方が動作すること。
+- 診断用S-Record実行後、SWIでROMモニタへ戻ること。
+- ROMモニタで `KEYTEST` を入力すると `?` を返すこと。
+- VDG有効profileでは、`KEYTEST.S` の表示が1st ACIAとVDG画面へ複製されること。
 
 ## 記録する内容
 
@@ -82,4 +83,4 @@ KEY 0D .
 - KKBD-USBのジャンパー設定。
 - SBC-IO 2nd ACIAの配線。
 - `MAP` 出力。
-- `KEYTEST` の表示結果。
+- `RUN KEYTEST.S` の表示結果。

@@ -22,6 +22,8 @@
 - `MAP` では `MAP SBCIO VDG`、`VRAM A000-BFFF`、`VDG 8110` を表示し、実行時検出ではなく profile 定義の想定配置を示す。
 - `k6802_vdg` の `MAP` では `MAP K6802 VDG`、`WORK A000-BFFF`、`VRAM C000-DFFF`、`VDG 8110` を表示する。
 
+後続の #167 ではROM容量を優先し、ROM常駐 `VDGTEST` は外した。固定表示確認は `diagnostics/VDGA000.S` / `VDGC000.S` をSDからロードして実行する。
+
 ## 検証方針
 
 - `base` / `sbcio` では `VDGTEST` が `?` を返し、既存のヘルプ、MAP、SD/FAT、RAMTESTの挙動を維持する。

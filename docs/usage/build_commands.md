@@ -75,12 +75,14 @@ ROM_CODE_LIMIT=0 make bin
 
 メモリ配置と装備の差分は次の通り。
 
-| `MONITOR_PROFILE` | RAM/WORK | SBC-IO | raw SD/BOOT | VDG | KEYTEST | VRAM |
+| `MONITOR_PROFILE` | RAM/WORK | SBC-IO | raw SD/BOOT | VDG | KEY hw | VRAM |
 | --- | --- | --- | --- | --- | --- | --- |
 | `base` | `RAM 0000-1FFF`, `WORK 1C00-1FFF` | なし | なし | なし | なし | なし |
 | `sbcio` | `RAM 0000-7FFF`, `WORK C000-DFFF` | あり | あり | なし | あり | なし |
 | `sbcio_vdg` | `RAM 0000-7FFF`, `WORK C000-DFFF` | あり | あり | あり | あり | `$A000-$BFFF` |
 | `k6802_vdg` | `RAM 0000-7FFF`, `WORK A000-BFFF` | あり | あり | あり | あり | `$C000-$DFFF` |
+
+`KEY hw` は2nd ACIA `$8094-$8095` の接続想定を示す。ROM常駐の `KEYTEST` コマンドは容量節約のため外し、必要な確認は `diagnostics/KEYTEST.S` をSDからロードして行う。
 
 ## 生成物の種類
 

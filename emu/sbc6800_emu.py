@@ -50,6 +50,29 @@ VEC_NMI = 0xFFFC
 VEC_RESET = 0xFFFE
 
 
+def _parse_dump_range(value):
+    try:
+        start_text, end_text = value.split("-", 1)
+        start = int(start_text, 16)
+        end = int(end_text, 16)
+    except ValueError as exc:
+        raise SystemExit(f"invalid --dump-memory range: {value!r}") from exc
+    if not (0 <= start <= end <= 0xFFFF):
+        raise SystemExit(f"invalid --dump-memory range: {value!r}")
+    return start, end
+
+
+def _print_memory_dump(mem, start, end):
+    addr = start
+    while addr <= end:
+        count = min(16, end - addr + 1)
+        values = mem[addr:addr + count]
+        hex_part = " ".join(f"{b:02X}" for b in values)
+        ascii_part = "".join(chr(b) if 0x20 <= b <= 0x7E else "." for b in values)
+        print(f"{addr:04X} {hex_part:<47}  {ascii_part}")
+        addr += count
+
+
 class ACIA:
     """MC6850 ACIA の擬似実装（標準入出力をシリアル端末として扱う）"""
 
@@ -1648,6 +1671,8 @@ def main():
     parser.add_argument("--sd", help="SD card image file attached to the temporary PIA SPI port")
     parser.add_argument("--key-input",
                         help="2nd ACIA keyboard input script file")
+    parser.add_argument("--dump-memory",
+                        help="終了時に指定範囲のメモリを16進ダンプする。例: A000-A03F")
     args = parser.parse_args()
 
     # ROM ロード
@@ -1677,10 +1702,17 @@ def main():
     rom_start = ROM_END - rom_size + 1
     cpu.load_rom(rom_data, rom_start)
 
+    exit_code = 0
     try:
         cpu.run()
+    except SystemExit as exc:
+        exit_code = int(exc.code or 0) if isinstance(exc.code, int) else 1
     finally:
         acia.cleanup()
+    if args.dump_memory:
+        start, end = _parse_dump_range(args.dump_memory)
+        _print_memory_dump(cpu.mem, start, end)
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":

@@ -64,6 +64,9 @@ RESET:
         jsr     ACIA2_INIT
 RESET_NO_KEYBOARD:
  endif
+ if MONITOR_FEATURE_VDG
+        jsr     VDG_INIT
+ endif
         ldx     #TXT_WELCOME
         jsr     PDATA1
         ldaa    #CHR_CR
@@ -138,19 +141,7 @@ CHK_CMD_FILL:
         bne     CHK_CMD_AFTER_FILL
         jmp     CMD_FILL
 CHK_CMD_AFTER_FILL:
- if MONITOR_FEATURE_VDG
-        cmpa    #'V'
-        bne     CHK_CMD_AFTER_VDGTEST
-        jmp     CMD_VDGTEST
-CHK_CMD_AFTER_VDGTEST:
- endif
- if MONITOR_FEATURE_KEYBOARD
-        cmpa    #'K'
-        bne     MAIN_LOOP_ERROR
-        jmp     CMD_KEYTEST
- else
         jmp     MAIN_LOOP_ERROR
- endif
 
 MAIN_LOOP_ERROR:
         jsr     SHOW_ERROR
@@ -319,7 +310,7 @@ CMD_DUMP_ASCII_LOOP:
 CMD_DUMP_ASCII_DOT:
         ldaa    #'.'
 CMD_DUMP_ASCII_PUTC:
-        jsr     ACIA_PUTC
+        jsr     MON_OUTEEE
         inx
         decb
         bra     CMD_DUMP_ASCII_LOOP
@@ -765,7 +756,7 @@ CMD_MOD_LOOP:
         ldx     MOD_ADDR
         jsr     PRINT_HEX16
         ldaa    #':'
-        jsr     ACIA_PUTC
+        jsr     MON_OUTEEE
         jsr     PRINT_SPACE
 
         ldx     MOD_ADDR
@@ -773,7 +764,7 @@ CMD_MOD_LOOP:
         jsr     PRINT_HEX8
         jsr     PRINT_SPACE
         ldaa    #'-'
-        jsr     ACIA_PUTC
+        jsr     MON_OUTEEE
         jsr     PRINT_SPACE
 
         jsr     READ_LINE
@@ -1237,122 +1228,91 @@ CMD_FILL_ERR:
         jmp     MAIN_LOOP_ERROR
 
  if MONITOR_FEATURE_VDG
-CMD_VDGTEST:
-        ldaa    #MONITOR_FEATURE_VDG
-        beq     CMD_VDGTEST_ERR
-        ldab    LINE_LEN
-        cmpb    #7
-        bne     CMD_VDGTEST_ERR
-        ldx     #LINE_BUF
-        ldaa    0,x
-        cmpa    #'V'
-        bne     CMD_VDGTEST_ERR
-        ldaa    1,x
-        cmpa    #'D'
-        bne     CMD_VDGTEST_ERR
-        ldaa    2,x
-        cmpa    #'G'
-        bne     CMD_VDGTEST_ERR
-        ldaa    3,x
-        cmpa    #'T'
-        bne     CMD_VDGTEST_ERR
-        ldaa    4,x
-        cmpa    #'E'
-        bne     CMD_VDGTEST_ERR
-        ldaa    5,x
-        cmpa    #'S'
-        bne     CMD_VDGTEST_ERR
-        ldaa    6,x
-        cmpa    #'T'
-        bne     CMD_VDGTEST_ERR
+VDG_INIT:
         ldaa    #VDG_MODE
         staa    VDG_CTL
+        jsr     VDG_CLEAR
         ldx     #VDG_VRAM_START
-CMD_VDGTEST_CLEAR:
+        stx     VDG_CURSOR
+        rts
+
+VDG_CLEAR:
+        ldx     #VDG_VRAM_START
+VDG_CLEAR_LOOP:
         ldaa    #$60
         staa    0,x
         cpx     #VDG_TEXT_END
-        beq     CMD_VDGTEST_WRITE
+        beq     VDG_CLEAR_DONE
         inx
-        bra     CMD_VDGTEST_CLEAR
-CMD_VDGTEST_WRITE:
-        ldx     #TXT_VDGTEST_MESSAGE
-        stx     DUMP_END
-        ldx     #VDG_VRAM_START
-        stx     DUMP_ADDR
-CMD_VDGTEST_WRITE_LOOP:
-        ldx     DUMP_END
-        ldaa    0,x
-        cmpa    #$04
-        beq     CMD_VDGTEST_OK
-        inx
-        stx     DUMP_END
-        ldx     DUMP_ADDR
+        bra     VDG_CLEAR_LOOP
+VDG_CLEAR_DONE:
+        rts
+
+VDG_PUTC:
+        psha
+        pshb
+        stx     VDG_SAVE_X
+        cmpa    #CHR_LF
+        beq     VDG_PUTC_DONE
+        cmpa    #CHR_CR
+        beq     VDG_PUTC_CR
+        cmpa    #CHR_BS
+        beq     VDG_PUTC_BS
+        cmpa    #CHR_DEL
+        beq     VDG_PUTC_BS
+        cmpa    #CHR_SPACE
+        blo     VDG_PUTC_DONE
+        jsr     VDG_ASCII_TO_CHAR
+        ldx     VDG_CURSOR
         staa    0,x
         inx
-        stx     DUMP_ADDR
-        bra     CMD_VDGTEST_WRITE_LOOP
-CMD_VDGTEST_OK:
-        ldx     #TXT_OK
-        jsr     MAP_PRINT_LINE
-        jmp     MAIN_LOOP
-CMD_VDGTEST_ERR:
-        jmp     MAIN_LOOP_ERROR
- endif
+        stx     VDG_CURSOR
+        jsr     VDG_WRAP_CURSOR
+        bra     VDG_PUTC_DONE
+VDG_PUTC_CR:
+        ldx     VDG_CURSOR
+VDG_PUTC_CR_LOOP:
+        inx
+        stx     VDG_CURSOR
+        ldaa    VDG_CURSOR+1
+        anda    #$1F
+        bne     VDG_PUTC_CR_LOOP
+        jsr     VDG_WRAP_CURSOR
+        bra     VDG_PUTC_DONE
+VDG_PUTC_BS:
+        ldx     VDG_CURSOR
+        cpx     #VDG_VRAM_START
+        beq     VDG_PUTC_DONE
+        dex
+        stx     VDG_CURSOR
+        ldaa    #$60
+        staa    0,x
+VDG_PUTC_DONE:
+        ldx     VDG_SAVE_X
+        pulb
+        pula
+        rts
 
- if MONITOR_FEATURE_KEYBOARD
-CMD_KEYTEST:
-        ldaa    #MONITOR_FEATURE_KEYBOARD
-        beq     CMD_KEYTEST_ERR
-        ldab    LINE_LEN
-        cmpb    #7
-        bne     CMD_KEYTEST_ERR
-        ldx     #LINE_BUF
-        ldaa    0,x
-        cmpa    #'K'
-        bne     CMD_KEYTEST_ERR
-        ldaa    1,x
-        cmpa    #'E'
-        bne     CMD_KEYTEST_ERR
-        ldaa    2,x
-        cmpa    #'Y'
-        bne     CMD_KEYTEST_ERR
-        ldaa    3,x
-        cmpa    #'T'
-        bne     CMD_KEYTEST_ERR
-        ldaa    4,x
-        cmpa    #'E'
-        bne     CMD_KEYTEST_ERR
-        ldaa    5,x
-        cmpa    #'S'
-        bne     CMD_KEYTEST_ERR
-        ldaa    6,x
-        cmpa    #'T'
-        bne     CMD_KEYTEST_ERR
-        jsr     ACIA2_GETC
-        psha
-        ldx     #TXT_KEY_PREFIX
-        jsr     PDATA1
-        pula
-        psha
-        jsr     PRINT_HEX8
-        ldaa    #CHR_SPACE
-        jsr     MON_OUTEEE
-        pula
-        anda    #$7F
-        cmpa    #CHR_SPACE
-        blo     CMD_KEYTEST_DOT
-        cmpa    #CHR_DEL
-        bhs     CMD_KEYTEST_DOT
-        bra     CMD_KEYTEST_PRINT
-CMD_KEYTEST_DOT:
-        ldaa    #'.'
-CMD_KEYTEST_PRINT:
-        jsr     MON_OUTEEE
-        jsr     PRINT_CRLF
-        jmp     MAIN_LOOP
-CMD_KEYTEST_ERR:
-        jmp     MAIN_LOOP_ERROR
+VDG_WRAP_CURSOR:
+        ldx     VDG_CURSOR
+        cpx     #VDG_TEXT_END+1
+        bne     VDG_WRAP_CURSOR_DONE
+        ldx     #VDG_VRAM_START
+        stx     VDG_CURSOR
+VDG_WRAP_CURSOR_DONE:
+        rts
+
+VDG_ASCII_TO_CHAR:
+        cmpa    #'-'
+        beq     VDG_ASCII_TO_HYPHEN
+        cmpa    #$40
+        bhs     VDG_ASCII_TO_CHAR_DONE
+        adda    #$40
+VDG_ASCII_TO_CHAR_DONE:
+        rts
+VDG_ASCII_TO_HYPHEN:
+        ldaa    #$6D
+        rts
  endif
 
 CMD_LOAD:
@@ -2041,7 +2001,7 @@ PRINT_NIBBLE:
 PRINT_NIBBLE_AF:
         adda    #'A'-10
 PRINT_NIBBLE_OUT:
-        jsr     ACIA_PUTC
+        jsr     MON_OUTEEE
         rts
 
 PRINT_HEX16:
@@ -2325,67 +2285,19 @@ TXT_WELCOME:    fcc     "MC6800 MONITOR"
                 fcb     $04
 TXT_HELP:
  if MONITOR_FEATURE_FAT
- if MONITOR_FEATURE_VDG
- if MONITOR_FEATURE_KEYBOARD
-                fcc     "D DIR M MAP RAMTEST VDGTEST KEYTEST G L LF BOOT B C R U H F"
- else
-                fcc     "D DIR M MAP RAMTEST VDGTEST G L LF BOOT B C R U H F"
- endif
- else
- if MONITOR_FEATURE_KEYBOARD
-                fcc     "D DIR M MAP RAMTEST KEYTEST G L LF BOOT B C R U H F"
- else
                 fcc     "D DIR M MAP RAMTEST G L LF BOOT B C R U H F"
- endif
- endif
  else
  if MONITOR_FEATURE_SD
  if S1_SUPPORTED
- if MONITOR_FEATURE_VDG
- if MONITOR_FEATURE_KEYBOARD
-                fcc     "D M MAP RAMTEST VDGTEST KEYTEST G L BOOT B C R U H F"
- else
-                fcc     "D M MAP RAMTEST VDGTEST G L BOOT B C R U H F"
- endif
- else
- if MONITOR_FEATURE_KEYBOARD
-                fcc     "D M MAP RAMTEST KEYTEST G L BOOT B C R U H F"
- else
                 fcc     "D M MAP RAMTEST G L BOOT B C R U H F"
- endif
- endif
  else
- if MONITOR_FEATURE_VDG
- if MONITOR_FEATURE_KEYBOARD
-                fcc     "D M MAP RAMTEST VDGTEST KEYTEST G L B C R U H F"
- else
-                fcc     "D M MAP RAMTEST VDGTEST G L B C R U H F"
+                fcc     "D M MAP RAMTEST G L B C R U H F"
  endif
- else
- if MONITOR_FEATURE_KEYBOARD
-                fcc     "D M MAP RAMTEST KEYTEST G L B C R U H F"
  else
                 fcc     "D M MAP RAMTEST G L B C R U H F"
  endif
  endif
- endif
- else
- if MONITOR_FEATURE_VDG
- if MONITOR_FEATURE_KEYBOARD
-                fcc     "D M MAP RAMTEST VDGTEST KEYTEST G L B C R U H F"
- else
-                fcc     "D M MAP RAMTEST VDGTEST G L B C R U H F"
- endif
- else
- if MONITOR_FEATURE_KEYBOARD
-                fcc     "D M MAP RAMTEST KEYTEST G L B C R U H F"
- else
-                fcc     "D M MAP RAMTEST G L B C R U H F"
- endif
- endif
- endif
- endif
-                fcb     $04
+                    fcb     $04
 TXT_OK:         fcc     "OK"
                 fcb     $04
 TXT_RAMTEST_PREFIX: fcc     "RAMTEST "
@@ -2456,14 +2368,6 @@ TXT_MAP_KEYBOARD:   fcc     "KEY 8094-8095"
  endif
 TXT_MAP_ROM:        fcc     "ROM E000-FFFF"
                     fcb     $04
- if MONITOR_FEATURE_VDG
-TXT_VDGTEST_MESSAGE: fcc    "MC6800 MONITOR K68-VDG"
-                     fcb    $04
- endif
- if MONITOR_FEATURE_KEYBOARD
-TXT_KEY_PREFIX: fcc     "KEY "
-                fcb     $04
- endif
 TXT_BP:         fcc     "BP "
                 fcb     $04
 TXT_NONE:       fcc     "NONE"
