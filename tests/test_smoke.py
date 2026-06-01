@@ -48,7 +48,13 @@ def rom_path() -> Path:
     return FIXTURE_ROM_PATH
 
 
-def run_emu(input_text: str, max_cycles: int = 5_000_000, timeout: int = 10, key_input: str | None = None):
+def run_emu(
+    input_text: str,
+    max_cycles: int = 5_000_000,
+    timeout: int = 10,
+    key_input: str | None = None,
+    dump_memory: str | None = None,
+):
     input_bytes = input_text.encode("ascii")
 
     with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
@@ -72,6 +78,8 @@ def run_emu(input_text: str, max_cycles: int = 5_000_000, timeout: int = 10, key
         ]
         if key_input_file is not None:
             cmd.extend(["--key-input", key_input_file])
+        if dump_memory is not None:
+            cmd.extend(["--dump-memory", dump_memory])
         result = subprocess.run(
             cmd,
             capture_output=True,
@@ -299,8 +307,9 @@ def test_vdgtest_command():
     vram_dump_end = "C017" if is_k6802_vdg_build() else "A017"
     vram_next = "C010" if is_k6802_vdg_build() else "A010"
     stdout, stderr, rc = run_emu(
-        f"F8110-8110 5A\rVDGTEST\rD8110-8110\rD{vram_start}-{vram_dump_end}\r\r",
+        "F8110-8110 5A\rVDGTEST\rD8110-8110\r\r",
         max_cycles=10_000_000,
+        dump_memory=f"{vram_start}-{vram_dump_end}",
     )
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
     if is_vdg_build():
@@ -309,12 +318,32 @@ def test_vdgtest_command():
         assert f"{vram_start} 4D 43 36 38 30 30 20 4D 4F 4E 49 54 4F 52 20 4B" in stdout, (
             f"VDGTEST should write message at {vram_start}: {stdout!r}"
         )
-        assert f"{vram_next} 36 38 2D 56 44 47 60 60" in stdout, (
-            f"VDGTEST should leave cleared screen bytes after message: {stdout!r}"
+        assert f"{vram_next} 36 38 2D 56 44 47 4F 4B" in stdout, (
+            f"VDGTEST should mirror OK after the test message: {stdout!r}"
         )
     else:
         assert "?" in stdout, f"non-VDG builds should reject VDGTEST: {stdout!r}"
     print("[PASS] test_vdgtest_command")
+
+
+def test_vdg_console_mirrors_monitor_output():
+    if not is_vdg_build():
+        print("[PASS] test_vdg_console_mirrors_monitor_output")
+        return
+    vram_start = "C000" if is_k6802_vdg_build() else "A000"
+    vram_dump_end = "C02F" if is_k6802_vdg_build() else "A02F"
+    vram_prompt_line = "C020" if is_k6802_vdg_build() else "A020"
+    stdout, stderr, rc = run_emu(
+        "\r",
+        max_cycles=10_000_000,
+        dump_memory=f"{vram_start}-{vram_dump_end}",
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert f"{vram_start} 4D 43 36 38 30 30 20 4D 4F 4E 49 54 4F 52" in stdout, (
+        f"VDG console should mirror startup banner into VRAM: {stdout!r}"
+    )
+    assert f"{vram_prompt_line} 5D 20" in stdout, f"VDG console should mirror prompt: {stdout!r}"
+    print("[PASS] test_vdg_console_mirrors_monitor_output")
 
 
 def test_keytest_command():
@@ -576,6 +605,7 @@ def main():
         test_help_command,
         test_map_command,
         test_vdgtest_command,
+        test_vdg_console_mirrors_monitor_output,
         test_keytest_command,
         test_ramtest_command,
         test_breakpoint_query,

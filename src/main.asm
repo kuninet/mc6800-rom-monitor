@@ -64,6 +64,9 @@ RESET:
         jsr     ACIA2_INIT
 RESET_NO_KEYBOARD:
  endif
+ if MONITOR_FEATURE_VDG
+        jsr     VDG_INIT
+ endif
         ldx     #TXT_WELCOME
         jsr     PDATA1
         ldaa    #CHR_CR
@@ -1265,16 +1268,7 @@ CMD_VDGTEST:
         ldaa    6,x
         cmpa    #'T'
         bne     CMD_VDGTEST_ERR
-        ldaa    #VDG_MODE
-        staa    VDG_CTL
-        ldx     #VDG_VRAM_START
-CMD_VDGTEST_CLEAR:
-        ldaa    #$60
-        staa    0,x
-        cpx     #VDG_TEXT_END
-        beq     CMD_VDGTEST_WRITE
-        inx
-        bra     CMD_VDGTEST_CLEAR
+        jsr     VDG_INIT
 CMD_VDGTEST_WRITE:
         ldx     #TXT_VDGTEST_MESSAGE
         stx     DUMP_END
@@ -1293,11 +1287,86 @@ CMD_VDGTEST_WRITE_LOOP:
         stx     DUMP_ADDR
         bra     CMD_VDGTEST_WRITE_LOOP
 CMD_VDGTEST_OK:
+        ldx     DUMP_ADDR
+        stx     VDG_CURSOR
         ldx     #TXT_OK
         jsr     MAP_PRINT_LINE
         jmp     MAIN_LOOP
 CMD_VDGTEST_ERR:
         jmp     MAIN_LOOP_ERROR
+
+VDG_INIT:
+        ldaa    #VDG_MODE
+        staa    VDG_CTL
+        jsr     VDG_CLEAR
+        ldx     #VDG_VRAM_START
+        stx     VDG_CURSOR
+        rts
+
+VDG_CLEAR:
+        ldx     #VDG_VRAM_START
+VDG_CLEAR_LOOP:
+        ldaa    #$60
+        staa    0,x
+        cpx     #VDG_TEXT_END
+        beq     VDG_CLEAR_DONE
+        inx
+        bra     VDG_CLEAR_LOOP
+VDG_CLEAR_DONE:
+        rts
+
+VDG_PUTC:
+        psha
+        pshb
+        stx     VDG_SAVE_X
+        cmpa    #CHR_LF
+        beq     VDG_PUTC_DONE
+        cmpa    #CHR_CR
+        beq     VDG_PUTC_CR
+        cmpa    #CHR_BS
+        beq     VDG_PUTC_BS
+        cmpa    #CHR_DEL
+        beq     VDG_PUTC_BS
+        cmpa    #CHR_SPACE
+        blo     VDG_PUTC_DONE
+        ldx     VDG_CURSOR
+        staa    0,x
+        inx
+        stx     VDG_CURSOR
+        jsr     VDG_WRAP_CURSOR
+        bra     VDG_PUTC_DONE
+VDG_PUTC_CR:
+        ldx     VDG_CURSOR
+VDG_PUTC_CR_LOOP:
+        inx
+        stx     VDG_CURSOR
+        ldaa    VDG_CURSOR+1
+        anda    #$1F
+        bne     VDG_PUTC_CR_LOOP
+        jsr     VDG_WRAP_CURSOR
+        bra     VDG_PUTC_DONE
+VDG_PUTC_BS:
+        ldx     VDG_CURSOR
+        cpx     #VDG_VRAM_START
+        beq     VDG_PUTC_DONE
+        dex
+        stx     VDG_CURSOR
+        ldaa    #$60
+        staa    0,x
+VDG_PUTC_DONE:
+        ldx     VDG_SAVE_X
+        pulb
+        pula
+        rts
+
+VDG_WRAP_CURSOR:
+        ldx     VDG_CURSOR
+        cpx     #VDG_TEXT_END+1
+        bne     VDG_WRAP_CURSOR_DONE
+        ldx     #VDG_VRAM_START
+        stx     VDG_CURSOR
+VDG_WRAP_CURSOR_DONE:
+        rts
  endif
 
  if MONITOR_FEATURE_KEYBOARD

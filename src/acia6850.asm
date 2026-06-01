@@ -52,12 +52,20 @@ ACIA2_GETC:
  endif
 
 MIKBUG_OUTEEE_IMPL:
+ if MONITOR_FEATURE_VDG
+        psha
+        jsr     VDG_PUTC
+        pula
+ endif
         jsr     ACIA_PUTC
         rts
 
 MON_OUTEEE:
         psha
         jsr     ACIA_PUTC
+ if MONITOR_FEATURE_VDG
+        jsr     VDG_PUTC
+ endif
         pula
         cmpa    #CHR_CR
         bne     MON_OUTEEE_DONE
