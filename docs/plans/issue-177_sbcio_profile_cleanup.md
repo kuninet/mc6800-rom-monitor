@@ -41,6 +41,22 @@ PR #176 のROM容量確認で、`sbcio` profileだけがROM常駐FAT `DIR` / `LF
 - `MONITOR_PROFILE=sbcio FEATURE_SD=1 FEATURE_FAT=1 make bin`
 - `MONITOR_PROFILE=sbcio FEATURE_SD=1 FEATURE_FAT=1 REQUIRE_BUILD_ROM=1 python3 tests/test_sd_fixture.py`
 
+## PR #178 時点のROM空き
+
+listing上で `org VEC_IRQ` が始まる `$FFF8` 直前までを追加可能領域として数える。
+最終実コードの次アドレスから `$FFF7` までが、vector領域へ食い込まずに使える空きである。
+
+| 構成 | `FEATURE_SD` | `FEATURE_FAT` | 最終コード直後 | vector直前までの空き |
+| --- | ---: | ---: | ---: | ---: |
+| `base` | 0 | 0 | `$EF20` | `$10D8` = 4312 bytes |
+| `sbcio` | 0 | 0 | `$EF4E` | `$10AA` = 4266 bytes |
+| `sbcio_vdg` | 1 | 0 | `$F398` | `$0C60` = 3168 bytes |
+| `k6802_vdg` | 1 | 0 | `$F3A6` | `$0C52` = 3154 bytes |
+| 直接指定互換 `sbcio` + ROM FAT | 1 | 1 | `$FB86` | `$0472` = 1138 bytes |
+
+`sbcio` 標準profileからROM FATを外したことで、`sbcio` は旧FAT互換構成の約1.1KB空きではなく、約4.2KB空きのROMになった。
+VDG付きprofileはraw SD `BOOT` を残すため約3.1KB空きであり、今後のVDG/キーボード系改善はこの範囲を見ながら進める。
+
 ## 後続メモ
 
 `FEATURE_FAT` は直接指定互換として残るため、ROM常駐FATのテスト経路は完全には消さない。
