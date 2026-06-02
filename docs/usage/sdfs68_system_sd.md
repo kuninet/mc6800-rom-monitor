@@ -39,12 +39,12 @@ flowchart TD
 | ROMモニタ起動、`D` / `M` / `G` / `L` / `B` / `C` / `R` / `U` | 不要 | ROMモニタ |
 | ROM `BOOT` でSDFS/68へ移行 | 必要 | ROM入口 + stage1 |
 | SDFS/68の `DIR` / `TYPE` / `RUN` / `LOAD` / `EXIT` | 必要 | SDFS/68 |
-| `sbcio` profileのROM常駐FAT `DIR` / `LF` | SDFS/68用system SDは不要。ただしFAT32 SDカードは必要 | ROM互換FAT |
+| 直接指定ROMのROM常駐FAT `DIR` / `LF` | SDFS/68用system SDは不要。ただしFAT32 SDカードは必要 | ROM互換FAT |
 
-`sbcio` profileのROM常駐FATは互換機能であり、SDFS/68本線ではない。
+ROM常駐FATは `FEATURE_SD=1 FEATURE_FAT=1` を直接指定したときだけ使う互換機能であり、SDFS/68本線ではない。
 ここで不要としているのは、fixed boot area のstage1と root の `SDFS.BIN` を含むSDFS/68用system SDである。
 ROM常駐FAT `DIR` / `LF` を使う場合でも、FAT32形式のSDカード自体は別途必要である。
-`sbcio_vdg` / `k6802_vdg` ではROM常駐FATを外し、`BOOT` でSDFS/68へ移行してからSD上ファイルを扱う。
+標準profileではROM常駐FATを外し、`sbcio_vdg` / `k6802_vdg` は `BOOT` でSDFS/68へ移行してからSD上ファイルを扱う。
 
 ## システムSDイメージ生成
 

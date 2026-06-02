@@ -10,7 +10,7 @@
 - `sbcio_vdg` profileでは、K68-VDG は VRAM `$A000-$BFFF` 設定で接続すること。
 - `k6802_vdg` profileでは、K68-VDG は VRAM `$C000-$DFFF` 設定で接続すること。
 - K68-VDG の VDG設定用レジスタは `$8110` として接続すること。
-- SD/FAT ワーク領域と K68-VDG VRAM が重ならないこと。
+- SD/BOOT work領域と K68-VDG VRAM が重ならないこと。
 
 ## ROM作成
 
@@ -93,8 +93,8 @@ C000 4B 76 78 6D 56 44 47 60 43 70 70 70
 ## 追加確認
 
 - SDFS/68併用構成では、診断用S-Record実行後も `DIR` / `LOAD` / `RUN` が動作することを確認する。
-- `sbcio_vdg` では `RAMTEST C000-DFFF` がSD/FATワーク領域の破壊テストであり、`$A000-$BFFF` は K68-VDG VRAM のため対象にしない。
-- `k6802_vdg` では `RAMTEST A000-BFFF` がSD/FATワーク領域の破壊テストであり、`$C000-$DFFF` は K68-VDG VRAM のため対象にしない。
+- `sbcio_vdg` では `RAMTEST C000-DFFF` がSD/BOOT work領域の破壊テストであり、`$A000-$BFFF` は K68-VDG VRAM のため対象にしない。
+- `k6802_vdg` では `RAMTEST A000-BFFF` がSD/BOOT work領域の破壊テストであり、`$C000-$DFFF` は K68-VDG VRAM のため対象にしない。
 
 ## 記録する内容
 
@@ -105,4 +105,4 @@ C000 4B 76 78 6D 56 44 47 60 43 70 70 70
 - `H` / `MAP` のVDG画面表示。
 - 診断用S-Recordの実行結果。
 - 画面表示結果。
-- SD/FAT を併用した場合は `DIR` / `LF` の結果。
+- SDFS/68 を併用した場合は `DIR` / `LOAD` / `RUN` の結果。

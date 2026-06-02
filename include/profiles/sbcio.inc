@@ -1,5 +1,5 @@
 ; SBC-IO RAM拡張プロファイル。
-; 低RAMをユーザープログラムやBASICへ返すため、SD/FATワークを$C000-$DFFFへ移す。
+; 低RAMをユーザープログラムやBASICへ返すため、モニタworkを$C000-$DFFFへ移す。
 
 MONITOR_PROFILE_BASE equ 0
 MONITOR_PROFILE_SBCIO equ 1

@@ -11,7 +11,7 @@ ROMモニタ、ROM常駐FAT、`BOOT`、stage1、SDFS/68の責務が、ユーザ�
 - `BOOT` はSDFS/68起動入口であり、ROMにDOS機能を増やす入口ではない。
 - stage1と `SDFS.BIN` はsystem SD側の成果物として説明する。
 - SDFS/68は通常運用の第2段DOSとして説明する。
-- ROM常駐FAT `DIR` / `LF` は `sbcio` profileの互換機能として扱い、本線は `BOOT + SDFS/68` へ寄せる。
+- ROM常駐FAT `DIR` / `LF` は標準profileから外し、必要な場合だけ直接指定互換構成で扱う。本線は `BOOT + SDFS/68` へ寄せる。
 - 図はGitHubで表示できるMermaid、一覧はMarkdown表で記録する。
 
 ## 更新対象
@@ -27,7 +27,7 @@ ROMモニタ、ROM常駐FAT、`BOOT`、stage1、SDFS/68の責務が、ユーザ�
 ## 対象外
 
 - ROM実装、SDFS/68実装、Makefile、テストコードの変更。
-- ROM常駐FAT `DIR` / `LF` の削除。
+- ROM常駐FAT `DIR` / `LF` 実装そのものの削除。
 - SDFS/68 v2コマンドの実装。
 - stage1 APIやSD/FAT処理の変更。
 

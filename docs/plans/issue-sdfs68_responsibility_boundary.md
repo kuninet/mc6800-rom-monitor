@@ -15,7 +15,7 @@ SDFS/68 v1 では、ROM `BOOT` から固定LBA stage1を読み、stage1がFAT ro
 - SDFS/68内で `M`、`B`、`C`、`R`、`U` などのROMモニタ機能を再実装しない。
 - SDFS/68でのプログラム起動は `RUN` を本線にする。
 - 低レベルデバッグ、メモリ変更、逆アセンブルは `EXIT` でROMモニタへ戻って行う。
-- ROM常駐FAT `DIR` / `LF` は `sbcio` profileの互換機能として扱い、SDFS/68本線へ新しいファイル操作を移す。
+- ROM常駐FAT `DIR` / `LF` は標準profileから外し、必要な場合だけ直接指定互換構成で扱う。SDFS/68本線へ新しいファイル操作を移す。
 - `BOOT` はSDFS/68を起動する入口であり、ROMにDOS機能を増やす入口ではない。
 
 ## 操作モデル

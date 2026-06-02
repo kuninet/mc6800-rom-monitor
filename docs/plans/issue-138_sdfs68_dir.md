@@ -48,7 +48,8 @@ stage1はSDFS/68を起動するためのboot servicesであり、ユーザー向
 - `SDFS_API_READ_SECTOR`
 
 ROM側 `CMD_DIR` も呼ばない。
-ROM常駐FATの `DIR` / `LF` は `sbcio` profileの互換機能であり、SDFS/68本線の機能はSDFS/68側へ寄せる。
+ROM常駐FATの `DIR` / `LF` は標準profileから外し、必要な場合だけ直接指定互換構成で使う。
+SDFS/68本線の機能はSDFS/68側へ寄せる。
 
 ## 内部レイヤ整理
 

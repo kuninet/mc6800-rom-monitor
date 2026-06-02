@@ -55,7 +55,7 @@ Issue #74 では `MAP` により、ビルド時の想定メモリ配置を表示
 - `sbcio` で `RAMTEST 0000-00FF`、`RAMTEST 7FFF-C000`、`RAMTEST BFFF-C000`、`RAMTEST DFFF-E000`、`RAMTEST A000-BFFF`、`RAMTEST E000-FFFF` が拒否されること。
 - `RAMTEST` 無引数、片側欠落、5桁以上、余分な文字、開始 > 終了が拒否されること。
 - `R` 単独が既存どおり `CMD_RESUME` として扱われること。
-- `sbcio` で `RAMTEST C000-DFFF` 後に `MAP`、`H`、`DIR`、`LF TEST.S` が動き、monitor/SD/FAT work が復帰していること。
+- `sbcio` で `RAMTEST C000-DFFF` 後に `MAP`、`H`、`D` が動き、monitor work が復帰していること。ROM常駐FATの確認は #177 以降、直接指定互換構成で行う。
 
 ## 対象外
 

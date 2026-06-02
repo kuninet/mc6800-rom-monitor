@@ -53,4 +53,4 @@ SDFS/68 v1は、`BOOT -> stage1 -> SDFS.BIN -> L filename` まで完了した。
 
 - #104 はv4以降のdirect read API設計として残す。
 - #105 はv3以降のsubdirectory設計として残す。
-- #128 の方針どおり、`sbcio` はROM常駐FAT互換profile、`sbcio_vdg` / `k6802_vdg` は `BOOT + SDFS/68` 本線profileとして扱う。
+- #177 の方針どおり、`sbcio` はSD/FATなしprofile、`sbcio_vdg` / `k6802_vdg` は `BOOT + SDFS/68` 本線profileとして扱う。ROM常駐FATは直接指定互換構成でだけ確認する。

@@ -8,7 +8,8 @@
 
 - `sbcio_vdg` / `k6802_vdg` は `BOOT + SDFS/68` 本線profileとする。
 - `sbcio_vdg` / `k6802_vdg` は `FEATURE_SD=1`、`FEATURE_FAT=0` を維持し、ROMには固定LBA `BOOT` とraw SD sector readを残す。
-- ROM常駐FAT `DIR` / `LF` は `sbcio` profileの互換機能として残す。
+- `sbcio` profileは #177 で `FEATURE_SD=0`、`FEATURE_FAT=0` に揃え、SBC-IO RAM拡張と2nd ACIAキーボードのprofileとして扱う。
+- ROM常駐FAT `DIR` / `LF` は標準profileから外し、必要な場合だけ直接指定の互換構成 `FEATURE_SD=1 FEATURE_FAT=1` で確認する。
 - `base` profileは引き続きSDなしの最小ROMとする。
 - 新しいSDFS/68機能、I2C、RTC、OLED、AUTOEXEC、subdirectory、FAT writeはROMへ戻さず、SDFS/68側の後続Issueで扱う。
 
@@ -20,9 +21,10 @@ SD上ファイルの通常操作は、`BOOT` 後のSDFS/68側へ寄せる。
 | profile | ROM側の位置づけ | `FEATURE_SD` | `FEATURE_FAT` | `DIR` / `LF` | `BOOT` |
 | --- | --- | --- | --- | --- | --- |
 | `base` | SBC6800互換の最小ROM | 0 | 0 | なし | なし |
-| `sbcio` | ROM常駐FAT互換profile | 1 | 1 | あり | あり |
+| `sbcio` | SBC-IO RAM拡張 + 2nd ACIA | 0 | 0 | なし | なし |
 | `sbcio_vdg` | SBC-IO + KBD + VDG + SDFS/68本線 | 1 | 0 | なし | あり |
 | `k6802_vdg` | K6802-SBC + KBD + VDG + SDFS/68本線 | 1 | 0 | なし | あり |
+| 直接指定互換 | ROM常駐FAT確認用 | 1 | 1 | あり | あり |
 
 ## ROMサイズ確認
 
@@ -43,5 +45,6 @@ SD上ファイルの通常操作は、`BOOT` 後のSDFS/68側へ寄せる。
 
 ## 後続
 
-ROM常駐FAT `DIR` / `LF` を完全削除する判断はしない。`sbcio` profileを互換入口として残す。
-ただし、新しい `DIR`、`TYPE`、AUTOEXEC、subdirectoryなどはROMへ戻さず、SDFS/68 v2以降で育てる。
+ROM常駐FAT `DIR` / `LF` のコード自体を完全削除する判断はしない。
+ただし標準profileからは外し、直接指定互換構成でだけ確認する。
+新しい `DIR`、`TYPE`、AUTOEXEC、subdirectoryなどはROMへ戻さず、SDFS/68 v2以降で育てる。

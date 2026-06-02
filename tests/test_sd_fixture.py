@@ -292,17 +292,23 @@ def _is_k6802_vdg_build() -> bool:
 def _is_sd_build() -> bool:
     if os.environ.get("FEATURE_SD") in ("0", "1"):
         return os.environ["FEATURE_SD"] == "1"
-    return _is_sbcio_build()
+    profile = os.environ.get("MONITOR_PROFILE")
+    if profile in ("sbcio_vdg", "k6802_vdg"):
+        return True
+    if profile in ("base", "sbcio"):
+        return False
+    stem = BUILD_ROM_PATH.stem
+    return "-sbcio-vdg" in stem or "-k6802-vdg" in stem or "-sd1-" in stem
 
 
 def _is_fat_build() -> bool:
     if os.environ.get("FEATURE_FAT") in ("0", "1"):
         return os.environ["FEATURE_FAT"] == "1"
-    return BUILD_ROM_PATH.stem.endswith("-sbcio")
+    return False
 
 
 def _is_s1_boot_build() -> bool:
-    return _is_sd_build() and (_is_vdg_build() or BUILD_ROM_PATH.stem.endswith("-sbcio"))
+    return _is_sd_build()
 
 
 def _run_emu_with_sd(input_text: str, sd_image: bytes, max_cycles: int = 30_000_000) -> tuple[str, str, int]:
@@ -590,7 +596,7 @@ def test_rom_profile_memory_layout() -> None:
         assert symbols["MONITOR_FEATURE_VDG"] == 0, "non-VDG profiles must keep VDG disabled"
     if _is_sd_build():
         assert symbols["FAT_SECTOR_IN_CLUS"] <= symbols["WORK_RAM_END"], (
-            "SD/FAT work variables must stay under WORK_RAM_END"
+            "SD work variables must stay under WORK_RAM_END"
         )
     print("[PASS] test_rom_profile_memory_layout")
 
