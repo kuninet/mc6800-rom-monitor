@@ -428,6 +428,56 @@ def test_keytest_command():
     print("[PASS] test_keytest_command")
 
 
+def test_keyboard_console_accepts_key_input_only():
+    if not is_keyboard_build():
+        print("[PASS] test_keyboard_console_accepts_key_input_only")
+        return
+    stdout, stderr, rc = run_emu("\r", key_input="H\r", max_cycles=10_000_000)
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert "D M MAP RAMTEST G L" in stdout, f"keyboard input should run H command: {stdout!r}"
+    print("[PASS] test_keyboard_console_accepts_key_input_only")
+
+
+def test_keyboard_console_prefers_key_input_over_uart():
+    if not is_keyboard_build():
+        print("[PASS] test_keyboard_console_prefers_key_input_over_uart")
+        return
+    stdout, stderr, rc = run_emu("H\r\r", key_input="MAP\r", max_cycles=10_000_000)
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    if is_k6802_vdg_build():
+        map_pos = stdout.find("MAP K6802 VDG")
+    elif is_sbcio_build():
+        map_pos = stdout.find("MAP SBCIO")
+    else:
+        map_pos = stdout.find("MAP BASE")
+    help_pos = stdout.find("D M MAP RAMTEST G L")
+    assert map_pos >= 0, f"keyboard MAP command should run: {stdout!r}"
+    assert help_pos >= 0, f"UART H command should still run after key input: {stdout!r}"
+    assert map_pos < help_pos, f"keyboard input should be consumed before UART input: {stdout!r}"
+    print("[PASS] test_keyboard_console_prefers_key_input_over_uart")
+
+
+def test_keyboard_console_falls_back_to_uart_when_key_empty():
+    if not is_keyboard_build():
+        print("[PASS] test_keyboard_console_falls_back_to_uart_when_key_empty")
+        return
+    stdout, stderr, rc = run_emu("H\r\r", key_input="", max_cycles=10_000_000)
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert "D M MAP RAMTEST G L" in stdout, f"UART input should work when key input is empty: {stdout!r}"
+    print("[PASS] test_keyboard_console_falls_back_to_uart_when_key_empty")
+
+
+def test_keyboard_console_line_editing_from_key_input():
+    if not is_keyboard_build():
+        print("[PASS] test_keyboard_console_line_editing_from_key_input")
+        return
+    stdout, stderr, rc = run_emu("\r", key_input="HX\b\r", max_cycles=10_000_000)
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert "D M MAP RAMTEST G L" in stdout, f"keyboard BS editing should leave H command: {stdout!r}"
+    assert "\b \b" in stdout, f"keyboard BS should emit visible erase sequence: {stdout!r}"
+    print("[PASS] test_keyboard_console_line_editing_from_key_input")
+
+
 def test_ramtest_command():
     input_text = (
         "RAMTEST\r"
@@ -679,6 +729,10 @@ def main():
         test_vdg_console_backspace_erases_character,
         test_vdg_console_scrolls_at_bottom,
         test_keytest_command,
+        test_keyboard_console_accepts_key_input_only,
+        test_keyboard_console_prefers_key_input_over_uart,
+        test_keyboard_console_falls_back_to_uart_when_key_empty,
+        test_keyboard_console_line_editing_from_key_input,
         test_ramtest_command,
         test_breakpoint_query,
         test_breakpoint_resume_and_clear,

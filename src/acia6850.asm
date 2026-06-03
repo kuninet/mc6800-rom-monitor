@@ -38,6 +38,25 @@ ACIA_GETC:
         ldaa    ACIA_DATA
         rts
 
+CONSOLE_GETC:
+ if MONITOR_FEATURE_KEYBOARD
+CONSOLE_GETC_LOOP:
+        ldaa    ACIA2_CTRL
+        bita    #ACIA_STAT_RDRF
+        bne     CONSOLE_GETC_KEYBOARD
+        ldaa    ACIA_CTRL
+        bita    #ACIA_STAT_RDRF
+        beq     CONSOLE_GETC_LOOP
+        ldaa    ACIA_DATA
+        rts
+CONSOLE_GETC_KEYBOARD:
+        ldaa    ACIA2_DATA
+        rts
+ else
+        jsr     ACIA_GETC
+        rts
+ endif
+
 MIKBUG_OUTEEE_IMPL:
  if MONITOR_FEATURE_VDG
         psha
@@ -65,7 +84,7 @@ MON_OUTEEE_DONE:
 
 MIKBUG_INEEE_IMPL:
 MIKBUG_INEEE_LOOP:
-        jsr     ACIA_GETC
+        jsr     CONSOLE_GETC
         cmpa    #CHR_LF
         beq     MIKBUG_INEEE_LOOP
         jsr     MIKBUG_OUTEEE_IMPL

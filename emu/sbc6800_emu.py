@@ -76,12 +76,12 @@ def _print_memory_dump(mem, start, end):
 class ACIA:
     """MC6850 ACIA の擬似実装（標準入出力をシリアル端末として扱う）"""
 
-    def __init__(self, input_data=None):
+    def __init__(self, input_data=None, exit_on_eof=None):
         self._input_buf = []
         self._input_data = input_data  # スクリプト入力用
         self._input_pos = 0
         self._interactive = input_data is None
-        self._exit_on_eof = input_data is not None
+        self._exit_on_eof = input_data is not None if exit_on_eof is None else exit_on_eof
         self._old_termios = None
         if self._interactive and sys.stdin.isatty() and not _IS_WINDOWS:
             self._old_termios = termios.tcgetattr(sys.stdin)
@@ -109,9 +109,11 @@ class ACIA:
                 ch = self._input_data[self._input_pos]
                 self._input_pos += 1
                 return ch
-            else:
+            elif self._exit_on_eof:
                 # 入力が尽きたら終了
                 raise SystemExit(0)
+            else:
+                return 0
         else:
             # 対話モード
             if _IS_WINDOWS:
@@ -1690,7 +1692,7 @@ def main():
             key_input_data = list(f.read())
 
     acia = ACIA(input_data=input_data)
-    acia2 = ACIA(input_data=key_input_data) if key_input_data is not None else None
+    acia2 = ACIA(input_data=key_input_data or [], exit_on_eof=False)
     sdcard = SDCard.from_file(args.sd) if args.sd else None
     pia = PIA(sdcard) if sdcard is not None else None
     cpu = MC6800(acia, acia2=acia2, pia=pia)

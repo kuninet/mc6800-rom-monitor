@@ -1621,7 +1621,7 @@ READ_LINE:
         clr     LINE_LEN
 
 READ_LINE_LOOP:
-        jsr     ACIA_GETC
+        jsr     CONSOLE_GETC
         cmpa    #CHR_LF
         beq     READ_LINE_LOOP
         cmpa    #CHR_CR
