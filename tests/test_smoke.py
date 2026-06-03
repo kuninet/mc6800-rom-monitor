@@ -377,7 +377,7 @@ def test_vdg_console_crlf_does_not_double_newline():
     )
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
     assert f"{vdg_addr(0x20)} 5D 60" in stdout, f"initial prompt line missing: {stdout!r}"
-    assert f"{vdg_addr(0x40)} 5D 60 5F" in stdout, f"CRLF should produce one new prompt line: {stdout!r}"
+    assert f"{vdg_addr(0x40)} 5D 60 20" in stdout, f"CRLF should produce one new prompt line: {stdout!r}"
     assert f"{vdg_addr(0x60)} 60 60 60 60" in stdout, f"LF after CR should not add an extra line: {stdout!r}"
     print("[PASS] test_vdg_console_crlf_does_not_double_newline")
 
@@ -414,7 +414,7 @@ def test_vdg_console_scrolls_at_bottom():
     )
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
     assert f"{vram_start} 5D 60" in stdout, f"top line should be scrolled prompt, not banner: {stdout!r}"
-    assert f"{vdg_addr(0x1E0)} 5D 60 5F" in stdout, f"cursor should stay on final scrolled line: {stdout!r}"
+    assert f"{vdg_addr(0x1E0)} 5D 60 20" in stdout, f"cursor should stay on final scrolled line: {stdout!r}"
     assert f"{vram_start} 4D 43 76 78 70 70 60 4D" not in stdout, (
         f"startup banner should have scrolled off instead of wrapping: {stdout!r}"
     )

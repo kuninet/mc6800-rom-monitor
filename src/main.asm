@@ -1358,8 +1358,7 @@ VDG_DRAW_CURSOR:
         ldx     VDG_CURSOR
         ldaa    0,x
         staa    VDG_CURSOR_CHAR
-        ldaa    #'_'
-        jsr     VDG_ASCII_TO_CHAR
+        ldaa    #$20
         staa    0,x
         rts
 
