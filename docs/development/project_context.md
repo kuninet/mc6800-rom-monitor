@@ -82,6 +82,23 @@ PoC で確認された主な注意点は次の通り。
 
 SD/FAT本体に入る前に、この開発運用文書を main へ入れる。その後、#47 から順に小さい PR で進める。
 
+## 副CPUディスク装置の将来構想
+
+将来構想 Issue [#166](https://github.com/kuninet/mc6800-rom-monitor/issues/166) では、MC6802 または 6502 を使った外部副CPUディスク装置を検討する。
+これは V1.3 の実装対象ではなく、現行の SBC-IO + SD / SDFS/68 本線とは別の棚として扱う。
+
+現時点の設計判断は次の通り。
+
+- 副CPUは SBC68 系バスへ同居させず、独立バスで動く賢いディスク装置として扱う。
+- 主MC6800との接続は、専用PIAまたは latch/register window による 8bit parallel + handshake を第一候補にする。
+- PIA制御線は READ/WRITE バス信号そのものではなく、REQ/STB/ACK/READY/DRQ/IRQ などのハンドシェイク信号として使う。
+- ROMモニタは同期I/Oで完結できる薄い装置呼び出しに留め、FAT、SD sector、cluster chain、directory walkを直接扱わない。
+- SDFS/68 はRAM上のDOS層として、必要に応じて割り込み駆動を利用できる設計にする。ただしROM boot / 復旧経路はポーリング同期I/Oでも成立させる。
+- FAT32、SDカード、将来の媒体差分は副ディスク装置側へ隠蔽し、主側ABIにはファイルサービスだけを見せる。
+- FATを向こう側へ持つことで、将来はFAT以外の独自FS、固定LBA、別媒体にも差し替えられる。
+
+GitHub sub-issue として、PIA同期通信、主側ファイルサービスABI、副CPU側FAT/媒体抽象、ROM最小入口、SDFS接続層、fixture検証、実機PoCを #166 配下に分割している。
+
 ## Blogとの関係
 
 Blogその13は、検討内容を読み物としてまとめた補助資料である。開発判断の正式な参照先は Git 管理下の docs、GitHub Issue、PR とする。
