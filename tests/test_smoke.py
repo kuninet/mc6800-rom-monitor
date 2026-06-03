@@ -228,6 +228,14 @@ def is_keyboard_build() -> bool:
     return is_sbcio_build()
 
 
+def vdg_vram_base() -> int:
+    return 0xC000 if is_k6802_vdg_build() else 0xA000
+
+
+def vdg_addr(offset: int) -> str:
+    return f"{vdg_vram_base() + offset:04X}"
+
+
 def test_map_command():
     stdout, stderr, rc = run_emu("F0100-0103 5A\rMAP\rD0100-0103\r\r", max_cycles=5_000_000)
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
@@ -302,9 +310,9 @@ def test_vdg_console_mirrors_monitor_output():
     if not is_vdg_build():
         print("[PASS] test_vdg_console_mirrors_monitor_output")
         return
-    vram_start = "C000" if is_k6802_vdg_build() else "A000"
-    vram_dump_end = "C02F" if is_k6802_vdg_build() else "A02F"
-    vram_prompt_line = "C020" if is_k6802_vdg_build() else "A020"
+    vram_start = vdg_addr(0)
+    vram_dump_end = vdg_addr(0x2F)
+    vram_prompt_line = vdg_addr(0x20)
     stdout, stderr, rc = run_emu(
         "\r",
         max_cycles=10_000_000,
@@ -322,9 +330,9 @@ def test_vdg_console_mirrors_dump_output():
     if not is_vdg_build():
         print("[PASS] test_vdg_console_mirrors_dump_output")
         return
-    vram_start = "C000" if is_k6802_vdg_build() else "A000"
-    vram_dump_end = "C07F" if is_k6802_vdg_build() else "A07F"
-    dump_line = "C040" if is_k6802_vdg_build() else "A040"
+    vram_start = vdg_addr(0)
+    vram_dump_end = vdg_addr(0x7F)
+    dump_line = vdg_addr(0x40)
     stdout, stderr, rc = run_emu(
         "D0100\r\r",
         max_cycles=10_000_000,
@@ -341,9 +349,9 @@ def test_vdg_console_mirrors_modify_prompt():
     if not is_vdg_build():
         print("[PASS] test_vdg_console_mirrors_modify_prompt")
         return
-    vram_start = "C000" if is_k6802_vdg_build() else "A000"
-    vram_dump_end = "C07F" if is_k6802_vdg_build() else "A07F"
-    mod_line = "C040" if is_k6802_vdg_build() else "A040"
+    vram_start = vdg_addr(0)
+    vram_dump_end = vdg_addr(0x7F)
+    mod_line = vdg_addr(0x40)
     stdout, stderr, rc = run_emu(
         "M0100\r.\r\r",
         max_cycles=10_000_000,
@@ -354,6 +362,63 @@ def test_vdg_console_mirrors_modify_prompt():
         f"VDG console should mirror M command prompt punctuation: {stdout!r}"
     )
     print("[PASS] test_vdg_console_mirrors_modify_prompt")
+
+
+def test_vdg_console_crlf_does_not_double_newline():
+    if not is_vdg_build():
+        print("[PASS] test_vdg_console_crlf_does_not_double_newline")
+        return
+    vram_start = vdg_addr(0)
+    vram_dump_end = vdg_addr(0x7F)
+    stdout, stderr, rc = run_emu(
+        "\r\n",
+        max_cycles=10_000_000,
+        dump_memory=f"{vram_start}-{vram_dump_end}",
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert f"{vdg_addr(0x20)} 5D 60" in stdout, f"initial prompt line missing: {stdout!r}"
+    assert f"{vdg_addr(0x40)} 5D 60 20" in stdout, f"CRLF should produce one new prompt line: {stdout!r}"
+    assert f"{vdg_addr(0x60)} 60 60 60 60" in stdout, f"LF after CR should not add an extra line: {stdout!r}"
+    print("[PASS] test_vdg_console_crlf_does_not_double_newline")
+
+
+def test_vdg_console_backspace_erases_character():
+    if not is_vdg_build():
+        print("[PASS] test_vdg_console_backspace_erases_character")
+        return
+    vram_start = vdg_addr(0)
+    vram_dump_end = vdg_addr(0x5F)
+    stdout, stderr, rc = run_emu(
+        "ABC\b\r\r",
+        max_cycles=10_000_000,
+        dump_memory=f"{vram_start}-{vram_dump_end}",
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert f"{vdg_addr(0x20)} 5D 60 41 42 60" in stdout, (
+        f"BS should erase the echoed C on VDG: {stdout!r}"
+    )
+    assert f"{vdg_addr(0x40)} 7F 60" in stdout, f"invalid AB command should still show error marker: {stdout!r}"
+    print("[PASS] test_vdg_console_backspace_erases_character")
+
+
+def test_vdg_console_scrolls_at_bottom():
+    if not is_vdg_build():
+        print("[PASS] test_vdg_console_scrolls_at_bottom")
+        return
+    vram_start = vdg_addr(0)
+    vram_dump_end = vdg_addr(0x1FF)
+    stdout, stderr, rc = run_emu(
+        "\r" * 20,
+        max_cycles=10_000_000,
+        dump_memory=f"{vram_start}-{vram_dump_end}",
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert f"{vram_start} 5D 60" in stdout, f"top line should be scrolled prompt, not banner: {stdout!r}"
+    assert f"{vdg_addr(0x1E0)} 5D 60 20" in stdout, f"cursor should stay on final scrolled line: {stdout!r}"
+    assert f"{vram_start} 4D 43 76 78 70 70 60 4D" not in stdout, (
+        f"startup banner should have scrolled off instead of wrapping: {stdout!r}"
+    )
+    print("[PASS] test_vdg_console_scrolls_at_bottom")
 
 
 def test_keytest_command():
@@ -610,6 +675,9 @@ def main():
         test_vdg_console_mirrors_monitor_output,
         test_vdg_console_mirrors_dump_output,
         test_vdg_console_mirrors_modify_prompt,
+        test_vdg_console_crlf_does_not_double_newline,
+        test_vdg_console_backspace_erases_character,
+        test_vdg_console_scrolls_at_bottom,
         test_keytest_command,
         test_ramtest_command,
         test_breakpoint_query,

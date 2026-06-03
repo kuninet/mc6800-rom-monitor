@@ -1234,6 +1234,10 @@ VDG_INIT:
         jsr     VDG_CLEAR
         ldx     #VDG_VRAM_START
         stx     VDG_CURSOR
+        ldaa    #$60
+        staa    VDG_CURSOR_CHAR
+        clr     VDG_LAST_CR
+        jsr     VDG_DRAW_CURSOR
         rts
 
 VDG_CLEAR:
@@ -1252,8 +1256,11 @@ VDG_PUTC:
         psha
         pshb
         stx     VDG_SAVE_X
+        tab
+        jsr     VDG_UNDRAW_CURSOR
+        tba
         cmpa    #CHR_LF
-        beq     VDG_PUTC_DONE
+        beq     VDG_PUTC_LF
         cmpa    #CHR_CR
         beq     VDG_PUTC_CR
         cmpa    #CHR_BS
@@ -1262,24 +1269,29 @@ VDG_PUTC:
         beq     VDG_PUTC_BS
         cmpa    #CHR_SPACE
         blo     VDG_PUTC_DONE
+        clr     VDG_LAST_CR
         jsr     VDG_ASCII_TO_CHAR
         ldx     VDG_CURSOR
         staa    0,x
         inx
         stx     VDG_CURSOR
-        jsr     VDG_WRAP_CURSOR
+        jsr     VDG_CHECK_CURSOR
+        bra     VDG_PUTC_DONE
+VDG_PUTC_LF:
+        tst     VDG_LAST_CR
+        beq     VDG_PUTC_LF_NEWLINE
+        clr     VDG_LAST_CR
+        bra     VDG_PUTC_DONE
+VDG_PUTC_LF_NEWLINE:
+        jsr     VDG_NEWLINE
         bra     VDG_PUTC_DONE
 VDG_PUTC_CR:
-        ldx     VDG_CURSOR
-VDG_PUTC_CR_LOOP:
-        inx
-        stx     VDG_CURSOR
-        ldaa    VDG_CURSOR+1
-        anda    #$1F
-        bne     VDG_PUTC_CR_LOOP
-        jsr     VDG_WRAP_CURSOR
+        jsr     VDG_NEWLINE
+        ldaa    #1
+        staa    VDG_LAST_CR
         bra     VDG_PUTC_DONE
 VDG_PUTC_BS:
+        clr     VDG_LAST_CR
         ldx     VDG_CURSOR
         cpx     #VDG_VRAM_START
         beq     VDG_PUTC_DONE
@@ -1288,18 +1300,66 @@ VDG_PUTC_BS:
         ldaa    #$60
         staa    0,x
 VDG_PUTC_DONE:
+        jsr     VDG_DRAW_CURSOR
         ldx     VDG_SAVE_X
         pulb
         pula
         rts
 
-VDG_WRAP_CURSOR:
+VDG_NEWLINE:
+        ldx     VDG_CURSOR
+VDG_NEWLINE_LOOP:
+        inx
+        stx     VDG_CURSOR
+        ldaa    VDG_CURSOR+1
+        anda    #$1F
+        bne     VDG_NEWLINE_LOOP
+        jsr     VDG_CHECK_CURSOR
+        rts
+
+VDG_CHECK_CURSOR:
         ldx     VDG_CURSOR
         cpx     #VDG_TEXT_END+1
-        bne     VDG_WRAP_CURSOR_DONE
+        bne     VDG_CHECK_CURSOR_DONE
+        jsr     VDG_SCROLL
+VDG_CHECK_CURSOR_DONE:
+        rts
+
+VDG_SCROLL:
         ldx     #VDG_VRAM_START
+VDG_SCROLL_COPY:
+        ldaa    $20,x
+        staa    0,x
+        cpx     #VDG_TEXT_END-$20
+        beq     VDG_SCROLL_CLEAR
+        inx
+        bra     VDG_SCROLL_COPY
+VDG_SCROLL_CLEAR:
+        ldx     #VDG_TEXT_END-$1F
+VDG_SCROLL_CLEAR_LOOP:
+        ldaa    #$60
+        staa    0,x
+        cpx     #VDG_TEXT_END
+        beq     VDG_SCROLL_DONE
+        inx
+        bra     VDG_SCROLL_CLEAR_LOOP
+VDG_SCROLL_DONE:
+        ldx     #VDG_TEXT_END-$1F
         stx     VDG_CURSOR
-VDG_WRAP_CURSOR_DONE:
+        rts
+
+VDG_UNDRAW_CURSOR:
+        ldx     VDG_CURSOR
+        ldaa    VDG_CURSOR_CHAR
+        staa    0,x
+        rts
+
+VDG_DRAW_CURSOR:
+        ldx     VDG_CURSOR
+        ldaa    0,x
+        staa    VDG_CURSOR_CHAR
+        ldaa    #$20
+        staa    0,x
         rts
 
 VDG_ASCII_TO_CHAR:
@@ -1595,11 +1655,11 @@ READ_LINE_BACKSPACE:
         dec     LINE_LEN
 
         ldaa    #CHR_BS
-        jsr     ACIA_PUTC
+        jsr     MON_OUTEEE
         ldaa    #CHR_SPACE
-        jsr     ACIA_PUTC
+        jsr     MON_OUTEEE
         ldaa    #CHR_BS
-        jsr     ACIA_PUTC
+        jsr     MON_OUTEEE
         bra     READ_LINE_LOOP
 
 READ_LINE_DONE:
