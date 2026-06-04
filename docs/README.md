@@ -64,6 +64,7 @@ ROM常駐FATを確認したい場合は、profileではなく直接構成軸で 
 - [plans/issue-177_sbcio_profile_cleanup.md](plans/issue-177_sbcio_profile_cleanup.md): sbcio profileのSD/FAT整理
 - [plans/issue-144_rom_sdfs_docs_boundary.md](plans/issue-144_rom_sdfs_docs_boundary.md): ROMモニタとSDFS/68責務境界のユーザー向け文書整理
 - [../diagnostics/README.md](../diagnostics/README.md): SDからロードして使う診断用S-Record
+- [../sdfs_tools/README.md](../sdfs_tools/README.md): SDFS/68向け S-Record / `.COM` ツールサンプル
 - [testing/sbc6800_bringup.md](testing/sbc6800_bringup.md)
 - [testing/sbc_io_sd_bringup.md](testing/sbc_io_sd_bringup.md): SBC-IO と microSD SPI モジュールで SD/FAT を実機確認する手順
 - [testing/sbc6800_datapack.md](testing/sbc6800_datapack.md): SBC6800 データパックの扱いと互換確認
