@@ -486,6 +486,96 @@ def test_sdfs_run_file_requires_srec_entry() -> None:
     print("[PASS] test_sdfs_run_file_requires_srec_entry")
 
 
+def test_sdfs_com_runs_transient_commands_and_arguments() -> None:
+    for profile, expected in EXPECTED.items():
+        _run_make(profile, "bin")
+        _run_make(profile, "stage1")
+        _run_make(profile, "sdfs")
+        _run_make(profile, "sdfs-tools")
+        suffix = expected["suffix"]
+        stage1 = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+        sdfs = (PROJECT_ROOT / "build" / f"SDFS{suffix}.BIN").read_bytes()
+        hello_com = (PROJECT_ROOT / "build" / "HELLO.COM").read_bytes()
+        args_com = (PROJECT_ROOT / "build" / "ARGS.COM").read_bytes()
+        stack_com = bytes.fromhex("BD010439BD01083939")
+        image = build_sdfs_image(
+            stage1_data=stage1,
+            sdfs_data=sdfs,
+            extra_files=[
+                _file("HELLO.COM", hello_com),
+                _file("DUMP.COM", hello_com),
+                _file("LIST.COM", hello_com),
+                _file("EDIT.COM", hello_com),
+                _file("READ.COM", hello_com),
+                _file("LOAD.COM", hello_com),
+                _file("STACK.COM", stack_com),
+                _file("ARGS.COM", args_com),
+            ],
+        )
+        stdout, stderr, rc = _run_emu_with_sd(
+            rom_path=PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
+            input_text=(
+                "BOOT\r"
+                "HELLO.COM\r"
+                "DUMP.COM\r"
+                "LIST.COM\r"
+                "EDIT.COM\r"
+                "READ.COM\r"
+                "LOAD.COM\r"
+                "STACK.COM\r"
+                "ARGS.COM AAA BBB\r"
+                "DIR\r"
+                "X"
+            ),
+            sd_image=image,
+            max_cycles=260_000_000,
+        )
+        assert rc == 0 and "[TIMEOUT]" not in stderr, (
+            f"emulator failed for {profile}: rc={rc} stderr={stderr!r}"
+        )
+        assert stdout.count("HELLO COM") >= 6, (
+            f".COM transient commands did not all execute for {profile}: {stdout!r}"
+        )
+        assert "ARGS AAA BBB" in stdout, f".COM arguments were not passed for {profile}: {stdout!r}"
+        assert "HELLO.COM A " in stdout, f"DIR did not run after .COM return for {profile}: {stdout!r}"
+        assert stdout.count("SDFS> ") >= 10, f".COM did not return to prompt for {profile}: {stdout!r}"
+    print("[PASS] test_sdfs_com_runs_transient_commands_and_arguments")
+
+
+def test_sdfs_com_rejects_bad_transient_commands() -> None:
+    profile = "sbcio_vdg"
+    _run_make(profile, "bin")
+    _run_make(profile, "stage1")
+    _run_make(profile, "sdfs")
+    _run_make(profile, "sdfs-tools")
+    suffix = EXPECTED[profile]["suffix"]
+    stage1 = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+    sdfs = (PROJECT_ROOT / "build" / f"SDFS{suffix}.BIN").read_bytes()
+    hello_com = (PROJECT_ROOT / "build" / "HELLO.COM").read_bytes()
+    image = build_sdfs_image(
+        stage1_data=stage1,
+        sdfs_data=sdfs,
+        extra_files=[
+            _file("HELLO.COM", hello_com),
+            _file("HELLO.S", _srec_file(0x0200, b"S")),
+            _file("EMPTY.COM", b""),
+            _file("BIG.COM", b"\x39" * 0x7F01),
+        ],
+    )
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
+        input_text="BOOT\rNOFILE.COM\rEMPTY.COM\rBIG.COM\rHELLO\rHELLO.S\rDIR\rX",
+        sd_image=image,
+        max_cycles=220_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert stdout.count("?") >= 5, f"bad .COM commands were not rejected: {stdout!r}"
+    assert "HELLO COM" not in stdout, f"bad .COM command unexpectedly executed: {stdout!r}"
+    assert "SDFS.BIN A " in stdout, f"prompt did not recover after bad .COM commands: {stdout!r}"
+    assert stdout.count("SDFS> ") >= 7, f"prompt did not recover after bad .COM commands: {stdout!r}"
+    print("[PASS] test_sdfs_com_rejects_bad_transient_commands")
+
+
 def test_sdfs_line_editing_backspace_delete_and_lowercase() -> None:
     profile = "sbcio_vdg"
     _run_make(profile, "bin")
@@ -855,6 +945,8 @@ def main() -> None:
         test_sdfs_run_addr_rejects_bad_arguments,
         test_sdfs_run_srec_file_executes_entry_address,
         test_sdfs_run_file_requires_srec_entry,
+        test_sdfs_com_runs_transient_commands_and_arguments,
+        test_sdfs_com_rejects_bad_transient_commands,
         test_sdfs_line_editing_backspace_delete_and_lowercase,
         test_sdfs_line_input_ignores_overlong_command,
         test_sdfs_loader_errors_return_to_prompt,

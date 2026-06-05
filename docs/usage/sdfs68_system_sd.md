@@ -154,6 +154,7 @@ SDFS.BIN headerのversion byteはstage1が読むバイナリ形式versionであ�
 | `RUN addr` | 実装済み。16bit hexadecimal address へジャンプする |
 | `LOAD filename` | 実装済み。ファイルをロードする。自動実行しない |
 | `L filename` | 実装済み。`LOAD filename` の短縮エイリアス |
+| `FOO.COM [args]` | 実装済み。`.COM` トランジェントコマンドをロードして実行する |
 | `Dhhhh` | 実装済み。16bit hexadecimal address の1 byteを表示する |
 | `EXIT` | 実装済み。ROMモニタへ戻る |
 
@@ -197,8 +198,10 @@ Intel HEXを実行したい場合は、`LOAD filename` でロードしてから 
 `RUN addr` は指定アドレスへ直接ジャンプする。プログラム終了後にSDFS/68へ戻る保証はない。
 ROMモニタの `G addr` 相当の実行入口として扱う。
 
-`.COM` トランジェントコマンドは V1.3 以降の候補であり、`RUN` とは別の復帰前提ABIとして設計する。
-初期案では `FOO.COM` 明示指定、`$0100` 固定ロード、`JSR $0100` / `RTS` 復帰、`X` / `B` による引数渡しを採用する。
+`.COM` トランジェントコマンドは `RUN` とは別の復帰前提ABIである。
+`FOO.COM` のように拡張子まで明示して入力すると、SDFS/68 は raw binary を `$0100` へ固定ロードし、`JSR $0100` 相当で起動する。
+`.COM` 側は `RTS` で SDFS/68 へ戻る。
+`FOO.COM AAA BBB` のように引数を付けた場合、SDFS/68 は `X` / `B` で引数テールを渡す。
 詳細は [SDFS/68 .COM トランジェントコマンドABI](../design/sdfs68_com_abi.md) を参照する。
 
 メモリ変更、ブレークポイント、逆アセンブルなどの低レベルデバッグはSDFS/68に取り込まず、`EXIT` でROMモニタへ戻って行う。

@@ -6,6 +6,10 @@ SDFS_FORMAT_VERSION equ 1
 SDFS_HDR_SIZE   equ 16
 SDFS_S1_VERSION equ 1
 SDFS_S1_COUNT   equ 6
+SDFS_COM_LOAD_BASE equ $0100
+SDFS_COM_MAX_SIZE equ USER_RAM_END-SDFS_COM_LOAD_BASE+1
+SDFS_COM_MAX_HI equ SDFS_COM_MAX_SIZE/256
+SDFS_COM_MAX_LO equ SDFS_COM_MAX_SIZE-SDFS_COM_MAX_HI*256
 
         if S1_SUPPORTED = 0
         error   "SDFS/68 is not supported for this memory configuration"
@@ -46,10 +50,17 @@ SDFS_LOOP:
         bcc     SDFS_DO_LOAD_LONG
         jsr     SDFS_CMD_IS_LOAD_LONG_PREFIX
         bcc     SDFS_COMMAND_ERROR
+        jsr     SDFS_CMD_COM
+        bcs     SDFS_TRY_LOAD_ALIAS
+        bra     SDFS_PROMPT_NEXT
+SDFS_TRY_LOAD_ALIAS:
         jsr     SDFS_CMD_LOAD_ALIAS
         bra     SDFS_LOAD_RESULT
 SDFS_DO_LOAD_LONG:
         jsr     SDFS_CMD_LOAD_LONG
+        bcc     SDFS_LOAD_RESULT
+        jsr     SDFS_CMD_COM
+        bcc     SDFS_PROMPT_NEXT
 SDFS_LOAD_RESULT:
         bcc     SDFS_LOAD_OK
         jsr     SDFS_SHOW_LOADER_ERROR
@@ -70,8 +81,7 @@ SDFS_CHECK_DUMP:
 SDFS_CHECK_DUMP_BYTE:
         jsr     SDFS_CMD_DUMP_BYTE
         bcc     SDFS_PROMPT_NEXT
-        jsr     SDFS_SHOW_ERROR
-        bra     SDFS_PROMPT_NEXT
+        bra     SDFS_COMMAND_ERROR
 SDFS_CHECK_EXIT:
         cmpa    #'E'
         bne     SDFS_CHECK_RUN
@@ -83,12 +93,13 @@ SDFS_CHECK_RUN:
         bne     SDFS_COMMAND_ERROR
         jsr     SDFS_CMD_RUN
         bcc     SDFS_PROMPT_NEXT
-        jsr     SDFS_SHOW_ERROR
-        bra     SDFS_PROMPT_NEXT
+        bra     SDFS_COMMAND_ERROR
 SDFS_PROMPT_NEXT:
         jsr     SDFS_PRINT_PROMPT
         bra     SDFS_LOOP
 SDFS_COMMAND_ERROR:
+        jsr     SDFS_CMD_COM
+        bcc     SDFS_PROMPT_NEXT
         jsr     SDFS_SHOW_ERROR
         bra     SDFS_PROMPT_NEXT
 
@@ -281,6 +292,73 @@ SDFS_CMD_RUN_FILE:
         ldx     SDFS_RUN_ENTRY
         jmp     0,x
 SDFS_CMD_RUN_FAIL:
+        sec
+        rts
+
+SDFS_CMD_COM:
+        ldab    LINE_LEN
+        ldx     #LINE_BUF
+        jsr     SDFS_PARSE_COM_COMMAND
+        bcs     SDFS_CMD_COM_FAIL
+        jsr     SDFS_API_MOUNT
+        bcs     SDFS_CMD_COM_FAIL
+        ldx     #FAT_FIND_NAME0
+        jsr     SDFS_API_FIND_83
+        bcs     SDFS_CMD_COM_FAIL
+        jsr     SDFS_COM_CHECK_SIZE
+        bcs     SDFS_CMD_COM_FAIL
+        jsr     SDFS_STREAM_OPEN
+        bcs     SDFS_CMD_COM_FAIL
+        jsr     SDFS_COM_LOAD_RAW
+        bcs     SDFS_CMD_COM_FAIL
+        lds     #STACK_TOP
+        ldx     ARG2_PTR
+        ldab    ARG2_LEN
+        clra
+        jsr     SDFS_COM_LOAD_BASE
+        jmp     SDFS_PROMPT_NEXT
+SDFS_CMD_COM_FAIL:
+        sec
+        rts
+
+SDFS_COM_CHECK_SIZE:
+        ldaa    FAT_FILE_SIZE0
+        oraa    FAT_FILE_SIZE1
+        bne     SDFS_COM_CHECK_FAIL
+        ldaa    FAT_FILE_SIZE2
+        oraa    FAT_FILE_SIZE3
+        beq     SDFS_COM_CHECK_FAIL
+        ldaa    FAT_FILE_SIZE2
+        cmpa    #SDFS_COM_MAX_HI
+        bhi     SDFS_COM_CHECK_FAIL
+        blo     SDFS_COM_CHECK_OK
+        ldaa    FAT_FILE_SIZE3
+        cmpa    #SDFS_COM_MAX_LO
+        bhi     SDFS_COM_CHECK_FAIL
+SDFS_COM_CHECK_OK:
+        clc
+        rts
+SDFS_COM_CHECK_FAIL:
+        sec
+        rts
+
+SDFS_COM_LOAD_RAW:
+        ldx     #SDFS_COM_LOAD_BASE
+        stx     FAT_READ_PTR
+SDFS_COM_LOAD_LOOP:
+        jsr     SDFS_BYTES_REMAIN
+        bcc     SDFS_COM_LOAD_DONE
+        jsr     SDFS_STREAM_GETC
+        bcs     SDFS_COM_LOAD_FAIL
+        ldx     FAT_READ_PTR
+        staa    0,x
+        inx
+        stx     FAT_READ_PTR
+        bra     SDFS_COM_LOAD_LOOP
+SDFS_COM_LOAD_DONE:
+        clc
+        rts
+SDFS_COM_LOAD_FAIL:
         sec
         rts
 
@@ -692,6 +770,141 @@ SDFS_PARSE_FILENAME_OK:
         clc
         rts
 SDFS_PARSE_FILENAME_FAIL:
+        sec
+        rts
+
+SDFS_PARSE_COM_COMMAND:
+        stx     ARG_PTR
+        stab    ARG_LEN
+        jsr     SDFS_CLEAR_FIND_NAME
+SDFS_PARSE_COM_SKIP_HEAD:
+        tst     ARG_LEN
+        bne     SDFS_PARSE_COM_SKIP_HAS
+        jmp     SDFS_PARSE_COM_FAIL
+SDFS_PARSE_COM_SKIP_HAS:
+        ldx     ARG_PTR
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        bne     SDFS_PARSE_COM_NAME_START
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+        bra     SDFS_PARSE_COM_SKIP_HEAD
+
+SDFS_PARSE_COM_NAME_START:
+        ldx     #FAT_FIND_NAME0
+        stx     FAT_ENTRY_PTR
+        clr     ARG2_LEN
+SDFS_PARSE_COM_NAME_LOOP:
+        tst     ARG_LEN
+        bne     SDFS_PARSE_COM_NAME_HAS_LEN
+        jmp     SDFS_PARSE_COM_FAIL
+SDFS_PARSE_COM_NAME_HAS_LEN:
+        ldx     ARG_PTR
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        bne     SDFS_PARSE_COM_NAME_NOT_SPACE
+        jmp     SDFS_PARSE_COM_FAIL
+SDFS_PARSE_COM_NAME_NOT_SPACE:
+        cmpa    #'.'
+        beq     SDFS_PARSE_COM_EXT_START
+        ldab    ARG2_LEN
+        cmpb    #8
+        blo     SDFS_PARSE_COM_NAME_ROOM
+        jmp     SDFS_PARSE_COM_FAIL
+SDFS_PARSE_COM_NAME_ROOM:
+        jsr     SDFS_TO_UPPER
+        ldx     FAT_ENTRY_PTR
+        staa    0,x
+        inx
+        stx     FAT_ENTRY_PTR
+        inc     ARG2_LEN
+        ldx     ARG_PTR
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+        bra     SDFS_PARSE_COM_NAME_LOOP
+
+SDFS_PARSE_COM_EXT_START:
+        tst     ARG2_LEN
+        bne     SDFS_PARSE_COM_EXT_NAME_OK
+        jmp     SDFS_PARSE_COM_FAIL
+SDFS_PARSE_COM_EXT_NAME_OK:
+        ldx     ARG_PTR
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+        ldx     #FAT_FIND_NAME8
+        stx     FAT_ENTRY_PTR
+        clr     ARG2_LEN
+SDFS_PARSE_COM_EXT_LOOP:
+        tst     ARG_LEN
+        beq     SDFS_PARSE_COM_TOKEN_DONE
+        ldx     ARG_PTR
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        beq     SDFS_PARSE_COM_TOKEN_DONE
+        cmpa    #'.'
+        beq     SDFS_PARSE_COM_FAIL
+        ldab    ARG2_LEN
+        cmpb    #3
+        bhs     SDFS_PARSE_COM_FAIL
+        jsr     SDFS_TO_UPPER
+        ldx     FAT_ENTRY_PTR
+        staa    0,x
+        inx
+        stx     FAT_ENTRY_PTR
+        inc     ARG2_LEN
+        ldx     ARG_PTR
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+        bra     SDFS_PARSE_COM_EXT_LOOP
+
+SDFS_PARSE_COM_TOKEN_DONE:
+        jsr     SDFS_PARSE_COM_CHECK_EXT
+        bcs     SDFS_PARSE_COM_FAIL
+SDFS_PARSE_COM_ARG_SKIP:
+        tst     ARG_LEN
+        beq     SDFS_PARSE_COM_NO_ARGS
+        ldx     ARG_PTR
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        bne     SDFS_PARSE_COM_ARGS_DONE
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+        bra     SDFS_PARSE_COM_ARG_SKIP
+SDFS_PARSE_COM_ARGS_DONE:
+        ldx     ARG_PTR
+        stx     ARG2_PTR
+        ldaa    ARG_LEN
+        staa    ARG2_LEN
+        clc
+        rts
+SDFS_PARSE_COM_NO_ARGS:
+        ldx     ARG_PTR
+        stx     ARG2_PTR
+        clr     ARG2_LEN
+        clc
+        rts
+
+SDFS_PARSE_COM_CHECK_EXT:
+        ldaa    FAT_FIND_NAME8
+        cmpa    #'C'
+        bne     SDFS_PARSE_COM_CHECK_FAIL
+        ldaa    FAT_FIND_NAME9
+        cmpa    #'O'
+        bne     SDFS_PARSE_COM_CHECK_FAIL
+        ldaa    FAT_FIND_NAME10
+        cmpa    #'M'
+        bne     SDFS_PARSE_COM_CHECK_FAIL
+        clc
+        rts
+SDFS_PARSE_COM_CHECK_FAIL:
+        sec
+        rts
+SDFS_PARSE_COM_FAIL:
         sec
         rts
 
