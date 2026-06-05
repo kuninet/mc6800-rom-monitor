@@ -161,6 +161,21 @@ SDFS_TARGET := SDFS$(TARGET_SUFFIX)
 SDFS_OBJ := $(OUTDIR)/$(SDFS_TARGET).p
 SDFS_LST := $(OUTDIR)/$(SDFS_TARGET).lst
 SDFS_BIN := $(OUTDIR)/$(SDFS_TARGET).BIN
+SDFS_TOOLS_DIR := sdfs_tools
+SDFS_TOOL_HELLO_S_SRC := $(SDFS_TOOLS_DIR)/HELLO_S.ASM
+SDFS_TOOL_HELLO_COM_SRC := $(SDFS_TOOLS_DIR)/HELLO_COM.ASM
+SDFS_TOOL_ARGS_COM_SRC := $(SDFS_TOOLS_DIR)/ARGS_COM.ASM
+SDFS_TOOL_HELLO_S_OBJ := $(OUTDIR)/HELLO_S.p
+SDFS_TOOL_HELLO_S_LST := $(OUTDIR)/HELLO_S.lst
+SDFS_TOOL_HELLO_S := $(OUTDIR)/HELLO.S
+SDFS_TOOL_HELLO_COM_OBJ := $(OUTDIR)/HELLO_COM.p
+SDFS_TOOL_HELLO_COM_LST := $(OUTDIR)/HELLO_COM.lst
+SDFS_TOOL_HELLO_COM := $(OUTDIR)/HELLO.COM
+SDFS_TOOL_ARGS_COM_OBJ := $(OUTDIR)/ARGS_COM.p
+SDFS_TOOL_ARGS_COM_LST := $(OUTDIR)/ARGS_COM.lst
+SDFS_TOOL_ARGS_COM := $(OUTDIR)/ARGS.COM
+SDFS_TOOL_SREC := $(SDFS_TOOL_HELLO_S)
+SDFS_TOOL_COM := $(SDFS_TOOL_HELLO_COM) $(SDFS_TOOL_ARGS_COM)
 CONFIG_INC := $(OUTDIR)/monitor_config.inc
 ROM_KIND ?= 27C64
 ROM_FILL ?= 0xFF
@@ -216,7 +231,7 @@ endif
 
 ASL_INCLUDE := $(CURDIR)/$(OUTDIR)$(ASL_PATHSEP)$(CURDIR)/include$(ASL_PATHSEP)$(CURDIR)/src
 
-.PHONY: all clean bin check-rom-size srec ihex stage1 sdfs check-stage1-profile rombin rombin-27c64 rombin-27c128 rombin-27c256 rombin-28c256 rombin-w27c512 program verify readback program-27c64 program-27c128 program-27c256 program-28c256 program-w27c512 program-upd28c256 FORCE
+.PHONY: all clean bin check-rom-size srec ihex stage1 sdfs sdfs-tools sdfs-tools-srec sdfs-tools-com check-stage1-profile rombin rombin-27c64 rombin-27c128 rombin-27c256 rombin-28c256 rombin-w27c512 program verify readback program-27c64 program-27c128 program-27c256 program-28c256 program-w27c512 program-upd28c256 FORCE
 
 all: check-rom-size srec ihex
 
@@ -255,6 +270,30 @@ $(SDFS_OBJ): FORCE $(SDFS_TOPSRC) include/hardware.inc $(CONFIG_INC) | $(OUTDIR)
 
 $(SDFS_BIN): $(SDFS_OBJ)
 	"$(P2BIN)" $(SDFS_OBJ) $(SDFS_BIN) -q
+
+sdfs-tools: sdfs-tools-srec sdfs-tools-com
+
+sdfs-tools-srec: $(SDFS_TOOL_SREC)
+
+sdfs-tools-com: $(SDFS_TOOL_COM)
+
+$(SDFS_TOOL_HELLO_S_OBJ): $(SDFS_TOOL_HELLO_S_SRC) | $(OUTDIR)
+	"$(ASL)" -q -L -olist $(SDFS_TOOL_HELLO_S_LST) -o $(SDFS_TOOL_HELLO_S_OBJ) $(SDFS_TOOL_HELLO_S_SRC)
+
+$(SDFS_TOOL_HELLO_S): $(SDFS_TOOL_HELLO_S_OBJ)
+	"$(P2HEX)" $(SDFS_TOOL_HELLO_S_OBJ) $(SDFS_TOOL_HELLO_S) -q -F Moto -M 2
+
+$(SDFS_TOOL_HELLO_COM_OBJ): $(SDFS_TOOL_HELLO_COM_SRC) | $(OUTDIR)
+	"$(ASL)" -q -L -olist $(SDFS_TOOL_HELLO_COM_LST) -o $(SDFS_TOOL_HELLO_COM_OBJ) $(SDFS_TOOL_HELLO_COM_SRC)
+
+$(SDFS_TOOL_HELLO_COM): $(SDFS_TOOL_HELLO_COM_OBJ)
+	"$(P2BIN)" $(SDFS_TOOL_HELLO_COM_OBJ) $(SDFS_TOOL_HELLO_COM) -q
+
+$(SDFS_TOOL_ARGS_COM_OBJ): $(SDFS_TOOL_ARGS_COM_SRC) | $(OUTDIR)
+	"$(ASL)" -q -L -olist $(SDFS_TOOL_ARGS_COM_LST) -o $(SDFS_TOOL_ARGS_COM_OBJ) $(SDFS_TOOL_ARGS_COM_SRC)
+
+$(SDFS_TOOL_ARGS_COM): $(SDFS_TOOL_ARGS_COM_OBJ)
+	"$(P2BIN)" $(SDFS_TOOL_ARGS_COM_OBJ) $(SDFS_TOOL_ARGS_COM) -q
 
 srec: $(SREC)
 
