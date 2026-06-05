@@ -36,6 +36,7 @@ ROM常駐FATを確認したい場合は、profileではなく直接構成軸で 
 - [usage/sdfs68_system_sd.md](usage/sdfs68_system_sd.md): SDFS/68 と system SD の初期方針
 - [design/memory_map.md](design/memory_map.md)
 - [design/architecture.md](design/architecture.md)
+- [design/sdfs68_com_abi.md](design/sdfs68_com_abi.md): SDFS/68 `.COM` トランジェントコマンドABI
 - [plans/implementation_plan.md](plans/implementation_plan.md)
 - [plans/issue-103_mk_sdfs_image.md](plans/issue-103_mk_sdfs_image.md): SDFS/68 システムSDイメージ生成ツールの実装計画
 - [plans/issue-101_rom_stage1_boot.md](plans/issue-101_rom_stage1_boot.md): ROM固定LBA stage1 BOOT
