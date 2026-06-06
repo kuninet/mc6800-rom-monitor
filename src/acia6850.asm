@@ -28,10 +28,21 @@ ACIA_WAIT_RX:
 
 ACIA_PUTC:
         psha
+ if MONITOR_FEATURE_VDG
+        ldaa    ACIA_CTRL
+        bita    #ACIA_STAT_TDRE
+        beq     ACIA_PUTC_SKIP
+ else
         bsr     ACIA_WAIT_TX
+ endif
         pula
         staa    ACIA_DATA
         rts
+ if MONITOR_FEATURE_VDG
+ACIA_PUTC_SKIP:
+        pula
+        rts
+ endif
 
 ACIA_GETC:
         bsr     ACIA_WAIT_RX

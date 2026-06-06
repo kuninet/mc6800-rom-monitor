@@ -54,6 +54,7 @@ def run_emu(
     timeout: int = 10,
     key_input: str | None = None,
     dump_memory: str | None = None,
+    extra_args: list[str] | None = None,
 ):
     input_bytes = input_text.encode("ascii")
 
@@ -80,6 +81,8 @@ def run_emu(
             cmd.extend(["--key-input", key_input_file])
         if dump_memory is not None:
             cmd.extend(["--dump-memory", dump_memory])
+        if extra_args is not None:
+            cmd.extend(extra_args)
         result = subprocess.run(
             cmd,
             capture_output=True,
@@ -324,6 +327,30 @@ def test_vdg_console_mirrors_monitor_output():
     )
     assert f"{vram_prompt_line} 5D 60" in stdout, f"VDG console should mirror prompt: {stdout!r}"
     print("[PASS] test_vdg_console_mirrors_monitor_output")
+
+
+def test_vdg_console_progresses_when_uart_tx_not_ready():
+    if not is_vdg_build():
+        print("[PASS] test_vdg_console_progresses_when_uart_tx_not_ready")
+        return
+    vram_start = vdg_addr(0)
+    vram_dump_end = vdg_addr(0x2F)
+    vram_prompt_line = vdg_addr(0x20)
+    stdout, stderr, rc = run_emu(
+        "\r",
+        max_cycles=10_000_000,
+        dump_memory=f"{vram_start}-{vram_dump_end}",
+        extra_args=["--acia-tdre-stuck-low"],
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert "MC6800 MONITOR" not in stdout, f"UART output should be blocked in this fixture: {stdout!r}"
+    assert f"{vram_start} 4D 43 76 78 70 70 60 4D 4F 4E 49 54 4F 52" in stdout, (
+        f"VDG console should show startup banner without UART TX ready: {stdout!r}"
+    )
+    assert f"{vram_prompt_line} 5D 60" in stdout, (
+        f"VDG console should reach prompt without UART TX ready: {stdout!r}"
+    )
+    print("[PASS] test_vdg_console_progresses_when_uart_tx_not_ready")
 
 
 def test_vdg_console_mirrors_dump_output():
@@ -723,6 +750,7 @@ def main():
         test_map_command,
         test_diagnostic_commands_are_externalized,
         test_vdg_console_mirrors_monitor_output,
+        test_vdg_console_progresses_when_uart_tx_not_ready,
         test_vdg_console_mirrors_dump_output,
         test_vdg_console_mirrors_modify_prompt,
         test_vdg_console_crlf_does_not_double_newline,
