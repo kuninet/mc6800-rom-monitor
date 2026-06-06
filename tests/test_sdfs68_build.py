@@ -239,6 +239,43 @@ def test_sdfs_dir_lists_root_files_and_skips_non_files() -> None:
     print("[PASS] test_sdfs_dir_lists_root_files_and_skips_non_files")
 
 
+def test_sdfs_vdg_dir_does_not_insert_blank_line_after_command() -> None:
+    profile = "sbcio_vdg"
+    expected = EXPECTED[profile]
+    _run_make(profile, "bin")
+    _run_make(profile, "stage1")
+    _run_make(profile, "sdfs")
+    suffix = expected["suffix"]
+    stage1 = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+    sdfs = (PROJECT_ROOT / "build" / f"SDFS{suffix}.BIN").read_bytes()
+    image = build_sdfs_image(
+        stage1_data=stage1,
+        sdfs_data=sdfs,
+        extra_files=[_file("HELLO.S", _srec_file(0x0200, b"S"))],
+    )
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
+        input_text="BOOT\rDIR\rX",
+        sd_image=image,
+        max_cycles=160_000_000,
+        extra_args=["--dump-memory", "A000-A1FF"],
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, (
+        f"emulator failed for {profile}: rc={rc} stderr={stderr!r}"
+    )
+    lines = _vdg_text_lines(stdout, start=0xA000, end=0xA1FF)
+    dir_line = next((idx for idx, line in enumerate(lines) if "SDFS> DIR" in line), -1)
+    assert dir_line >= 0, f"VDG DIR command line missing: {lines!r} stdout={stdout!r}"
+    assert dir_line + 1 < len(lines), f"VDG DIR command was on final line: {lines!r}"
+    assert lines[dir_line + 1].strip(), (
+        f"VDG inserted a blank line after DIR command: {lines!r} stdout={stdout!r}"
+    )
+    assert "SDFS.BIN" in "\n".join(lines[dir_line + 1:]), (
+        f"VDG DIR output did not follow command line: {lines!r} stdout={stdout!r}"
+    )
+    print("[PASS] test_sdfs_vdg_dir_does_not_insert_blank_line_after_command")
+
+
 def test_sdfs_dir_scans_root_chain() -> None:
     profile = "sbcio_vdg"
     _run_make(profile, "bin")
@@ -761,6 +798,7 @@ def _run_emu_with_sd(
     input_text: str,
     sd_image: bytes,
     max_cycles: int,
+    extra_args: list[str] | None = None,
 ) -> tuple[str, str, int]:
     with tempfile.NamedTemporaryFile(suffix=".img", delete=False) as sd_file:
         sd_file.write(sd_image)
@@ -770,7 +808,7 @@ def _run_emu_with_sd(
             rom_path=rom_path,
             input_text=input_text,
             max_cycles=max_cycles,
-            extra_args=["--sd", str(sd_path)],
+            extra_args=["--sd", str(sd_path), *(extra_args or [])],
         )
     finally:
         sd_path.unlink(missing_ok=True)
@@ -814,6 +852,44 @@ def _run_emu(
 
 def _hex_bytes(values: list[int]) -> str:
     return "\r".join(f"{value:02X}" for value in values)
+
+
+def _vdg_text_lines(stdout: str, *, start: int, end: int) -> list[str]:
+    data: list[int] = []
+    for line in stdout.splitlines():
+        match = re.search(
+            r"\b([0-9A-Fa-f]{4})\s+((?:[0-9A-Fa-f]{2}\s+){15}[0-9A-Fa-f]{2})\b",
+            line,
+        )
+        if not match:
+            continue
+        addr = int(match.group(1), 16)
+        if not (start <= addr <= end):
+            continue
+        hex_values = match.group(2).split()
+        for value in hex_values[:16]:
+            try:
+                data.append(int(value, 16))
+            except ValueError:
+                break
+    expected_len = end - start + 1
+    assert len(data) >= expected_len, f"missing VDG memory dump: got={len(data)} stdout={stdout!r}"
+    data = data[:expected_len]
+    lines = []
+    for offset in range(0, expected_len, 0x20):
+        row = data[offset:offset + 0x20]
+        lines.append("".join(_vdg_code_to_ascii(value) for value in row).rstrip())
+    return lines
+
+
+def _vdg_code_to_ascii(value: int) -> str:
+    if value == 0x20:
+        return " "
+    if 0x60 <= value <= 0x7F:
+        return chr(value - 0x40)
+    if 0x20 <= value <= 0x5F:
+        return chr(value)
+    return " "
 
 
 def _file(name: str, data: bytes) -> Fat32File:
@@ -937,6 +1013,7 @@ def main() -> None:
         test_stage1_boot_runs_built_sdfs_binary,
         test_sdfs_loads_srec_and_ihex_files,
         test_sdfs_dir_lists_root_files_and_skips_non_files,
+        test_sdfs_vdg_dir_does_not_insert_blank_line_after_command,
         test_sdfs_dir_scans_root_chain,
         test_sdfs_dir_returns_prompt_on_empty_followup_root_cluster,
         test_sdfs_dir_requires_exact_command_and_dump_still_works,

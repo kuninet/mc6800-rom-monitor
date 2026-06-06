@@ -1286,6 +1286,8 @@ VDG_PUTC_LF_NEWLINE:
         jsr     VDG_NEWLINE
         bra     VDG_PUTC_DONE
 VDG_PUTC_CR:
+        tst     VDG_LAST_CR
+        bne     VDG_PUTC_DONE
         jsr     VDG_NEWLINE
         ldaa    #1
         staa    VDG_LAST_CR
