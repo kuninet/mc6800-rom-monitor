@@ -199,6 +199,10 @@ ROM E000-FFFF
 `FEATURE_VDG=1` のROMでは、起動メッセージ、プロンプト、通常の文字出力をUARTとK68-VDG画面の両方へ出す。
 K68-VDG の設定レジスタは `$8110`、VRAMは `sbcio_vdg` で `$A000-$BFFF`、`k6802_vdg` で `$C000-$DFFF` を使う。
 
+VDG有効ROMでは、32桁画面向けの短幅ダンプ `DS` も使える。
+`DS`、`DS0100`、`DS0100-011F` の形式で、1行はアドレスと8 byte分のHEXだけを表示し、ASCII欄は出さない。
+表示は `0100 00 01 02 03 04 05 06 07` のように32桁以内へ収める。
+
 ROM容量を節約するため、画面クリアと固定文字列表示だけの `VDGTEST` コマンドはROMから外した。
 必要な場合は `diagnostics/VDGA000.S` または `diagnostics/VDGC000.S` をSDへ置き、SDFS/68から `RUN` する。
 
