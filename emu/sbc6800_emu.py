@@ -76,10 +76,11 @@ def _print_memory_dump(mem, start, end):
 class ACIA:
     """MC6850 ACIA の擬似実装（標準入出力をシリアル端末として扱う）"""
 
-    def __init__(self, input_data=None, exit_on_eof=None):
+    def __init__(self, input_data=None, exit_on_eof=None, tx_ready=True):
         self._input_buf = []
         self._input_data = input_data  # スクリプト入力用
         self._input_pos = 0
+        self._tx_ready = tx_ready
         self._interactive = input_data is None
         self._exit_on_eof = input_data is not None if exit_on_eof is None else exit_on_eof
         self._old_termios = None
@@ -96,7 +97,7 @@ class ACIA:
         """ACIA ステータスレジスタを読む"""
         if self._exit_on_eof and self._input_data is not None and self._input_pos >= len(self._input_data):
             raise SystemExit(0)
-        status = ACIA_STAT_TDRE  # 送信は常にレディ
+        status = ACIA_STAT_TDRE if self._tx_ready else 0
         if self._has_input():
             status |= ACIA_STAT_RDRF
         return status
@@ -133,6 +134,8 @@ class ACIA:
 
     def write_data(self, value):
         """ACIA データレジスタへ書く（1文字送信）"""
+        if not self._tx_ready:
+            return
         ch = chr(value & 0x7F)
         sys.stdout.write(ch)
         sys.stdout.flush()
@@ -1675,6 +1678,8 @@ def main():
                         help="2nd ACIA keyboard input script file")
     parser.add_argument("--dump-memory",
                         help="終了時に指定範囲のメモリを16進ダンプする。例: A000-A03F")
+    parser.add_argument("--acia-tdre-stuck-low", action="store_true",
+                        help="1st ACIAの送信レディを常に0として扱う")
     args = parser.parse_args()
 
     # ROM ロード
@@ -1691,7 +1696,7 @@ def main():
         with open(args.key_input, "rb") as f:
             key_input_data = list(f.read())
 
-    acia = ACIA(input_data=input_data)
+    acia = ACIA(input_data=input_data, tx_ready=not args.acia_tdre_stuck_low)
     acia2 = ACIA(input_data=key_input_data or [], exit_on_eof=False)
     sdcard = SDCard.from_file(args.sd) if args.sd else None
     pia = PIA(sdcard) if sdcard is not None else None
