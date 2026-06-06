@@ -81,6 +81,12 @@ MAIN_LOOP:
         ldaa    LINE_BUF
         cmpa    #'D'
         bne     CHK_CMD_MOD
+ if MONITOR_FEATURE_VDG
+        jsr     IS_CMD_DS
+        bcs     MAIN_DISPATCH_NOT_DS
+        jmp     CMD_DUMP_SHORT
+MAIN_DISPATCH_NOT_DS:
+ endif
  if MONITOR_FEATURE_FAT
         jsr     IS_CMD_DIR
         bcs     MAIN_DISPATCH_DUMP
@@ -161,6 +167,21 @@ IS_CMD_DIR:
         clc
         rts
 IS_CMD_DIR_FAIL:
+        sec
+        rts
+ endif
+
+ if MONITOR_FEATURE_VDG
+IS_CMD_DS:
+        ldab    LINE_LEN
+        cmpb    #2
+        blo     IS_CMD_DS_FAIL
+        ldaa    LINE_BUF+1
+        cmpa    #'S'
+        bne     IS_CMD_DS_FAIL
+        clc
+        rts
+IS_CMD_DS_FAIL:
         sec
         rts
  endif
@@ -251,13 +272,35 @@ CMD_DUMP_NOARG:
         stx     DUMP_END
         jsr     SET_DUMP_END_64
 CMD_DUMP_SHOW:
+        ldab    #16
+        stab    ARG2_LEN
         jsr     DUMP_RANGE
         jmp     MAIN_LOOP
+
+ if MONITOR_FEATURE_VDG
+CMD_DUMP_SHORT:
+        ldab    LINE_LEN
+        cmpb    #2
+        beq     CMD_DUMP_SHORT_NOARG
+        jsr     PARSE_DUMP_SHORT_ARGS
+        bcc     CMD_DUMP_SHORT_SHOW
+        jmp     MAIN_LOOP_ERROR
+CMD_DUMP_SHORT_NOARG:
+        ldx     DUMP_ADDR
+        stx     DUMP_END
+        jsr     SET_DUMP_END_64
+CMD_DUMP_SHORT_SHOW:
+        ldab    #8
+        stab    ARG2_LEN
+        jsr     DUMP_RANGE
+        jmp     MAIN_LOOP
+ endif
 
 DUMP_RANGE:
         ldx     DUMP_ADDR
         jsr     CMP_X_DUMP_END
-        bhi     DUMP_RANGE_DONE
+        bls     DUMP_RANGE_LINE
+        rts
 DUMP_RANGE_LINE:
         ldx     DUMP_ADDR
         stx     LINE_PTR
@@ -267,7 +310,7 @@ DUMP_COUNT_LOOP:
         jsr     CMP_X_DUMP_END
         bhi     DUMP_COUNT_DONE
         ldab    DUMP_COUNT
-        cmpb    #16
+        cmpb    ARG2_LEN
         bhs     DUMP_COUNT_DONE
         inc     DUMP_COUNT
         ldx     DUMP_ADDR
@@ -294,6 +337,9 @@ CMD_DUMP_HEX_LOOP:
         bra     CMD_DUMP_HEX_LOOP
 CMD_DUMP_HEX_DONE:
 
+        ldab    ARG2_LEN
+        cmpb    #16
+        bne     CMD_DUMP_ASCII_DONE
         jsr     PRINT_SPACE
 
         ldx     LINE_PTR
@@ -322,7 +368,8 @@ CMD_DUMP_ASCII_DONE:
         beq     DUMP_RANGE_DONE
         ldx     DUMP_ADDR
         jsr     CMP_X_DUMP_END
-        bls     DUMP_RANGE_LINE
+        bhi     DUMP_RANGE_DONE
+        jmp     DUMP_RANGE_LINE
 DUMP_RANGE_DONE:
         rts
 
@@ -332,6 +379,7 @@ PARSE_DUMP_ARGS:
         ldab    LINE_LEN
         decb
         stab    ARG_LEN
+PARSE_DUMP_ARGS_READY:
         clr     ARG2_LEN
 PARSE_DUMP_SCAN:
         tstb
@@ -405,6 +453,17 @@ PARSE_DUMP_RANGE:
 PARSE_DUMP_FAIL:
         sec
         rts
+
+ if MONITOR_FEATURE_VDG
+PARSE_DUMP_SHORT_ARGS:
+        ldx     #LINE_BUF+2
+        stx     ARG_PTR
+        ldab    LINE_LEN
+        decb
+        decb
+        stab    ARG_LEN
+        jmp     PARSE_DUMP_ARGS_READY
+ endif
 
 PARSE_FILL_ARGS:
         stx     ARG_PTR

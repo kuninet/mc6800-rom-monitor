@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -126,6 +127,39 @@ def test_dump_range_command():
     assert "FFF0" in stdout, f"missing high-end range dump: {stdout!r}"
     assert stdout.count("?") >= 2, f"missing invalid range errors: {stdout!r}"
     print("[PASS] test_dump_range_command")
+
+
+def test_short_dump_command():
+    if not is_vdg_build():
+        print("[PASS] test_short_dump_command")
+        return
+    stdout, stderr, rc = run_emu("DS0100\rDS0100-011F\rDSXYZ\r\r")
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    dump_lines = [
+        line
+        for line in stdout.splitlines()
+        if re.match(r"^[0-9A-F]{4}(?: [0-9A-F]{2}){1,8}\s*$", line)
+    ]
+    assert any(line.startswith("0100 ") for line in dump_lines), f"missing DS0100 line: {stdout!r}"
+    assert any(line.startswith("0118 ") for line in dump_lines), f"missing final DS range line: {stdout!r}"
+    assert all(len(line) <= 32 for line in dump_lines), f"DS line exceeded 32 columns: {dump_lines!r}"
+    assert stdout.count("?") >= 1, f"bad DS argument should show error: {stdout!r}"
+
+    vram_start = vdg_addr(0)
+    vram_dump_end = vdg_addr(0x7F)
+    stdout, stderr, rc = run_emu(
+        "DS0100\r\r",
+        max_cycles=10_000_000,
+        dump_memory=f"{vram_start}-{vram_dump_end}",
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert f"{vdg_addr(0x40)} 70 71 70 70 60" in stdout, (
+        f"VDG DS line should start at one row: {stdout!r}"
+    )
+    assert f"{vdg_addr(0x60)} 70 71 70 78 60" in stdout, (
+        f"VDG DS output should advance to next row without wrapping: {stdout!r}"
+    )
+    print("[PASS] test_short_dump_command")
 
 
 def test_modify_and_dump():
@@ -714,6 +748,7 @@ def main():
         test_boot_prompt,
         test_dump_command,
         test_dump_range_command,
+        test_short_dump_command,
         test_modify_and_dump,
         test_go_swi_return,
         test_srec_load,
