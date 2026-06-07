@@ -55,7 +55,8 @@ VDGはSBC-IOとは独立した外部表示装備として扱い、VRAM範囲は 
 
 ただし、I2CはRTC、EEPROM、OLED/LCDなど個別デバイス処理を含めるとROM容量を急速に消費する。8KB ROM互換を維持する間は、`FEATURE_I2C=1` を「I2C関連コードを無条件にROMへ押し込む入口」として使わない。ROM側へ入れる場合でも、最小BOOTや診断用の薄い入口に限定し、I2Cバスドライバ本体や個別デバイス機能はシリアル `L`、ROM常駐FATがある構成の `LF`、または `SDFS.BIN` など第2段のRAMロード機能として検証する。
 
-`FEATURE_SD=1` はraw SD sector readと固定LBA stage1 `BOOT` の前提を表す。ROM常駐のFAT32 `DIR` / `LF` は `FEATURE_FAT=1` として分ける。標準profileではROM容量確保と責務整理のため `FEATURE_FAT=0` を基本にし、`base` / `sbcio` は `FEATURE_SD=0`、VDG付きprofileだけを `FEATURE_SD=1` / `FEATURE_FAT=0` にする。
+`FEATURE_SD=1` はraw SD sector readと固定LBA stage1 `BOOT` の前提を表す。ROM常駐のFAT32 `DIR` / `LF` は `FEATURE_FAT=1` として分ける。標準profileではROM容量確保と責務整理のため `FEATURE_FAT=0` を基本にし、`base` / `sbcio` は `FEATURE_SD=0`、VDG付きprofileは `FEATURE_SD=1` / `FEATURE_FAT=0` にする。
+ただし、stage1 / SDFS/68生成可否はprofile名ではなく構成軸で判断する。`BOARD_IO=sbcio`、`FEATURE_SD=1`、`MEMORY_CONFIG=ram64_c000_work` または `ram64_a000_work` の組み合わせなら、VDGなしのSBC-IO構成でも `BOOT + SDFS/68` 用のROM、stage1、`SDFS.BIN` を生成できる。
 
 ## 既存profileの展開
 
@@ -106,6 +107,12 @@ make bin MEMORY_CONFIG=ram64_a000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_FAT=0
 不正な組み合わせはMake時に失敗させる。
 `FEATURE_SD=1`、`FEATURE_KEYBOARD=1`、`FEATURE_I2C=1` は `BOARD_IO=sbcio` を必須とする。
 `FEATURE_VDG=1` は `VDG_VRAM_CONFIG` の明示的な配置を使う。
+`make stage1` / `make sdfs` は `FEATURE_SD=1`、`BOARD_IO=sbcio`、stage1対応RAM配置を必須にする。
+標準 `sbcio` profileはSDなしのまま維持し、VDGなしSDFS/68構成を試す場合は次のように軸指定で有効化する。
+
+```sh
+MONITOR_PROFILE=sbcio FEATURE_SD=1 FEATURE_FAT=0 BUILD_CONFIG_NAME=sbcio-sdfs make bin stage1 sdfs
+```
 
 アセンブル時には、Makefileが `build/monitor_config.inc` を生成し、ROM本体はこの生成ファイルだけをincludeする。
 過去の `include/profiles/*.inc` はprofileプリセットのコピー元としては使わない。

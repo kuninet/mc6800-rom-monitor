@@ -109,7 +109,10 @@ ROM_CODE_LIMIT=0 make bin
 
 ## SDFS/68 stage1
 
-`stage1` ターゲットは SDFS/68 の固定LBA boot areaへ置くstage1 loaderを単体生成する。対象は当面 `sbcio_vdg` と `k6802_vdg` だけで、`base` profileでは生成しない。
+`stage1` ターゲットは SDFS/68 の固定LBA boot areaへ置くstage1 loaderを単体生成する。
+生成可否はprofile名ではなく構成軸で決まる。
+`FEATURE_SD=1`、`BOARD_IO=sbcio`、stage1対応RAM配置である `MEMORY_CONFIG=ram64_c000_work` または `ram64_a000_work` の組み合わせで有効になる。
+`base` profileや `FEATURE_SD=0` の構成では生成しない。
 
 ```sh
 MONITOR_PROFILE=sbcio_vdg make stage1
@@ -118,18 +121,33 @@ MONITOR_PROFILE=sbcio_vdg make sdfs
 MONITOR_PROFILE=k6802_vdg make sdfs
 ```
 
+VDGなしのSBC-IOでSDFS/68を使う場合は、標準 `sbcio` profileを直接変更せず、構成軸で `FEATURE_SD=1` を明示する。
+出力名を短く安定させるため、`BUILD_CONFIG_NAME` を付ける。
+
+```sh
+MONITOR_PROFILE=sbcio FEATURE_SD=1 FEATURE_FAT=0 BUILD_CONFIG_NAME=sbcio-sdfs make bin
+MONITOR_PROFILE=sbcio FEATURE_SD=1 FEATURE_FAT=0 BUILD_CONFIG_NAME=sbcio-sdfs make stage1
+MONITOR_PROFILE=sbcio FEATURE_SD=1 FEATURE_FAT=0 BUILD_CONFIG_NAME=sbcio-sdfs make sdfs
+```
+
 主な出力:
 
-| profile | 出力 |
+| 構成 | 出力 |
 | --- | --- |
 | `sbcio_vdg` | `build/stage1-sbcio-vdg.bin` |
 | `k6802_vdg` | `build/stage1-k6802-vdg.bin` |
+| `sbcio` + `FEATURE_SD=1 BUILD_CONFIG_NAME=sbcio-sdfs` | `build/stage1-sbcio-sdfs.bin` |
 
-stage1 v1の配置は、`sbcio_vdg` が `$C400-$CFFF`、`k6802_vdg` が `$A400-$AFFF` である。SDFS/68本体の初期ロード領域はそれぞれ `$D000-$DEFF`、`$B000-$BEFF` とする。
+stage1 v1の配置は、`MEMORY_CONFIG=ram64_c000_work` が `$C400-$CFFF`、`MEMORY_CONFIG=ram64_a000_work` が `$A400-$AFFF` である。
+SDFS/68本体の初期ロード領域はそれぞれ `$D000-$DEFF`、`$B000-$BEFF` とする。
 
-`sdfs` ターゲットは FAT root の `SDFS.BIN` として配置するSDFS/68本体を生成する。出力はprofile suffix付きの `build/SDFS-sbcio-vdg.BIN` / `build/SDFS-k6802-vdg.BIN` で、SDイメージ作成時に root の8.3名 `SDFS.BIN` として格納する。
+`sdfs` ターゲットは FAT root の `SDFS.BIN` として配置するSDFS/68本体を生成する。
+出力はsuffix付きの `build/SDFS-sbcio-vdg.BIN`、`build/SDFS-k6802-vdg.BIN`、`build/SDFS-sbcio-sdfs.BIN` などで、SDイメージ作成時に root の8.3名 `SDFS.BIN` として格納する。
 
-ROM profileでは `FEATURE_SD` と `FEATURE_FAT` を分ける。`FEATURE_SD=1` はraw SD sector readと `BOOT` の前提、`FEATURE_FAT=1` はROM常駐の `DIR` / `LF` を含める設定である。標準profileではROM FATを外し、`sbcio_vdg` / `k6802_vdg` だけを固定LBA stage1 `BOOT` に寄せる。ROM FAT互換を確認したい場合は、直接指定ビルドで `FEATURE_SD=1 FEATURE_FAT=1` を指定する。
+ROM profileでは `FEATURE_SD` と `FEATURE_FAT` を分ける。
+`FEATURE_SD=1` はraw SD sector readと `BOOT` の前提、`FEATURE_FAT=1` はROM常駐の `DIR` / `LF` を含める設定である。
+標準profileではROM FATを外し、`sbcio_vdg` / `k6802_vdg` と、必要に応じた軸指定 `sbcio FEATURE_SD=1` を固定LBA stage1 `BOOT` に寄せる。
+ROM FAT互換を確認したい場合は、直接指定ビルドで `FEATURE_SD=1 FEATURE_FAT=1` を指定する。
 stage1と `SDFS.BIN` はROMモニタの一部ではなく、system SD側へ置く別成果物である。
 
 ## ROM_KIND

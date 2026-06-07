@@ -40,12 +40,65 @@ EXPECTED = {
     },
 }
 
+SBCIO_SD_AXIS = {
+    "profile": "sbcio",
+    "suffix": "-sbcio-sdfs",
+    "SDFS_LOAD_BASE": 0xD000,
+    "SDFS_LOAD_LIMIT": 0xDEFF,
+    "make_args": [
+        "FEATURE_SD=1",
+        "FEATURE_FAT=0",
+        "BUILD_CONFIG_NAME=sbcio-sdfs",
+    ],
+}
+
 
 def test_sdfs_rejects_base_profile() -> None:
     result = _run_make("base", "sdfs", expect_success=False)
     assert result.returncode != 0
-    assert "stage1 target requires" in result.stdout or "stage1 target requires" in result.stderr
+    assert "FEATURE_SD=1" in result.stdout or "FEATURE_SD=1" in result.stderr
     print("[PASS] test_sdfs_rejects_base_profile")
+
+
+def test_sdfs_accepts_sd_axis_without_vdg() -> None:
+    config = SBCIO_SD_AXIS
+    make_args = config["make_args"]
+    _run_make(config["profile"], "bin", make_args=make_args)
+    _run_make(config["profile"], "stage1", make_args=make_args)
+    _run_make(config["profile"], "sdfs", make_args=make_args)
+    suffix = config["suffix"]
+    rom_path = PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin"
+    stage1_path = PROJECT_ROOT / "build" / f"stage1{suffix}.bin"
+    sdfs_path = PROJECT_ROOT / "build" / f"SDFS{suffix}.BIN"
+    lst_path = PROJECT_ROOT / "build" / f"SDFS{suffix}.lst"
+    assert rom_path.exists(), f"missing axis ROM: {rom_path}"
+    assert stage1_path.exists(), f"missing axis stage1: {stage1_path}"
+    assert sdfs_path.exists(), f"missing axis SDFS: {sdfs_path}"
+    symbols = _load_symbols(
+        lst_path,
+        "SDFS_LOAD_BASE",
+        "SDFS_LOAD_LIMIT",
+    )
+    assert symbols["SDFS_LOAD_BASE"] == config["SDFS_LOAD_BASE"]
+    assert symbols["SDFS_LOAD_LIMIT"] == config["SDFS_LOAD_LIMIT"]
+
+    image = build_sdfs_image(
+        stage1_data=stage1_path.read_bytes(),
+        sdfs_data=sdfs_path.read_bytes(),
+        extra_files=[],
+    )
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=rom_path,
+        input_text="BOOT\rEXIT\r",
+        sd_image=image,
+        max_cycles=40_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, (
+        f"emulator failed for sbcio SD axis: rc={rc} stderr={stderr!r}"
+    )
+    assert "SDFS/68 V1.2 #150" in stdout, f"missing SDFS banner: {stdout!r}"
+    assert "SDFS> " in stdout, f"missing SDFS prompt: {stdout!r}"
+    print("[PASS] test_sdfs_accepts_sd_axis_without_vdg")
 
 
 def test_sdfs_profiles_build_and_match_header() -> None:
@@ -775,9 +828,10 @@ def _run_make(
     profile: str,
     target: str,
     expect_success: bool = True,
+    make_args: list[str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
-        ["make", target, f"MONITOR_PROFILE={profile}"],
+        ["make", target, f"MONITOR_PROFILE={profile}", *(make_args or [])],
         cwd=PROJECT_ROOT,
         capture_output=True,
         text=True,
@@ -1008,6 +1062,7 @@ def main() -> None:
     print("=" * 50)
     tests = [
         test_sdfs_rejects_base_profile,
+        test_sdfs_accepts_sd_axis_without_vdg,
         test_sdfs_profiles_build_and_match_header,
         test_sdfs_api_wrappers_target_stage1_jump_table,
         test_stage1_boot_runs_built_sdfs_binary,
