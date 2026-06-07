@@ -206,13 +206,28 @@ def test_error_display():
 def test_help_command():
     stdout, stderr, rc = run_emu("H\r\r")
     if is_fat_build():
-        expected = "D DIR M MAP RAMTEST G L LF BOOT B C R U H F"
+        if is_vdg_build():
+            expected = "D DS DIR M MAP RAMTEST G L LF BOOT B C R U UW H F"
+        else:
+            expected = "D DIR M MAP RAMTEST G L LF BOOT B C R U H F"
     elif is_sd_build():
-        expected = "D M MAP RAMTEST G L BOOT B C R U H F"
+        if is_vdg_build():
+            expected = "D DS M MAP RAMTEST G L BOOT B C R U UW H F"
+        else:
+            expected = "D M MAP RAMTEST G L BOOT B C R U H F"
     else:
-        expected = "D M MAP RAMTEST G L B C R U H F"
+        if is_vdg_build():
+            expected = "D DS M MAP RAMTEST G L B C R U UW H F"
+        else:
+            expected = "D M MAP RAMTEST G L B C R U H F"
     assert expected in stdout, f"missing help command list: {stdout!r}"
     print("[PASS] test_help_command")
+
+
+def expected_help_prefix() -> str:
+    if is_vdg_build():
+        return "D DS M MAP RAMTEST G L"
+    return "D M MAP RAMTEST G L"
 
 
 def is_sbcio_build() -> bool:
@@ -387,6 +402,35 @@ def test_vdg_console_progresses_when_uart_tx_not_ready():
     print("[PASS] test_vdg_console_progresses_when_uart_tx_not_ready")
 
 
+def test_vdg_uart_wait_command_toggles_state():
+    if not is_vdg_build():
+        print("[PASS] test_vdg_uart_wait_command_toggles_state")
+        return
+    stdout, stderr, rc = run_emu("UW\rUW ON\rUW\rUW OFF\rUW\r\r", max_cycles=10_000_000)
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert stdout.count("UW OFF") >= 2, f"UW should default to OFF and return to OFF: {stdout!r}"
+    assert "UW ON" in stdout, f"UW ON should enable UART wait mode: {stdout!r}"
+    print("[PASS] test_vdg_uart_wait_command_toggles_state")
+
+
+def test_vdg_uart_wait_on_blocks_when_uart_tx_not_ready():
+    if not is_vdg_build():
+        print("[PASS] test_vdg_uart_wait_on_blocks_when_uart_tx_not_ready")
+        return
+    stdout, stderr, rc = run_emu(
+        "\r",
+        key_input="UW ON\r",
+        max_cycles=1_000_000,
+        timeout=5,
+        extra_args=["--acia-tdre-stuck-low"],
+    )
+    assert rc == 0 and "サイクル上限" in stderr, (
+        f"UW ON should wait for TDRE and hit emulator cycle limit: rc={rc} stderr={stderr!r} stdout={stdout!r}"
+    )
+    assert "UW ON" not in stdout, f"UART output should remain blocked while TDRE is stuck low: {stdout!r}"
+    print("[PASS] test_vdg_uart_wait_on_blocks_when_uart_tx_not_ready")
+
+
 def test_vdg_console_mirrors_dump_output():
     if not is_vdg_build():
         print("[PASS] test_vdg_console_mirrors_dump_output")
@@ -495,7 +539,7 @@ def test_keyboard_console_accepts_key_input_only():
         return
     stdout, stderr, rc = run_emu("\r", key_input="H\r", max_cycles=10_000_000)
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
-    assert "D M MAP RAMTEST G L" in stdout, f"keyboard input should run H command: {stdout!r}"
+    assert expected_help_prefix() in stdout, f"keyboard input should run H command: {stdout!r}"
     print("[PASS] test_keyboard_console_accepts_key_input_only")
 
 
@@ -511,7 +555,7 @@ def test_keyboard_console_prefers_key_input_over_uart():
         map_pos = stdout.find("MAP SBCIO")
     else:
         map_pos = stdout.find("MAP BASE")
-    help_pos = stdout.find("D M MAP RAMTEST G L")
+    help_pos = stdout.find(expected_help_prefix())
     assert map_pos >= 0, f"keyboard MAP command should run: {stdout!r}"
     assert help_pos >= 0, f"UART H command should still run after key input: {stdout!r}"
     assert map_pos < help_pos, f"keyboard input should be consumed before UART input: {stdout!r}"
@@ -524,7 +568,7 @@ def test_keyboard_console_falls_back_to_uart_when_key_empty():
         return
     stdout, stderr, rc = run_emu("H\r\r", key_input="", max_cycles=10_000_000)
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
-    assert "D M MAP RAMTEST G L" in stdout, f"UART input should work when key input is empty: {stdout!r}"
+    assert expected_help_prefix() in stdout, f"UART input should work when key input is empty: {stdout!r}"
     print("[PASS] test_keyboard_console_falls_back_to_uart_when_key_empty")
 
 
@@ -534,7 +578,7 @@ def test_keyboard_console_line_editing_from_key_input():
         return
     stdout, stderr, rc = run_emu("\r", key_input="HX\b\r", max_cycles=10_000_000)
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
-    assert "D M MAP RAMTEST G L" in stdout, f"keyboard BS editing should leave H command: {stdout!r}"
+    assert expected_help_prefix() in stdout, f"keyboard BS editing should leave H command: {stdout!r}"
     assert "\b \b" in stdout, f"keyboard BS should emit visible erase sequence: {stdout!r}"
     print("[PASS] test_keyboard_console_line_editing_from_key_input")
 
@@ -786,6 +830,8 @@ def main():
         test_diagnostic_commands_are_externalized,
         test_vdg_console_mirrors_monitor_output,
         test_vdg_console_progresses_when_uart_tx_not_ready,
+        test_vdg_uart_wait_command_toggles_state,
+        test_vdg_uart_wait_on_blocks_when_uart_tx_not_ready,
         test_vdg_console_mirrors_dump_output,
         test_vdg_console_mirrors_modify_prompt,
         test_vdg_console_crlf_does_not_double_newline,
