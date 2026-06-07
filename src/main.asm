@@ -65,6 +65,7 @@ RESET:
 RESET_NO_KEYBOARD:
  endif
  if MONITOR_FEATURE_VDG
+        clr     ACIA_TX_WAIT
         jsr     VDG_INIT
  endif
         ldx     #TXT_WELCOME
@@ -137,6 +138,12 @@ CHK_CMD_CLEAR:
 CHK_CMD_UNASM:
         cmpa    #'U'
         bne     CHK_CMD_HELP
+ if MONITOR_FEATURE_VDG
+        jsr     IS_CMD_UW
+        bcs     MAIN_DISPATCH_UNASM
+        jmp     CMD_UART_WAIT
+MAIN_DISPATCH_UNASM:
+ endif
         jmp     CMD_UNASM
 CHK_CMD_HELP:
         cmpa    #'H'
@@ -151,7 +158,7 @@ CHK_CMD_AFTER_FILL:
 
 MAIN_LOOP_ERROR:
         jsr     SHOW_ERROR
-        bra     MAIN_LOOP
+        jmp     MAIN_LOOP
 
  if MONITOR_FEATURE_FAT
 IS_CMD_DIR:
@@ -182,6 +189,19 @@ IS_CMD_DS:
         clc
         rts
 IS_CMD_DS_FAIL:
+        sec
+        rts
+
+IS_CMD_UW:
+        ldab    LINE_LEN
+        cmpb    #2
+        blo     IS_CMD_UW_FAIL
+        ldaa    LINE_BUF+1
+        cmpa    #'W'
+        bne     IS_CMD_UW_FAIL
+        clc
+        rts
+IS_CMD_UW_FAIL:
         sec
         rts
  endif
@@ -975,6 +995,61 @@ RESTORE_BREAKPOINT:
         staa    0,x
         clr     BP_ACTIVE
         rts
+
+ if MONITOR_FEATURE_VDG
+CMD_UART_WAIT:
+        ldab    LINE_LEN
+        cmpb    #2
+        beq     CMD_UART_WAIT_SHOW
+        cmpb    #5
+        beq     CMD_UART_WAIT_ON
+        cmpb    #6
+        beq     CMD_UART_WAIT_OFF
+        jmp     MAIN_LOOP_ERROR
+CMD_UART_WAIT_ON:
+        ldaa    LINE_BUF+2
+        cmpa    #CHR_SPACE
+        bne     CMD_UART_WAIT_ERR
+        ldaa    LINE_BUF+3
+        cmpa    #'O'
+        bne     CMD_UART_WAIT_ERR
+        ldaa    LINE_BUF+4
+        cmpa    #'N'
+        bne     CMD_UART_WAIT_ERR
+        ldaa    #1
+        staa    ACIA_TX_WAIT
+        bra     CMD_UART_WAIT_SHOW
+CMD_UART_WAIT_OFF:
+        ldaa    LINE_BUF+2
+        cmpa    #CHR_SPACE
+        bne     CMD_UART_WAIT_ERR
+        ldaa    LINE_BUF+3
+        cmpa    #'O'
+        bne     CMD_UART_WAIT_ERR
+        ldaa    LINE_BUF+4
+        cmpa    #'F'
+        bne     CMD_UART_WAIT_ERR
+        ldaa    LINE_BUF+5
+        cmpa    #'F'
+        bne     CMD_UART_WAIT_ERR
+        clr     ACIA_TX_WAIT
+        bra     CMD_UART_WAIT_SHOW
+CMD_UART_WAIT_ERR:
+        jmp     MAIN_LOOP_ERROR
+CMD_UART_WAIT_SHOW:
+        ldx     #TXT_UW
+        jsr     PDATA1
+        tst     ACIA_TX_WAIT
+        beq     CMD_UART_WAIT_SHOW_OFF
+        ldx     #TXT_ON
+        bra     CMD_UART_WAIT_SHOW_DONE
+CMD_UART_WAIT_SHOW_OFF:
+        ldx     #TXT_OFF
+CMD_UART_WAIT_SHOW_DONE:
+        jsr     PDATA1
+        jsr     PRINT_CRLF
+        jmp     MAIN_LOOP
+ endif
 
 CMD_UNASM:
         ldab    LINE_LEN
@@ -2401,16 +2476,32 @@ TXT_WELCOME:    fcc     "MC6800 MONITOR"
                 fcb     $04
 TXT_HELP:
  if MONITOR_FEATURE_FAT
+ if MONITOR_FEATURE_VDG
+                fcc     "D DS DIR M MAP RAMTEST G L LF BOOT B C R U UW H F"
+ else
                 fcc     "D DIR M MAP RAMTEST G L LF BOOT B C R U H F"
+ endif
  else
  if MONITOR_FEATURE_SD
  if S1_SUPPORTED
+ if MONITOR_FEATURE_VDG
+                fcc     "D DS M MAP RAMTEST G L BOOT B C R U UW H F"
+ else
                 fcc     "D M MAP RAMTEST G L BOOT B C R U H F"
+ endif
+ else
+ if MONITOR_FEATURE_VDG
+                fcc     "D DS M MAP RAMTEST G L B C R U UW H F"
  else
                 fcc     "D M MAP RAMTEST G L B C R U H F"
  endif
+ endif
+ else
+ if MONITOR_FEATURE_VDG
+                fcc     "D DS M MAP RAMTEST G L B C R U UW H F"
  else
                 fcc     "D M MAP RAMTEST G L B C R U H F"
+ endif
  endif
  endif
                     fcb     $04
@@ -2532,6 +2623,14 @@ TXT_BP:         fcc     "BP "
                 fcb     $04
 TXT_NONE:       fcc     "NONE"
                 fcb     $04
+ if MONITOR_FEATURE_VDG
+TXT_UW:         fcc     "UW "
+                fcb     $04
+TXT_ON:         fcc     "ON"
+                fcb     $04
+TXT_OFF:        fcc     "OFF"
+                fcb     $04
+ endif
 TXT_A:          fcc     "A="
                 fcb     $04
 TXT_B:          fcc     "B="

@@ -39,6 +39,9 @@ ROM単体で使える低レベル操作、復旧口、マシン語デバッグ�
 | `Cssss` | `ssss` のブレークポイントを解除する |
 | `R` | SWI ブレーク停止後に再開する |
 | `Ussss` | `ssss` から簡易逆アセンブル表示する |
+| `UW` | VDG有効ROMで、UART送信待ち状態を表示する |
+| `UW ON` | VDG有効ROMで、UART送信時にTDREを待つ |
+| `UW OFF` | VDG有効ROMで、UART送信不可なら捨ててVDG出力を優先する |
 
 ### SDFS/68起動入口
 
@@ -62,7 +65,7 @@ ROM単体で使える低レベル操作、復旧口、マシン語デバッグ�
 
 | 所属 | コマンド | 位置づけ |
 | --- | --- | --- |
-| ROM本線 | `D`、`M`、`G`、`L`、`B`、`C`、`R`、`U` など | ROM単体で使う低レベル操作とデバッグ |
+| ROM本線 | `D`、`M`、`G`、`L`、`B`、`C`、`R`、`U`、`UW` など | ROM単体で使う低レベル操作とデバッグ |
 | ROM常駐FAT互換 | `DIR`、`LF filename` | `FEATURE_SD=1 FEATURE_FAT=1` を直接指定したときだけ使う互換入口 |
 | SDFS/68起動入口 | `BOOT` | system SD上のstage1と `SDFS.BIN` へ渡す入口 |
 | SDFS/68 | `DIR`、`TYPE`、`RUN`、`LOAD`、`EXIT` | `SDFS> ` で使う第2段DOSのコマンド |
@@ -202,6 +205,11 @@ K68-VDG の設定レジスタは `$8110`、VRAMは `sbcio_vdg` で `$A000-$BFFF`
 VDG有効ROMでは、32桁画面向けの短幅ダンプ `DS` も使える。
 `DS`、`DS0100`、`DS0100-011F` の形式で、1行はアドレスと8 byte分のHEXだけを表示し、ASCII欄は出さない。
 表示は `0100 00 01 02 03 04 05 06 07` のように32桁以内へ収める。
+
+VDG有効ROMでは、1st ACIA UART出力を補助コンソールとして扱う。
+デフォルトの `UW OFF` では、1st ACIA の `TDRE` が立っていない文字は捨てて、VDG画面とキーボード操作を止めない。
+Mac側でUSBシリアルログを確実に取りたい場合は `UW ON` を実行すると、従来どおり `TDRE` を待って送信する。
+ただし `UW ON` は、USBシリアル未接続、制御線の状態異常、またはACIA送信不可の状態では停止し得る。
 
 ROM容量を節約するため、画面クリアと固定文字列表示だけの `VDGTEST` コマンドはROMから外した。
 必要な場合は `diagnostics/VDGA000.S` または `diagnostics/VDGC000.S` をSDへ置き、SDFS/68から `RUN` する。
