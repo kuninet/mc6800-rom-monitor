@@ -231,7 +231,7 @@ endif
 
 ASL_INCLUDE := $(CURDIR)/$(OUTDIR)$(ASL_PATHSEP)$(CURDIR)/include$(ASL_PATHSEP)$(CURDIR)/src
 
-.PHONY: all clean bin check-rom-size srec ihex stage1 sdfs sdfs-tools sdfs-tools-srec sdfs-tools-com check-stage1-profile rombin rombin-27c64 rombin-27c128 rombin-27c256 rombin-28c256 rombin-w27c512 program verify readback program-27c64 program-27c128 program-27c256 program-28c256 program-w27c512 program-upd28c256 FORCE
+.PHONY: all clean bin check-rom-size srec ihex stage1 sdfs sdfs-tools sdfs-tools-srec sdfs-tools-com check-stage1-config rombin rombin-27c64 rombin-27c128 rombin-27c256 rombin-28c256 rombin-w27c512 program verify readback program-27c64 program-27c128 program-27c256 program-28c256 program-w27c512 program-upd28c256 FORCE
 
 all: check-rom-size srec ihex
 
@@ -252,12 +252,12 @@ $(BIN): $(OBJ)
 check-rom-size: $(BIN)
 	"$(PYTHON)" -c "from pathlib import Path; import sys; p=Path('$(BIN)'); size=p.stat().st_size; limit=int('$(ROM_CODE_LIMIT)', 0); print(f'{p}: {size}/{limit} bytes'); sys.exit(0 if limit <= 0 or size <= limit else 1)"
 
-stage1: check-stage1-profile $(STAGE1_BIN)
+stage1: check-stage1-config $(STAGE1_BIN)
 
-sdfs: check-stage1-profile $(SDFS_BIN)
+sdfs: check-stage1-config $(SDFS_BIN)
 
-check-stage1-profile:
-	"$(PYTHON)" -c "import sys; profile='$(MONITOR_PROFILE)'; sys.exit(0 if profile in ('sbcio_vdg', 'k6802_vdg') else 1)" || (echo "stage1 target requires MONITOR_PROFILE=sbcio_vdg or MONITOR_PROFILE=k6802_vdg" && exit 1)
+check-stage1-config:
+	"$(PYTHON)" -c "import sys; sd='$(FEATURE_SD)'; board='$(BOARD_IO)'; memory='$(MEMORY_CONFIG)'; ok = sd == '1' and board == 'sbcio' and memory in ('ram64_c000_work', 'ram64_a000_work'); sys.exit(0 if ok else 1)" || (echo "stage1 target requires FEATURE_SD=1 BOARD_IO=sbcio and MEMORY_CONFIG=ram64_c000_work or ram64_a000_work" && exit 1)
 
 $(STAGE1_OBJ): FORCE $(STAGE1_TOPSRC) include/hardware.inc $(CONFIG_INC) src/sdcard.asm src/fat32.asm | $(OUTDIR)
 	"$(ASL)" -q -L -olist $(STAGE1_LST) -o $(STAGE1_OBJ) -i $(ASL_INCLUDE_ARG) $(STAGE1_TOPSRC)
