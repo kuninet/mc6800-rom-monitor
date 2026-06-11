@@ -41,9 +41,9 @@ def build_sdfs_image(
         raise ValueError("stage1 boot area overlaps the FAT32 partition")
 
     root_files = [Fat32File(SDFS_NAME_83, sdfs_data), *extra_files]
-    names = [file.name for file in root_files]
+    names = [(*file.path, file.name) for file in root_files]
     if len(names) != len(set(names)):
-        raise ValueError("duplicate FAT 8.3 root filename")
+        raise ValueError("duplicate FAT 8.3 filename")
 
     image, _layout = build_fat32_image_from_files(
         root_files,
@@ -72,6 +72,21 @@ def fat83_from_path(path: Path) -> bytes:
     if not _is_valid_83_part(stem) or not _is_valid_83_part(ext):
         raise ValueError(f"filename contains unsupported FAT 8.3 characters: {name}")
     return stem.encode("ascii").ljust(8, b" ") + ext.encode("ascii").ljust(3, b" ")
+
+
+def fat83_parent_from_path(path: Path) -> tuple[bytes, ...]:
+    if path.is_absolute():
+        raise ValueError(f"absolute image paths are not supported: {path}")
+    parts = path.parent.parts
+    if not parts or parts == (".",):
+        return ()
+    if any(part in ("", ".", "..") for part in parts):
+        raise ValueError(f"invalid directory path: {path}")
+    return tuple(fat83_from_name(part) for part in parts)
+
+
+def fat83_from_name(name: str) -> bytes:
+    return fat83_from_path(Path(name))
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -107,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
         extra_files = [
-            Fat32File(fat83_from_path(path), _read_file(path), 0x20)
+            Fat32File(fat83_from_path(path), _read_file(path), 0x20, fat83_parent_from_path(path))
             for path in args.files
         ]
         image = build_sdfs_image(

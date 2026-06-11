@@ -164,12 +164,11 @@ SDFS_K_LOAD_FILE:
         clr     LOADER_MODE
         clr     LOADER_STAGE
         clr     SDFS_RUN_ENTRY_SET
-        jsr     SDFS_PARSE_FILENAME_83
-        bcs     SDFS_CMD_LOAD_FAIL
+        stx     PATH_PTR
+        stab    PATH_LEN
         jsr     SDFS_API_MOUNT
         bcs     SDFS_CMD_LOAD_FAIL
-        ldx     #FAT_FIND_NAME0
-        jsr     SDFS_API_FIND_83
+        jsr     SDFS_RESOLVE_FILE_SAVED
         bcs     SDFS_CMD_LOAD_FAIL
         jsr     SDFS_STREAM_OPEN
         bcs     SDFS_CMD_LOAD_FAIL
@@ -214,7 +213,7 @@ SDFS_CMD_DUMP_FAIL:
 SDFS_CMD_IS_DIR:
         ldab    LINE_LEN
         cmpb    #3
-        bne     SDFS_CMD_IS_DIR_FAIL
+        blo     SDFS_CMD_IS_DIR_FAIL
         ldaa    LINE_BUF+1
         jsr     SDFS_TO_UPPER
         cmpa    #'I'
@@ -223,6 +222,13 @@ SDFS_CMD_IS_DIR:
         jsr     SDFS_TO_UPPER
         cmpa    #'R'
         bne     SDFS_CMD_IS_DIR_FAIL
+        ldab    LINE_LEN
+        cmpb    #3
+        beq     SDFS_CMD_IS_DIR_OK
+        ldaa    LINE_BUF+3
+        cmpa    #CHR_SPACE
+        bne     SDFS_CMD_IS_DIR_FAIL
+SDFS_CMD_IS_DIR_OK:
         clc
         rts
 SDFS_CMD_IS_DIR_FAIL:
@@ -298,12 +304,13 @@ SDFS_CMD_RUN_FAIL:
 SDFS_CMD_COM:
         ldab    LINE_LEN
         ldx     #LINE_BUF
-        jsr     SDFS_PARSE_COM_COMMAND
+        jsr     SDFS_PARSE_COM_PATH_COMMAND
         bcs     SDFS_CMD_COM_FAIL
         jsr     SDFS_API_MOUNT
         bcs     SDFS_CMD_COM_FAIL
-        ldx     #FAT_FIND_NAME0
-        jsr     SDFS_API_FIND_83
+        jsr     SDFS_RESOLVE_FILE_SAVED
+        bcs     SDFS_CMD_COM_FAIL
+        jsr     SDFS_PARSE_COM_CHECK_EXT
         bcs     SDFS_CMD_COM_FAIL
         jsr     SDFS_COM_CHECK_SIZE
         bcs     SDFS_CMD_COM_FAIL
@@ -311,6 +318,7 @@ SDFS_CMD_COM:
         bcs     SDFS_CMD_COM_FAIL
         jsr     SDFS_COM_LOAD_RAW
         bcs     SDFS_CMD_COM_FAIL
+        jsr     SDFS_COM_RESTORE_ARGS
         lds     #STACK_TOP
         ldx     ARG2_PTR
         ldab    ARG2_LEN
@@ -362,14 +370,39 @@ SDFS_COM_LOAD_FAIL:
         sec
         rts
 
+SDFS_COM_RESTORE_ARGS:
+        ldx     PATH_ARG_PTR
+        stx     ARG2_PTR
+        ldaa    PATH_ARG_LEN
+        staa    ARG2_LEN
+        rts
+
 SDFS_CMD_DIR:
+        ldab    LINE_LEN
+        cmpb    #3
+        bne     SDFS_CMD_DIR_PATH
         jsr     SDFS_K_DIR_ROOT
+        rts
+SDFS_CMD_DIR_PATH:
+        ldab    LINE_LEN
+        subb    #3
+        ldx     #LINE_BUF+3
+        stx     PATH_PTR
+        stab    PATH_LEN
+        jsr     SDFS_K_DIR_PATH
         rts
 
 SDFS_K_DIR_ROOT:
         jsr     SDFS_API_MOUNT
         bcs     SDFS_K_DIR_FAIL
         jsr     SDFS_K_COPY_ROOT_TO_CUR
+        bra     SDFS_K_DIR_CLUSTER_LOOP
+
+SDFS_K_DIR_PATH:
+        jsr     SDFS_API_MOUNT
+        bcs     SDFS_K_DIR_FAIL
+        jsr     SDFS_RESOLVE_DIR_SAVED
+        bcs     SDFS_K_DIR_FAIL
 SDFS_K_DIR_CLUSTER_LOOP:
         jsr     SDFS_CLUSTER_TO_SD_LBA
         ldx     #SD_SECTOR_BUF
@@ -412,6 +445,293 @@ SDFS_K_COPY_ROOT_TO_CUR:
         staa    FAT_CUR_CLUS2
         ldaa    FAT_ROOT_CLUS3
         staa    FAT_CUR_CLUS3
+        rts
+
+SDFS_RESOLVE_FILE_SAVED:
+        jsr     SDFS_PATH_START
+        bcs     SDFS_RESOLVE_FAIL
+SDFS_RESOLVE_FILE_LOOP:
+        jsr     SDFS_PATH_COMPONENT
+        bcs     SDFS_RESOLVE_FAIL
+        jsr     SDFS_FIND_IN_CUR
+        bcs     SDFS_RESOLVE_FAIL
+        tst     PATH_DELIM
+        beq     SDFS_RESOLVE_FILE_LAST
+        jsr     SDFS_ENTRY_IS_DIR
+        bcs     SDFS_RESOLVE_FAIL
+        jsr     SDFS_COPY_FILE_TO_CUR
+        bra     SDFS_RESOLVE_FILE_LOOP
+SDFS_RESOLVE_FILE_LAST:
+        jsr     SDFS_ENTRY_IS_FILE
+        bcs     SDFS_RESOLVE_FAIL
+        clc
+        rts
+
+SDFS_RESOLVE_DIR_SAVED:
+        jsr     SDFS_PATH_START_ALLOW_ROOT
+        bcs     SDFS_RESOLVE_FAIL
+        tst     PATH_LEN
+        beq     SDFS_RESOLVE_OK
+SDFS_RESOLVE_DIR_LOOP:
+        jsr     SDFS_PATH_COMPONENT
+        bcs     SDFS_RESOLVE_FAIL
+        jsr     SDFS_FIND_IN_CUR
+        bcs     SDFS_RESOLVE_FAIL
+        jsr     SDFS_ENTRY_IS_DIR
+        bcs     SDFS_RESOLVE_FAIL
+        jsr     SDFS_COPY_FILE_TO_CUR
+        tst     PATH_DELIM
+        bne     SDFS_RESOLVE_DIR_LOOP
+SDFS_RESOLVE_OK:
+        clc
+        rts
+SDFS_RESOLVE_FAIL:
+        sec
+        rts
+
+SDFS_PATH_START:
+        jsr     SDFS_PATH_SKIP_HEAD
+        bcs     SDFS_PATH_START_FAIL
+        tst     PATH_LEN
+        beq     SDFS_PATH_START_FAIL
+        jsr     SDFS_K_COPY_ROOT_TO_CUR
+        clc
+        rts
+SDFS_PATH_START_ALLOW_ROOT:
+        jsr     SDFS_PATH_SKIP_HEAD
+        bcs     SDFS_PATH_START_FAIL
+        jsr     SDFS_K_COPY_ROOT_TO_CUR
+        clc
+        rts
+SDFS_PATH_START_FAIL:
+        sec
+        rts
+
+SDFS_PATH_SKIP_HEAD:
+        tst     PATH_LEN
+        beq     SDFS_PATH_SKIP_DONE
+        ldx     PATH_PTR
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        beq     SDFS_PATH_SKIP_ONE
+        cmpa    #'/'
+        beq     SDFS_PATH_SKIP_SLASH
+        bra     SDFS_PATH_SKIP_DONE
+SDFS_PATH_SKIP_ONE:
+        inx
+        stx     PATH_PTR
+        dec     PATH_LEN
+        bra     SDFS_PATH_SKIP_HEAD
+SDFS_PATH_SKIP_SLASH:
+        inx
+        stx     PATH_PTR
+        dec     PATH_LEN
+        beq     SDFS_PATH_SKIP_FAIL
+SDFS_PATH_SKIP_DONE:
+        clc
+        rts
+SDFS_PATH_SKIP_FAIL:
+        sec
+        rts
+
+SDFS_PATH_COMPONENT:
+        ldx     PATH_PTR
+        stx     ARG2_PTR
+        clr     ARG2_LEN
+        clr     PATH_DELIM
+SDFS_PATH_COMPONENT_LOOP:
+        tst     PATH_LEN
+        beq     SDFS_PATH_COMPONENT_DONE
+        ldx     PATH_PTR
+        ldaa    0,x
+        cmpa    #'/'
+        beq     SDFS_PATH_COMPONENT_SLASH
+        cmpa    #CHR_SPACE
+        beq     SDFS_PATH_COMPONENT_SPACE
+        inx
+        stx     PATH_PTR
+        dec     PATH_LEN
+        inc     ARG2_LEN
+        bra     SDFS_PATH_COMPONENT_LOOP
+SDFS_PATH_COMPONENT_SLASH:
+        ldaa    ARG2_LEN
+        beq     SDFS_PATH_COMPONENT_FAIL
+        ldx     PATH_PTR
+        inx
+        stx     PATH_PTR
+        dec     PATH_LEN
+        ldaa    #1
+        staa    PATH_DELIM
+        tst     PATH_LEN
+        beq     SDFS_PATH_COMPONENT_FAIL
+        bra     SDFS_PATH_COMPONENT_PARSE
+SDFS_PATH_COMPONENT_SPACE:
+        jsr     SDFS_PATH_SKIP_TRAILING
+        bcs     SDFS_PATH_COMPONENT_FAIL
+SDFS_PATH_COMPONENT_DONE:
+        ldaa    ARG2_LEN
+        beq     SDFS_PATH_COMPONENT_FAIL
+SDFS_PATH_COMPONENT_PARSE:
+        ldx     ARG2_PTR
+        ldab    ARG2_LEN
+        jsr     SDFS_PARSE_FILENAME_83
+        bcs     SDFS_PATH_COMPONENT_FAIL
+        clc
+        rts
+SDFS_PATH_COMPONENT_FAIL:
+        sec
+        rts
+
+SDFS_PATH_SKIP_TRAILING:
+        tst     PATH_LEN
+        beq     SDFS_PATH_SKIP_TRAILING_OK
+        ldx     PATH_PTR
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        bne     SDFS_PATH_SKIP_TRAILING_FAIL
+        inx
+        stx     PATH_PTR
+        dec     PATH_LEN
+        bra     SDFS_PATH_SKIP_TRAILING
+SDFS_PATH_SKIP_TRAILING_OK:
+        clc
+        rts
+SDFS_PATH_SKIP_TRAILING_FAIL:
+        sec
+        rts
+
+SDFS_FIND_IN_CUR:
+        jsr     SDFS_CLUSTER_TO_SD_LBA
+        ldx     #SD_SECTOR_BUF
+        jsr     SDFS_API_READ_SECTOR
+        bcs     SDFS_FIND_IN_CUR_FAIL
+        ldx     #SD_SECTOR_BUF
+        stx     FAT_ENTRY_PTR
+        ldaa    #16
+        staa    FAT_DIR_COUNT
+SDFS_FIND_IN_CUR_ENTRY_LOOP:
+        ldx     FAT_ENTRY_PTR
+        ldaa    0,x
+        beq     SDFS_FIND_IN_CUR_FAIL
+        cmpa    #$E5
+        beq     SDFS_FIND_IN_CUR_NEXT_ENTRY
+        ldaa    11,x
+        anda    #$0F
+        cmpa    #$0F
+        beq     SDFS_FIND_IN_CUR_NEXT_ENTRY
+        ldaa    11,x
+        bita    #$08
+        bne     SDFS_FIND_IN_CUR_NEXT_ENTRY
+        jsr     SDFS_COMPARE_ENTRY_NAME
+        bcc     SDFS_FIND_IN_CUR_MATCH
+SDFS_FIND_IN_CUR_NEXT_ENTRY:
+        jsr     SDFS_K_ADVANCE_ENTRY_PTR
+        dec     FAT_DIR_COUNT
+        bne     SDFS_FIND_IN_CUR_ENTRY_LOOP
+        jsr     SDFS_NEXT_CLUSTER
+        bcs     SDFS_FIND_IN_CUR_FAIL
+        jsr     SDFS_COPY_NEXT_TO_CUR
+        bra     SDFS_FIND_IN_CUR
+SDFS_FIND_IN_CUR_MATCH:
+        jsr     SDFS_STORE_FILE_ENTRY
+        clc
+        rts
+SDFS_FIND_IN_CUR_FAIL:
+        sec
+        rts
+
+SDFS_COMPARE_ENTRY_NAME:
+        ldx     FAT_ENTRY_PTR
+        ldaa    0,x
+        cmpa    FAT_FIND_NAME0
+        bne     SDFS_COMPARE_ENTRY_NAME_FAIL
+        ldaa    1,x
+        cmpa    FAT_FIND_NAME1
+        bne     SDFS_COMPARE_ENTRY_NAME_FAIL
+        ldaa    2,x
+        cmpa    FAT_FIND_NAME2
+        bne     SDFS_COMPARE_ENTRY_NAME_FAIL
+        ldaa    3,x
+        cmpa    FAT_FIND_NAME3
+        bne     SDFS_COMPARE_ENTRY_NAME_FAIL
+        ldaa    4,x
+        cmpa    FAT_FIND_NAME4
+        bne     SDFS_COMPARE_ENTRY_NAME_FAIL
+        ldaa    5,x
+        cmpa    FAT_FIND_NAME5
+        bne     SDFS_COMPARE_ENTRY_NAME_FAIL
+        ldaa    6,x
+        cmpa    FAT_FIND_NAME6
+        bne     SDFS_COMPARE_ENTRY_NAME_FAIL
+        ldaa    7,x
+        cmpa    FAT_FIND_NAME7
+        bne     SDFS_COMPARE_ENTRY_NAME_FAIL
+        ldaa    8,x
+        cmpa    FAT_FIND_NAME8
+        bne     SDFS_COMPARE_ENTRY_NAME_FAIL
+        ldaa    9,x
+        cmpa    FAT_FIND_NAME9
+        bne     SDFS_COMPARE_ENTRY_NAME_FAIL
+        ldaa    10,x
+        cmpa    FAT_FIND_NAME10
+        bne     SDFS_COMPARE_ENTRY_NAME_FAIL
+        clc
+        rts
+SDFS_COMPARE_ENTRY_NAME_FAIL:
+        sec
+        rts
+
+SDFS_STORE_FILE_ENTRY:
+        ldx     FAT_ENTRY_PTR
+        ldaa    21,x
+        staa    FAT_FILE_CLUS0
+        ldaa    20,x
+        staa    FAT_FILE_CLUS1
+        ldaa    27,x
+        staa    FAT_FILE_CLUS2
+        ldaa    26,x
+        staa    FAT_FILE_CLUS3
+        ldaa    31,x
+        staa    FAT_FILE_SIZE0
+        ldaa    30,x
+        staa    FAT_FILE_SIZE1
+        ldaa    29,x
+        staa    FAT_FILE_SIZE2
+        ldaa    28,x
+        staa    FAT_FILE_SIZE3
+        rts
+
+SDFS_COPY_FILE_TO_CUR:
+        ldaa    FAT_FILE_CLUS0
+        staa    FAT_CUR_CLUS0
+        ldaa    FAT_FILE_CLUS1
+        staa    FAT_CUR_CLUS1
+        ldaa    FAT_FILE_CLUS2
+        staa    FAT_CUR_CLUS2
+        ldaa    FAT_FILE_CLUS3
+        staa    FAT_CUR_CLUS3
+        rts
+
+SDFS_ENTRY_IS_DIR:
+        ldx     FAT_ENTRY_PTR
+        ldaa    11,x
+        bita    #$10
+        beq     SDFS_ENTRY_IS_DIR_FAIL
+        clc
+        rts
+SDFS_ENTRY_IS_DIR_FAIL:
+        sec
+        rts
+
+SDFS_ENTRY_IS_FILE:
+        ldx     FAT_ENTRY_PTR
+        ldaa    11,x
+        bita    #$18
+        bne     SDFS_ENTRY_IS_FILE_FAIL
+        clc
+        rts
+SDFS_ENTRY_IS_FILE_FAIL:
+        sec
         rts
 
 SDFS_K_ADVANCE_ENTRY_PTR:
@@ -459,7 +779,15 @@ SDFS_K_PRINT_DIR_EXT_DONE:
 SDFS_K_PRINT_DIR_NO_EXT:
         ldaa    #CHR_SPACE
         jsr     SDFS_PUTC
+        ldx     FAT_ENTRY_PTR
+        ldaa    11,x
+        bita    #$10
+        beq     SDFS_K_PRINT_DIR_ATTR_FILE
+        ldaa    #'D'
+        bra     SDFS_K_PRINT_DIR_ATTR_OUT
+SDFS_K_PRINT_DIR_ATTR_FILE:
         ldaa    #'A'
+SDFS_K_PRINT_DIR_ATTR_OUT:
         jsr     SDFS_PUTC
         ldaa    #CHR_SPACE
         jsr     SDFS_PUTC
@@ -500,9 +828,11 @@ SDFS_K_DIR_EXT_FOUND:
 SDFS_K_DIR_ENTRY_VISIBLE:
         ldx     FAT_ENTRY_PTR
         ldaa    11,x
-        anda    #$1E
+        anda    #$0E
         bne     SDFS_K_DIR_ENTRY_SKIP
         ldaa    0,x
+        cmpa    #'.'
+        beq     SDFS_K_DIR_ENTRY_SKIP
         cmpa    #CHR_SPACE
         beq     SDFS_K_DIR_ENTRY_SKIP
         ldab    #11
@@ -773,120 +1103,71 @@ SDFS_PARSE_FILENAME_FAIL:
         sec
         rts
 
-SDFS_PARSE_COM_COMMAND:
+SDFS_PARSE_COM_PATH_COMMAND:
         stx     ARG_PTR
         stab    ARG_LEN
-        jsr     SDFS_CLEAR_FIND_NAME
-SDFS_PARSE_COM_SKIP_HEAD:
+SDFS_PARSE_COM_PATH_SKIP_HEAD:
         tst     ARG_LEN
-        bne     SDFS_PARSE_COM_SKIP_HAS
-        jmp     SDFS_PARSE_COM_FAIL
-SDFS_PARSE_COM_SKIP_HAS:
+        beq     SDFS_PARSE_COM_PATH_FAIL
         ldx     ARG_PTR
         ldaa    0,x
         cmpa    #CHR_SPACE
-        bne     SDFS_PARSE_COM_NAME_START
+        bne     SDFS_PARSE_COM_PATH_START
         inx
         stx     ARG_PTR
         dec     ARG_LEN
-        bra     SDFS_PARSE_COM_SKIP_HEAD
-
-SDFS_PARSE_COM_NAME_START:
-        ldx     #FAT_FIND_NAME0
-        stx     FAT_ENTRY_PTR
-        clr     ARG2_LEN
-SDFS_PARSE_COM_NAME_LOOP:
+        bra     SDFS_PARSE_COM_PATH_SKIP_HEAD
+SDFS_PARSE_COM_PATH_START:
+        ldx     ARG_PTR
+        stx     PATH_PTR
+        clr     PATH_LEN
+SDFS_PARSE_COM_PATH_TOKEN:
         tst     ARG_LEN
-        bne     SDFS_PARSE_COM_NAME_HAS_LEN
-        jmp     SDFS_PARSE_COM_FAIL
-SDFS_PARSE_COM_NAME_HAS_LEN:
+        beq     SDFS_PARSE_COM_PATH_NO_ARGS
         ldx     ARG_PTR
         ldaa    0,x
         cmpa    #CHR_SPACE
-        bne     SDFS_PARSE_COM_NAME_NOT_SPACE
-        jmp     SDFS_PARSE_COM_FAIL
-SDFS_PARSE_COM_NAME_NOT_SPACE:
-        cmpa    #'.'
-        beq     SDFS_PARSE_COM_EXT_START
-        ldab    ARG2_LEN
-        cmpb    #8
-        blo     SDFS_PARSE_COM_NAME_ROOM
-        jmp     SDFS_PARSE_COM_FAIL
-SDFS_PARSE_COM_NAME_ROOM:
-        jsr     SDFS_TO_UPPER
-        ldx     FAT_ENTRY_PTR
-        staa    0,x
+        beq     SDFS_PARSE_COM_PATH_ARG_SKIP
         inx
-        stx     FAT_ENTRY_PTR
-        inc     ARG2_LEN
+        stx     ARG_PTR
+        dec     ARG_LEN
+        inc     PATH_LEN
+        bra     SDFS_PARSE_COM_PATH_TOKEN
+SDFS_PARSE_COM_PATH_ARG_SKIP:
+        ldaa    PATH_LEN
+        beq     SDFS_PARSE_COM_PATH_FAIL
         ldx     ARG_PTR
         inx
         stx     ARG_PTR
         dec     ARG_LEN
-        bra     SDFS_PARSE_COM_NAME_LOOP
-
-SDFS_PARSE_COM_EXT_START:
-        tst     ARG2_LEN
-        bne     SDFS_PARSE_COM_EXT_NAME_OK
-        jmp     SDFS_PARSE_COM_FAIL
-SDFS_PARSE_COM_EXT_NAME_OK:
-        ldx     ARG_PTR
-        inx
-        stx     ARG_PTR
-        dec     ARG_LEN
-        ldx     #FAT_FIND_NAME8
-        stx     FAT_ENTRY_PTR
-        clr     ARG2_LEN
-SDFS_PARSE_COM_EXT_LOOP:
+SDFS_PARSE_COM_PATH_ARG_SKIP_LOOP:
         tst     ARG_LEN
-        beq     SDFS_PARSE_COM_TOKEN_DONE
+        beq     SDFS_PARSE_COM_PATH_NO_ARGS
         ldx     ARG_PTR
         ldaa    0,x
         cmpa    #CHR_SPACE
-        beq     SDFS_PARSE_COM_TOKEN_DONE
-        cmpa    #'.'
-        beq     SDFS_PARSE_COM_FAIL
-        ldab    ARG2_LEN
-        cmpb    #3
-        bhs     SDFS_PARSE_COM_FAIL
-        jsr     SDFS_TO_UPPER
-        ldx     FAT_ENTRY_PTR
-        staa    0,x
-        inx
-        stx     FAT_ENTRY_PTR
-        inc     ARG2_LEN
-        ldx     ARG_PTR
+        bne     SDFS_PARSE_COM_PATH_ARGS
         inx
         stx     ARG_PTR
         dec     ARG_LEN
-        bra     SDFS_PARSE_COM_EXT_LOOP
-
-SDFS_PARSE_COM_TOKEN_DONE:
-        jsr     SDFS_PARSE_COM_CHECK_EXT
-        bcs     SDFS_PARSE_COM_FAIL
-SDFS_PARSE_COM_ARG_SKIP:
-        tst     ARG_LEN
-        beq     SDFS_PARSE_COM_NO_ARGS
+        bra     SDFS_PARSE_COM_PATH_ARG_SKIP_LOOP
+SDFS_PARSE_COM_PATH_ARGS:
         ldx     ARG_PTR
-        ldaa    0,x
-        cmpa    #CHR_SPACE
-        bne     SDFS_PARSE_COM_ARGS_DONE
-        inx
-        stx     ARG_PTR
-        dec     ARG_LEN
-        bra     SDFS_PARSE_COM_ARG_SKIP
-SDFS_PARSE_COM_ARGS_DONE:
-        ldx     ARG_PTR
-        stx     ARG2_PTR
+        stx     PATH_ARG_PTR
         ldaa    ARG_LEN
-        staa    ARG2_LEN
+        staa    PATH_ARG_LEN
         clc
         rts
-SDFS_PARSE_COM_NO_ARGS:
+SDFS_PARSE_COM_PATH_NO_ARGS:
+        ldaa    PATH_LEN
+        beq     SDFS_PARSE_COM_PATH_FAIL
         ldx     ARG_PTR
-        stx     ARG2_PTR
-        clr     ARG2_LEN
+        stx     PATH_ARG_PTR
+        clr     PATH_ARG_LEN
         clc
+        rts
+SDFS_PARSE_COM_PATH_FAIL:
+        sec
         rts
 
 SDFS_PARSE_COM_CHECK_EXT:
@@ -902,9 +1183,6 @@ SDFS_PARSE_COM_CHECK_EXT:
         clc
         rts
 SDFS_PARSE_COM_CHECK_FAIL:
-        sec
-        rts
-SDFS_PARSE_COM_FAIL:
         sec
         rts
 
@@ -1692,7 +1970,7 @@ SDFS_PUTC_DONE:
 
 TXT_BANNER:
         fcb     CHR_CR
-        fcc     "SDFS/68 V1.2 #150"
+        fcc     "SDFS/68 V1.3 #157"
         fcb     CHR_CR,0
 
 TXT_PROMPT:

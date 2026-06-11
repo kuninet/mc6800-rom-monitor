@@ -24,7 +24,7 @@ SDFS/68 が呼び出し元になり、`.COM` 側は `RTS` で SDFS/68 のプロ�
 
 - `SDFS> FOO.COM` のように、拡張子 `.COM` まで明示された入力を外部コマンド候補にする。
 - `SDFS> FOO.COM AAA BBB` のような引数テールを渡せるようにする。
-- root directory 直下の 8.3 short filename を対象にする。
+- root directory 直下またはroot起点path上の 8.3 short filename を対象にする。
 - `.COM` ファイルは header なしの raw binary とする。
 - `.COM` は `$0100` 固定ロード、`$0100` 固定エントリとする。
 - SDFS/68 は `.COM` を `JSR $0100` 相当で呼び、`.COM` は `RTS` で戻る。
@@ -32,7 +32,6 @@ SDFS/68 が呼び出し元になり、`.COM` 側は `RTS` で SDFS/68 のプロ�
 次は対象外とする。
 
 - `FOO` 入力から `FOO.COM` を補完探索する本格トランジェントコマンド探索。
-- path 指定つき `.COM` 実行。ただし #157 の path 対応後に拡張できる設計にする。
 - `.COM` から呼び出す SDFS/68 ファイルAPI。
 - FAT write、SAVE、delete、rename。
 - 複数ファイルopen。
@@ -42,12 +41,12 @@ SDFS/68 が呼び出し元になり、`.COM` 側は `RTS` で SDFS/68 のプロ�
 SDFS/68 のコマンド解釈順は、次を基本にする。
 
 1. 既存の内蔵コマンドを優先して判定する。
-2. 内蔵コマンドに一致しない場合、入力行の先頭トークンを 8.3 filename として解釈する。
+2. 内蔵コマンドに一致しない場合、入力行の先頭トークンを root起点path として解釈する。
 3. 先頭トークンの拡張子が `.COM` の場合だけ、トランジェントコマンドとして扱う。
 4. `.COM` として検索、ロード、起動できなければ `?` を表示して `SDFS> ` へ戻る。
 5. `.COM` 以外の未定義入力は従来どおり `?` を表示する。
 
-初期実装では `FOO.COM` を明示指定する。
+初期実装では `FOO.COM` または `/BIN/FOO.COM` のように `.COM` 拡張子を明示指定する。
 `FOO` だけを入力して `FOO.COM` を探す動作は、検索規則と内蔵コマンド優先順位の仕様が増えるため後続Issueへ分ける。
 
 ## ファイル形式
@@ -109,9 +108,10 @@ SDFS/68 は `.COM` から戻った後、必要な状態を再設定してプロ�
 
 ```text
 SDFS> FOO.COM AAA BBB
+SDFS> /BIN/FOO.COM AAA BBB
 ```
 
-SDFS/68 は先頭トークン `FOO.COM` をファイル名として扱い、その後ろを引数テールとする。
+SDFS/68 は先頭トークン `FOO.COM` または `/BIN/FOO.COM` をroot起点pathとして扱い、その後ろを引数テールとする。
 先頭トークン直後の空白は区切りとして消費し、引数テール先頭は最初の非空白文字にする。
 引数テール内部の空白は保持する。
 
@@ -157,13 +157,13 @@ SDFS/68 は初期実装では `.COM` が低RAM内のどの領域を使うかま�
 
 ## SDFS/68本体サイズ
 
-2026-06-05 時点の `main` 由来ビルドでは、`make sdfs MONITOR_PROFILE=sbcio_vdg` と `make sdfs MONITOR_PROFILE=k6802_vdg` の `SDFS.BIN` はどちらも 2714 byte である。
+2026-06-11 時点の V1.3 実装では、`make sdfs MONITOR_PROFILE=sbcio_vdg` の `SDFS.BIN` は 3614 byte である。
 
-`SDFS_LOAD_BASE` から `SDFS_LOAD_LIMIT` までの枠は 3840 byte なので、現時点の余裕は 1126 byte である。
-`.COM` 対応は SDFS/68 本体を肥大化させすぎないよう、初期実装を次に限定する。
+`SDFS_LOAD_BASE` から `SDFS_LOAD_LIMIT` までの枠は 3840 byte なので、現時点の余裕は 226 byte である。
+`.COM` 対応は SDFS/68 本体を肥大化させすぎないよう、実装を次に限定する。
 
 - 先頭トークン `.COM` 判定。
-- 8.3 root filename 検索。
+- root起点path上の8.3 filename 検索。
 - raw binary の `$0100` への読み込み。
 - `X` / `B` / `A` のエントリレジスタ設定。
 - `JSR $0100` と `RTS` 復帰後のプロンプト表示。
