@@ -39,10 +39,14 @@ class Fat32File:
     name: bytes
     data: bytes
     attr: int = 0x20
+    path: tuple[bytes, ...] = ()
 
     def __post_init__(self) -> None:
         if len(self.name) != 11:
             raise ValueError("FAT 8.3 directory name must be 11 bytes")
+        for component in self.path:
+            if len(component) != 11:
+                raise ValueError("FAT 8.3 directory path component must be 11 bytes")
 
 
 def build_fat32_image_from_files(
@@ -57,21 +61,41 @@ def build_fat32_image_from_files(
     root_cluster: int = DEFAULT_ROOT_CLUSTER,
     volume_label: bytes = DEFAULT_VOLUME_LABEL,
 ) -> tuple[bytes, Fat32Layout]:
-    """Build a simple read-only FAT32 image with root-directory files only."""
+    """Build a simple read-only FAT32 image."""
     if not files:
         raise ValueError("at least one root file is required")
-    if len(files) >= entries_per_cluster(sectors_per_cluster):
-        raise ValueError("too many root files for a single root directory cluster")
     if len(volume_label) != 11:
         raise ValueError("FAT volume label must be 11 bytes")
 
     cluster_cursor = root_cluster + 1
+    dir_clusters: dict[tuple[bytes, ...], int] = {}
+    entries_by_dir: dict[tuple[bytes, ...], list[Fat32File]] = {(): []}
     file_clusters: list[tuple[Fat32File, list[int]]] = []
     for file in files:
+        parent = ()
+        for component in file.path:
+            child = (*parent, component)
+            if child not in dir_clusters:
+                if any(entry.name == component for entry in entries_by_dir[parent]):
+                    raise ValueError("directory path conflicts with an existing entry")
+                dir_clusters[child] = cluster_cursor
+                cluster_cursor += 1
+                entries_by_dir.setdefault(parent, []).append(
+                    Fat32File(component, b"", 0x10, parent)
+                )
+                entries_by_dir.setdefault(child, [])
+            parent = child
+        if any(entry.name == file.name for entry in entries_by_dir[file.path]):
+            raise ValueError("duplicate FAT 8.3 filename")
+        entries_by_dir.setdefault(file.path, []).append(file)
         clusters_needed = max(1, cluster_count_for_size(len(file.data), sectors_per_cluster))
         clusters = list(range(cluster_cursor, cluster_cursor + clusters_needed))
         cluster_cursor += clusters_needed
         file_clusters.append((file, clusters))
+
+    for entries in entries_by_dir.values():
+        if len(entries) >= entries_per_cluster(sectors_per_cluster):
+            raise ValueError("too many entries for a single directory cluster")
 
     minimum_data_clusters = cluster_cursor - 2
     if total_volume_sectors is None:
@@ -124,8 +148,8 @@ def build_fat32_image_from_files(
         volume_label=volume_label,
     )
     write_fsinfo(image, volume_start + 1)
-    _write_generated_fats(image, layout, file_clusters)
-    _write_generated_root_dir(image, layout, file_clusters)
+    _write_generated_fats(image, layout, dir_clusters, file_clusters)
+    _write_generated_directories(image, layout, dir_clusters, entries_by_dir, file_clusters)
     for file, clusters in file_clusters:
         write_file_data(image, layout, tuple(clusters), file.data, 0x00)
     return bytes(image), layout
@@ -308,6 +332,7 @@ def fat_size_for_volume(
 def _write_generated_fats(
     image: bytearray,
     layout: Fat32Layout,
+    dir_clusters: dict[tuple[bytes, ...], int],
     file_clusters: list[tuple[Fat32File, list[int]]],
 ) -> None:
     fat = bytearray(SECTOR_SIZE * layout.fat_size_sectors)
@@ -316,6 +341,8 @@ def _write_generated_fats(
         1: EOC,
         layout.root_cluster: EOC,
     }
+    for cluster in dir_clusters.values():
+        entries[cluster] = EOC
     for _file, clusters in file_clusters:
         for index, cluster in enumerate(clusters):
             entries[cluster] = clusters[index + 1] if index + 1 < len(clusters) else EOC
@@ -327,6 +354,31 @@ def _write_generated_fats(
         for sector_index in range(layout.fat_size_sectors):
             start = sector_index * SECTOR_SIZE
             write_sector(image, base_lba + sector_index, fat[start:start + SECTOR_SIZE])
+
+
+def _write_generated_directories(
+    image: bytearray,
+    layout: Fat32Layout,
+    dir_clusters: dict[tuple[bytes, ...], int],
+    entries_by_dir: dict[tuple[bytes, ...], list[Fat32File]],
+    file_clusters: list[tuple[Fat32File, list[int]]],
+) -> None:
+    file_cluster_map = {file: clusters[0] for file, clusters in file_clusters}
+    for path, entries in entries_by_dir.items():
+        directory = bytearray(SECTOR_SIZE * layout.sectors_per_cluster)
+        for index, entry in enumerate(entries):
+            start = index * 32
+            child_dir = (*path, entry.name)
+            if entry.attr & 0x10 and child_dir in dir_clusters:
+                cluster = dir_clusters[child_dir]
+                size = 0
+            else:
+                cluster = file_cluster_map[entry]
+                size = len(entry.data)
+            directory[start:start + 32] = root_entry(entry.name, entry.attr, cluster, size)
+        directory[len(entries) * 32] = 0x00
+        cluster = layout.root_cluster if path == () else dir_clusters[path]
+        write_cluster(image, layout, cluster, directory)
 
 
 def _write_generated_root_dir(

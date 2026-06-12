@@ -14,7 +14,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "tools"))
 sys.path.insert(0, str(PROJECT_ROOT / "tests"))
 
 from fat32_image import DEFAULT_PARTITION_START_LBA, EOC, SECTOR_SIZE, sector  # noqa: E402
-from mk_sdfs_image import DEFAULT_STAGE1_LBA, build_sdfs_image, fat83_from_path  # noqa: E402
+from mk_sdfs_image import DEFAULT_STAGE1_LBA, build_sdfs_image, fat83_from_path, fat83_parent_from_path  # noqa: E402
 
 
 def u16(data: bytes, offset: int) -> int:
@@ -49,6 +49,15 @@ def test_fat83_from_path_rejects_non_83() -> None:
             continue
         raise AssertionError(f"expected invalid 8.3 filename: {name}")
     print("[PASS] test_fat83_from_path_rejects_non_83")
+
+
+def test_fat83_parent_from_path_rejects_absolute_path() -> None:
+    try:
+        fat83_parent_from_path(Path("/tmp/SRC/HELLO.S"))
+    except ValueError:
+        print("[PASS] test_fat83_parent_from_path_rejects_absolute_path")
+        return
+    raise AssertionError("expected absolute image path to be rejected")
 
 
 def test_build_sdfs_image_places_stage1_and_root_files() -> None:
@@ -118,12 +127,63 @@ def test_build_sdfs_image_places_stage1_and_root_files() -> None:
     print("[PASS] test_build_sdfs_image_places_stage1_and_root_files")
 
 
+def test_build_sdfs_image_places_subdirectory_files() -> None:
+    stage1 = b"S1API68"
+    sdfs = b"SDFS68" + bytes(range(250)) * 3
+    hello = b"S1060200010203F1\r\nS9030000FC\r\n"
+    hello_com = b"\x39"
+    image = build_sdfs_image(
+        stage1_data=stage1,
+        sdfs_data=sdfs,
+        extra_files=[
+            _file("HELLO.S", hello, path=("SRC",)),
+            _file("HELLO.COM", hello_com, path=("BIN",)),
+        ],
+    )
+
+    bpb = sector(image, DEFAULT_PARTITION_START_LBA)
+    fat_lba = DEFAULT_PARTITION_START_LBA + u16(bpb, 14)
+    data_start_lba = fat_lba + bpb[16] * u32(bpb, 36)
+    root = sector(image, data_start_lba)
+    assert root[0:11] == b"SDFS    BIN"
+    assert root[32:43] == b"SRC        "
+    assert root[32 + 11] == 0x10
+    assert root[64:75] == b"BIN        "
+    assert root[64 + 11] == 0x10
+
+    fat = sector(image, fat_lba)
+    src_cluster = entry_cluster(root[32:64])
+    bin_cluster = entry_cluster(root[64:96])
+    assert fat_entry(fat, src_cluster) == EOC
+    assert fat_entry(fat, bin_cluster) == EOC
+
+    src = sector(image, data_start_lba + (src_cluster - 2))
+    bin_dir = sector(image, data_start_lba + (bin_cluster - 2))
+    assert src[0:11] == b"HELLO   S  "
+    assert src[11] == 0x20
+    assert u32(src, 28) == len(hello)
+    assert bin_dir[0:11] == b"HELLO   COM"
+    assert bin_dir[11] == 0x20
+    assert u32(bin_dir, 28) == len(hello_com)
+    assert sector(image, data_start_lba + (entry_cluster(src[0:32]) - 2)).startswith(hello)
+    assert sector(image, data_start_lba + (entry_cluster(bin_dir[0:32]) - 2)).startswith(hello_com)
+    print("[PASS] test_build_sdfs_image_places_subdirectory_files")
+
+
 def test_build_sdfs_image_rejects_bad_inputs() -> None:
     cases = [
         dict(stage1_data=b"", sdfs_data=b"S", extra_files=[]),
         dict(stage1_data=b"S", sdfs_data=b"", extra_files=[]),
         dict(stage1_data=b"S" * (17 * SECTOR_SIZE), sdfs_data=b"S", extra_files=[]),
         dict(stage1_data=b"S", sdfs_data=b"S", extra_files=[_file("SDFS.BIN", b"dup")]),
+        dict(
+            stage1_data=b"S",
+            sdfs_data=b"S",
+            extra_files=[
+                _file("SRC", b"file"),
+                _file("HELLO.S", b"sub", path=("SRC",)),
+            ],
+        ),
     ]
     for kwargs in cases:
         try:
@@ -184,10 +244,14 @@ def test_cli_writes_image_and_reports_missing_file() -> None:
     print("[PASS] test_cli_writes_image_and_reports_missing_file")
 
 
-def _file(name: str, data: bytes):
+def _file(name: str, data: bytes, path: tuple[str, ...] = ()):
     from fat32_image import Fat32File
 
-    return Fat32File(fat83_from_path(Path(name)), data)
+    return Fat32File(
+        fat83_from_path(Path(name)),
+        data,
+        path=tuple(fat83_from_path(Path(component)) for component in path),
+    )
 
 
 def main() -> None:
@@ -197,7 +261,9 @@ def main() -> None:
     tests = [
         test_fat83_from_path_accepts_uppercase_83,
         test_fat83_from_path_rejects_non_83,
+        test_fat83_parent_from_path_rejects_absolute_path,
         test_build_sdfs_image_places_stage1_and_root_files,
+        test_build_sdfs_image_places_subdirectory_files,
         test_build_sdfs_image_rejects_bad_inputs,
         test_cli_writes_image_and_reports_missing_file,
     ]

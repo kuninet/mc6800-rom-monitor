@@ -56,13 +56,13 @@ ROM常駐FAT `DIR` / `LF` を使う場合でも、FAT32形式のSDカード自�
 基本形:
 
 ```console
-python3 tools/mk_sdfs_image.py --stage1 STAGE1.BIN --sdfs SDFS.BIN --output sdfs.img HELLO.S HELLO.HEX
+python3 tools/mk_sdfs_image.py --stage1 STAGE1.BIN --sdfs SDFS.BIN --output sdfs.img SRC/HELLO.S SRC/HELLO.HEX BIN/HELLO.COM
 ```
 
 Windows では `python` コマンドを使う環境もある。
 
 ```powershell
-python tools\mk_sdfs_image.py --stage1 STAGE1.BIN --sdfs SDFS.BIN --output sdfs.img HELLO.S HELLO.HEX
+python tools\mk_sdfs_image.py --stage1 STAGE1.BIN --sdfs SDFS.BIN --output sdfs.img SRC\HELLO.S SRC\HELLO.HEX BIN\HELLO.COM
 ```
 
 入力候補:
@@ -80,7 +80,7 @@ python tools\mk_sdfs_image.py --stage1 STAGE1.BIN --sdfs SDFS.BIN --output sdfs.
 - partition開始前の physical LBA `16` 以降にstage1 loaderを配置する。
 - FAT32 partition は既定で physical LBA `32` から開始する。
 - 既定出力はホストOSがFAT32として扱えるクラスタ数を持つ。
-- root directory に `SDFS.BIN` と指定ファイルを配置する。
+- root directory に `SDFS.BIN` を配置し、相対パス付きの指定ファイルは対応するサブディレクトリに配置する。
 - テスト用には小さい決定的イメージを生成できるようにする。
 
 stage1 boot area は FAT32 reserved sector ではない。ROMはFATを見ずに physical LBA `16` からstage1を読み、stage1がFAT rootの `SDFS.BIN` を読む。
@@ -97,19 +97,23 @@ Mac / Linux では `dd` や OS 標準のディスク操作でイメージを書�
 - デバイス指定ミスで別ディスクを破壊する危険がある。
 - Mac / Windows / Linux でデバイス列挙と権限モデルが大きく違う。
 
-## 初期ファイル配置
+## 推奨ファイル配置
 
-v1 の root directory は次を想定する。
+V1.3では `SDFS.BIN` をroot directoryへ置いたまま、利用者ファイルをサブディレクトリへ整理できる。
 
 | ファイル | 用途 |
 | --- | --- |
 | fixed boot area | stage1 loader。ROMが固定LBAから読む |
 | `SDFS.BIN` | SDFS/68 本体。stage1がFAT rootから読む |
-| `HELLO.S` | S-Record LOAD 確認用 |
-| `HELLO.HEX` | Intel HEX LOAD 確認用 |
-| `AUTOEXEC.S` | v2 以降の任意起動スクリプト候補 |
+| `SRC/HELLO.S` | S-Record LOAD / RUN 確認用 |
+| `SRC/HELLO.HEX` | Intel HEX LOAD 確認用 |
+| `BIN/HELLO.COM` | `.COM` トランジェントコマンド確認用 |
+| `DATA/` | データファイル配置候補 |
+| `DOC/` | テキストや説明資料の配置候補 |
+| `AUTOEXEC.S` | 将来の任意起動スクリプト候補 |
 
-`AUTOEXEC.S` は v1 の必須ファイルではない。ROM 側 `BOOT` は `AUTOEXEC.S` を直接読まない。
+`SDFS.BIN` は stage1 が固定名で探すため、V1.3でもroot directory直下に置く。
+`AUTOEXEC.S` は現時点の必須ファイルではない。ROM 側 `BOOT` は `AUTOEXEC.S` を直接読まない。
 
 ## SDFS/68 v1 コマンド
 
@@ -142,28 +146,33 @@ SDFS/68 v1 はloaderの書き込み先アドレスを保護しない。`SDFS.BIN
 
 ## SDFS/68 v2 コマンド
 
-SDFS/68 v2では、DOS風の通常操作を本線にする。
-ただし現時点ではメジャーバージョンを変えるほどのアーキテクチャ変更ではないため、起動時は `SDFS/68 V1.2 #150` のように表示する。
-`#150` は元Issue番号をbuild番号相当として扱う。
+SDFS/68 v2以降では、DOS風の通常操作を本線にする。
+SDFS/68 V1.3ではサブディレクトリとroot起点の明示path指定を追加し、起動時は `SDFS/68 V1.3 #157` のように表示する。
+`#157` は元Issue番号をbuild番号相当として扱う。
 SDFS.BIN headerのversion byteはstage1が読むバイナリ形式versionであり、起動表示のバージョンとは別に扱う。
 
 | コマンド | 用途 |
 | --- | --- |
-| `DIR` | 実装済み。FAT root の8.3通常ファイルを表示する |
+| `DIR [path]` | 実装済み。FAT directory の8.3通常ファイルと通常ディレクトリを表示する |
 | `TYPE filename` | 予定。テキストファイルをコンソールへ表示する |
-| `RUN filename` | 実装済み。S-Recordファイルをロードし、entry recordがあれば実行する |
+| `RUN path/file` | 実装済み。S-Recordファイルをロードし、entry recordがあれば実行する |
 | `RUN addr` | 実装済み。16bit hexadecimal address へジャンプする |
-| `LOAD filename` | 実装済み。ファイルをロードする。自動実行しない |
-| `L filename` | 実装済み。`LOAD filename` の短縮エイリアス |
-| `FOO.COM [args]` | 実装済み。`.COM` トランジェントコマンドをロードして実行する |
+| `LOAD path/file` | 実装済み。ファイルをロードする。自動実行しない |
+| `L path/file` | 実装済み。`LOAD path/file` の短縮エイリアス |
+| `path/FOO.COM [args]` | 実装済み。`.COM` トランジェントコマンドをロードして実行する |
 | `Dhhhh` | 実装済み。16bit hexadecimal address の1 byteを表示する |
 | `EXIT` | 実装済み。ROMモニタへ戻る |
 
 SDFS/68の行入力はROMモニタ相当に寄せ、BS / DELで入力中の1文字を削除できる。
 行頭でのBS / DELは無視する。
-コマンド名と8.3ファイル名は小文字でも入力できる。
+コマンド名、8.3ファイル名、path componentは小文字でも入力できる。
 
-`DIR` はSDFS/68本体がstage1の既存低レベルサービスを使ってroot directoryを走査する。
+V1.3のpath指定は毎回root directoryを起点にたどる。
+`/SRC/HELLO.S` と `SRC/HELLO.S` はどちらもrootの `SRC` から始まる明示pathとして扱う。
+カレントディレクトリ、`CD`、`PWD`、相対path、`.`、`..`、wildcard、LFNは扱わない。
+末尾 `/`、空component、`//`、path内の空白はエラーとして `?` を表示する。
+
+`DIR` はSDFS/68本体がstage1の既存低レベルサービスを使ってdirectoryを走査する。
 stage1に `DIR` 専用APIは追加せず、ROM側の `DIR` も呼ばない。
 
 表示例:
@@ -171,15 +180,19 @@ stage1に `DIR` 専用APIは追加せず、ROM側の `DIR` も呼ばない。
 ```text
 SDFS> DIR
 SDFS.BIN A 0000092F
+SRC D 00000000
+BIN D 00000000
+SDFS> DIR /SRC
 HELLO.S A 0000004A
 HELLO.HEX A 00000022
 ```
 
-`DIR` が表示するのは、root directory直下の8.3 short filename通常ユーザーファイルだけである。
-LFN、volume label、directory、hidden、system、deleted entryは表示しない。
+`DIR` が表示するのは、8.3 short filenameの通常ユーザーファイルと通常ディレクトリである。
+属性欄は通常ファイルを `A`、ディレクトリを `D` として表示する。
+LFN、volume label、hidden、system、deleted entry、`.`、`..` は表示しない。
 ファイル名に制御文字や非ASCIIが混じるentryも表示しない。
 MacでSDカードをマウントしたときにできるAppleDouble風の副産物は、hidden属性付きの短縮名として見える場合があり、SDFS/68の `DIR` では表示しない。
-subdirectory、wildcard、属性詳細表示、FAT writeは対象外である。
+wildcard、属性詳細表示、FAT writeは対象外である。
 
 通常実行は `RUN` を使う。
 `LOAD` / `L` はロード確認やデバッグ用の補助コマンドとして扱う。
@@ -189,20 +202,23 @@ subdirectory、wildcard、属性詳細表示、FAT writeは対象外である。
 
 ```text
 SDFS> RUN HELLO.S
+SDFS> LOAD /SRC/HELLO.HEX
+SDFS> /BIN/HELLO.COM
+SDFS> /BIN/ARGS.COM AAA BBB
 ```
 
-`RUN filename` はS-Record専用である。
+`RUN path/file` はS-Record専用である。
 `S9` / `S8` のentry recordがある場合だけ、ロード後にそのアドレスへジャンプする。
 Intel HEXはアセンブラがstart address recordを出さない環境が多いため、SDFS/68 V1.2では `RUN filename` の対象外とする。
-Intel HEXを実行したい場合は、`LOAD filename` でロードしてから `RUN addr` で明示アドレスへジャンプする。
+Intel HEXを実行したい場合は、`LOAD path/file` でロードしてから `RUN addr` で明示アドレスへジャンプする。
 
 `RUN addr` は指定アドレスへ直接ジャンプする。プログラム終了後にSDFS/68へ戻る保証はない。
 ROMモニタの `G addr` 相当の実行入口として扱う。
 
 `.COM` トランジェントコマンドは `RUN` とは別の復帰前提ABIである。
-`FOO.COM` のように拡張子まで明示して入力すると、SDFS/68 は raw binary を `$0100` へ固定ロードし、`JSR $0100` 相当で起動する。
+`FOO.COM` や `/BIN/FOO.COM` のように拡張子まで明示して入力すると、SDFS/68 は raw binary を `$0100` へ固定ロードし、`JSR $0100` 相当で起動する。
 `.COM` 側は `RTS` で SDFS/68 へ戻る。
-`FOO.COM AAA BBB` のように引数を付けた場合、SDFS/68 は `X` / `B` で引数テールを渡す。
+`FOO.COM AAA BBB` や `/BIN/FOO.COM AAA BBB` のように引数を付けた場合、SDFS/68 は `X` / `B` で引数テールを渡す。
 詳細は [SDFS/68 .COM トランジェントコマンドABI](../design/sdfs68_com_abi.md) を参照する。
 
 メモリ変更、ブレークポイント、逆アセンブルなどの低レベルデバッグはSDFS/68に取り込まず、`EXIT` でROMモニタへ戻って行う。

@@ -96,7 +96,7 @@ def test_sdfs_accepts_sd_axis_without_vdg() -> None:
     assert rc == 0 and "[TIMEOUT]" not in stderr, (
         f"emulator failed for sbcio SD axis: rc={rc} stderr={stderr!r}"
     )
-    assert "SDFS/68 V1.2 #150" in stdout, f"missing SDFS banner: {stdout!r}"
+    assert "SDFS/68 V1.3 #157" in stdout, f"missing SDFS banner: {stdout!r}"
     assert "SDFS> " in stdout, f"missing SDFS prompt: {stdout!r}"
     print("[PASS] test_sdfs_accepts_sd_axis_without_vdg")
 
@@ -197,7 +197,7 @@ def test_stage1_boot_runs_built_sdfs_binary() -> None:
         assert rc == 0 and "[TIMEOUT]" not in stderr, (
             f"emulator failed for {profile}: rc={rc} stderr={stderr!r}"
         )
-        assert "SDFS/68 V1.2 #150" in stdout, f"missing SDFS banner for {profile}: {stdout!r}"
+        assert "SDFS/68 V1.3 #157" in stdout, f"missing SDFS banner for {profile}: {stdout!r}"
         assert "SDFS> " in stdout, f"missing SDFS prompt for {profile}: {stdout!r}"
     print("[PASS] test_stage1_boot_runs_built_sdfs_binary")
 
@@ -280,7 +280,7 @@ def test_sdfs_dir_lists_root_files_and_skips_non_files() -> None:
             f"README.TXT missing or size mismatch for {profile}: {stdout!r}"
         )
         assert "SKIPVOL" not in stdout, f"volume label leaked into DIR for {profile}: {stdout!r}"
-        assert "SKIPDIR" not in stdout, f"directory entry leaked into DIR for {profile}: {stdout!r}"
+        assert "SKIPDIR D 00000000" in stdout, f"directory entry missing from DIR for {profile}: {stdout!r}"
         assert "SKIPLFN" not in stdout, f"LFN entry leaked into DIR for {profile}: {stdout!r}"
         assert "SKIPHID" not in stdout, f"hidden entry leaked into DIR for {profile}: {stdout!r}"
         assert "SKIPSYS" not in stdout, f"system entry leaked into DIR for {profile}: {stdout!r}"
@@ -436,7 +436,7 @@ def test_sdfs_exit_returns_to_monitor_and_boots_again() -> None:
         max_cycles=180_000_000,
     )
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
-    assert stdout.count("SDFS/68 V1.2 #150") >= 2, f"EXIT did not allow BOOT again: {stdout!r}"
+    assert stdout.count("SDFS/68 V1.3 #157") >= 2, f"EXIT did not allow BOOT again: {stdout!r}"
     assert stdout.count("] ") >= 2, f"monitor prompt did not return after EXIT: {stdout!r}"
     print("[PASS] test_sdfs_exit_returns_to_monitor_and_boots_again")
 
@@ -664,6 +664,125 @@ def test_sdfs_com_rejects_bad_transient_commands() -> None:
     assert "SDFS.BIN A " in stdout, f"prompt did not recover after bad .COM commands: {stdout!r}"
     assert stdout.count("SDFS> ") >= 7, f"prompt did not recover after bad .COM commands: {stdout!r}"
     print("[PASS] test_sdfs_com_rejects_bad_transient_commands")
+
+
+def test_sdfs_subdirectory_paths_dir_load_run_and_com() -> None:
+    profile = "sbcio_vdg"
+    _run_make(profile, "bin")
+    _run_make(profile, "stage1")
+    _run_make(profile, "sdfs")
+    _run_make(profile, "sdfs-tools")
+    suffix = EXPECTED[profile]["suffix"]
+    stage1 = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+    sdfs = (PROJECT_ROOT / "build" / f"SDFS{suffix}.BIN").read_bytes()
+    hello_com = (PROJECT_ROOT / "build" / "HELLO.COM").read_bytes()
+    args_com = (PROJECT_ROOT / "build" / "ARGS.COM").read_bytes()
+    hello_program = bytes(
+        [
+            0xCE,
+            0x01,
+            0x07,
+            0xBD,
+            0xE0,
+            0x7E,
+            0x3F,
+            0x0D,
+            0x0A,
+            *b"HELLO, WORLD",
+            0x0D,
+            0x0A,
+            0x04,
+        ]
+    )
+    image = build_sdfs_image(
+        stage1_data=stage1,
+        sdfs_data=sdfs,
+        extra_files=[
+            _file("HELLO.S", _srec_file(0x0200, b"S"), path=("SRC",)),
+            _file("HELLO.HEX", _ihex_file(0x0201, b"I"), path=("SRC",)),
+            _file("RUN.S", _srec_file(0x0100, hello_program, entry_address=0x0100), path=("SRC",)),
+            _file("HELLO.COM", hello_com, path=("BIN",)),
+            _file("ARGS.COM", args_com, path=("BIN",)),
+            _raw_file(b"SKIPHID TXT", b"", attr=0x22, path=("SRC",)),
+            _raw_file(b"SKIPLFN    ", b"", attr=0x0F, path=("SRC",)),
+            _raw_file(b".          ", b"", attr=0x10, path=("SRC",)),
+            _raw_file(b"..         ", b"", attr=0x10, path=("SRC",)),
+        ],
+    )
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
+        input_text=(
+            "BOOT\r"
+            "DIR\r"
+            "DIR /SRC\r"
+            "LOAD /SRC/HELLO.S\r"
+            "D0200\r"
+            "L SRC/HELLO.HEX\r"
+            "D0201\r"
+            "/BIN/HELLO.COM\r"
+            "/BIN/ARGS.COM AAA BBB\r"
+            "RUN /SRC/RUN.S\r"
+            "X"
+        ),
+        sd_image=image,
+        max_cycles=360_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert "SRC D 00000000" in stdout, f"root DIR did not show SRC directory: {stdout!r}"
+    assert "BIN D 00000000" in stdout, f"root DIR did not show BIN directory: {stdout!r}"
+    assert "HELLO.S A " in stdout, f"DIR /SRC did not show HELLO.S: {stdout!r}"
+    assert "HELLO.HEX A " in stdout, f"DIR /SRC did not show HELLO.HEX: {stdout!r}"
+    assert "SKIPHID" not in stdout, f"hidden entry leaked from DIR /SRC: {stdout!r}"
+    assert "SKIPLFN" not in stdout, f"LFN entry leaked from DIR /SRC: {stdout!r}"
+    assert ". D " not in stdout and ".. D " not in stdout, f"dot entries leaked: {stdout!r}"
+    assert "0200 53" in stdout, f"path LOAD did not write S-record data: {stdout!r}"
+    assert "0201 49" in stdout, f"relative-root path L did not write HEX data: {stdout!r}"
+    assert "HELLO COM" in stdout, f"path .COM did not execute: {stdout!r}"
+    assert "ARGS AAA BBB" in stdout, f"path .COM arguments were not passed: {stdout!r}"
+    assert "HELLO, WORLD" in stdout, f"path RUN did not execute S-record entry: {stdout!r}"
+    assert "BRK 0106" in stdout, f"path RUN program did not reach SWI: {stdout!r}"
+    print("[PASS] test_sdfs_subdirectory_paths_dir_load_run_and_com")
+
+
+def test_sdfs_subdirectory_paths_reject_bad_inputs() -> None:
+    profile = "sbcio_vdg"
+    _run_make(profile, "bin")
+    _run_make(profile, "stage1")
+    _run_make(profile, "sdfs")
+    suffix = EXPECTED[profile]["suffix"]
+    stage1 = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+    sdfs = (PROJECT_ROOT / "build" / f"SDFS{suffix}.BIN").read_bytes()
+    image = build_sdfs_image(
+        stage1_data=stage1,
+        sdfs_data=sdfs,
+        extra_files=[
+            _file("HELLO.S", _srec_file(0x0200, b"S"), path=("SRC",)),
+            _raw_file(b"VOL     TXT", b"", attr=0x08),
+        ],
+    )
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
+        input_text=(
+            "BOOT\r"
+            "DIR /\r"
+            "DIR //SRC\r"
+            "DIR /SRC/\r"
+            "LOAD /SRC/NOPE.S\r"
+            "LOAD /SRC\r"
+            "LOAD /NOPE/HELLO.S\r"
+            "LOAD /SRC/HELLO.S X\r"
+            "LOAD /VOL.TXT\r"
+            "DIR\r"
+            "X"
+        ),
+        sd_image=image,
+        max_cycles=220_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert stdout.count("?") >= 8, f"bad path inputs were not rejected: {stdout!r}"
+    assert "SRC D 00000000" in stdout, f"prompt did not recover after bad paths: {stdout!r}"
+    assert stdout.count("SDFS> ") >= 8, f"prompt count too low after bad paths: {stdout!r}"
+    print("[PASS] test_sdfs_subdirectory_paths_reject_bad_inputs")
 
 
 def test_sdfs_line_editing_backspace_delete_and_lowercase() -> None:
@@ -946,15 +1065,17 @@ def _vdg_code_to_ascii(value: int) -> str:
     return " "
 
 
-def _file(name: str, data: bytes) -> Fat32File:
+def _file(name: str, data: bytes, path: tuple[str, ...] = ()) -> Fat32File:
     stem, _dot, ext = name.partition(".")
     name83 = stem.upper().encode("ascii").ljust(8, b" ")
     name83 += ext.upper().encode("ascii").ljust(3, b" ")
-    return Fat32File(name83, data)
+    path83 = tuple(part.upper().encode("ascii").ljust(8, b" ") + b"   " for part in path)
+    return Fat32File(name83, data, path=path83)
 
 
-def _raw_file(name83: bytes, data: bytes, *, attr: int) -> Fat32File:
-    return Fat32File(name83, data, attr=attr)
+def _raw_file(name83: bytes, data: bytes, *, attr: int, path: tuple[str, ...] = ()) -> Fat32File:
+    path83 = tuple(part.upper().encode("ascii").ljust(8, b" ") + b"   " for part in path)
+    return Fat32File(name83, data, attr=attr, path=path83)
 
 
 def _layout_from_image(image: bytes | bytearray) -> Fat32Layout:
@@ -1079,6 +1200,8 @@ def main() -> None:
         test_sdfs_run_file_requires_srec_entry,
         test_sdfs_com_runs_transient_commands_and_arguments,
         test_sdfs_com_rejects_bad_transient_commands,
+        test_sdfs_subdirectory_paths_dir_load_run_and_com,
+        test_sdfs_subdirectory_paths_reject_bad_inputs,
         test_sdfs_line_editing_backspace_delete_and_lowercase,
         test_sdfs_line_input_ignores_overlong_command,
         test_sdfs_loader_errors_return_to_prompt,
