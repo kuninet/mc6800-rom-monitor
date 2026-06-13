@@ -29,6 +29,15 @@
   ```
 - close済みのIssueも sub-issue として追加できる。
 
+## 分割PRの紐づけ(パターンA)
+
+GitHub Project の「Linked pull requests」列でPRを取りこぼさず追跡するための標準運用。
+
+- 1つの作業を複数PRに分ける場合は、**PRステップごとに sub-issue を作り、各PRは `Closes #<そのstep-issue>`** を使う。これで全PRが該当Issueの「Linked pull requests」列に並び、取りこぼさない。
+- 単一PRで完了する作業は、そのPRが対象Issueを `Closes` する。
+- 親/アンブレラIssue(例 #216)は **close しない**。`Refs` と sub-issue ツリーで束ねる(`Closes` しない)。
+- 注意: 「Linked pull requests」列はリンク(`Closes`/`Fixes`/`Resolves` または手動リンク)でのみ埋まり、`Refs` では出ない。そしてリンクはデフォルトブランチへのマージでIssueを自動closeする。「リンクするが閉じない」手段は無いため、閉じたくないIssueには上記のstep-issue分割で対応する。
+
 ## 生成AIの痕跡を残さない
 
 - GitHub Issue、Pull Request、コミットメッセージに、生成AI由来であることを示す痕跡を一切残さない。
