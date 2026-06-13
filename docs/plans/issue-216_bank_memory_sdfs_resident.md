@@ -275,7 +275,8 @@ TPA境界を導入するIssueでは、`.COM` ABI文書とテストの更新を�
 ## 推奨するIssue分割
 
 親Issue #216 は、検討と方針整理の棚にする。
-実装PRから親Issueを直接closeせず、子Issueから `Refs #216` を使う。
+子IssueはGitHubのsub-issueとして #216 に正式に紐づける。
+実装PRから親Issueを直接closeせず、子IssueのPRは自身のIssueを `Closes` し、親Issue #216 は `Refs` とsub-issueツリーで束ねる。
 
 | 子Issue案 | 内容 | 完了条件 |
 | --- | --- | --- |
