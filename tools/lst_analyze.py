@@ -104,6 +104,59 @@ def dup_report(rom, sdfs, ours):
         print(f"      {b}  (ROM @{rom[b][0]})  ↔  SDFS_{b}  (SDFS @{sdfs['SDFS_'+b][0]})")
 
 
+BODY = re.compile(r"^\s*\d+/[0-9A-Fa-f]+\s*:\s*(.*)$")
+LABELDEF = re.compile(r"^([A-Za-z_.][A-Za-z0-9_.$]*):")
+
+
+def reclaim_report(cfg, rom):
+    """案1(ROMローダAPI化)でSDFSモジュールから回収できるバイト数を、
+    リスト本文の実出力バイトを行単位で集計して見積もる。
+
+    各行を直近のラベルに帰属させ、`SDFS_X` の X が ROM に live コードとして
+    存在すれば「ROM再利用可能=回収対象」とする。ただしROMに存在しない
+    `SDFS_PARSE_FILENAME_*` はSDFS固有として据置に分類する。"""
+    rom_live = {n for n, v in rom.items() if v[1] == "C" and not v[2]}
+    p = ROOT / f"build/SDFS-{cfg}.lst"
+    if not p.exists():
+        print(f"\n{'='*70}\n■ 回収見積り — SDFSリストなし(スキップ)")
+        return
+    lines = p.read_text(errors="replace").splitlines()
+    end = next((i for i, l in enumerate(lines) if "Symbol Table" in l), len(lines))
+    cur = None
+    reuse = filename = other = total = 0
+    for l in lines[:end]:
+        m = BODY.match(l)
+        if not m:
+            continue
+        toks = m.group(1).split()
+        nb = 0
+        for tk in toks:
+            if re.fullmatch(r"[0-9A-F]{2}", tk):
+                nb += 1
+            else:
+                break
+        ld = LABELDEF.match(" ".join(toks[nb:]))
+        if ld:
+            cur = ld.group(1)
+        total += nb
+        if cur and cur.startswith("SDFS_"):
+            base = cur[5:]
+            if base.startswith("PARSE_FILENAME"):
+                filename += nb
+            elif base in rom_live:
+                reuse += nb
+            else:
+                other += nb
+        else:
+            other += nb
+    print(f"\n{'='*70}\n■ 案1 回収見積り(SDFSモジュール [{cfg}])")
+    print(f"  総出力バイト: {total} (0x{total:X})")
+    print(f"  ├ ROM再利用可能ローダ(回収対象): {reuse} bytes (0x{reuse:X})")
+    print(f"  ├ PARSE_FILENAME(SDFS固有・据置): {filename} bytes (0x{filename:X})")
+    print(f"  └ その他SDFS本体: {other} bytes (0x{other:X})")
+    print(f"  ==> 回収見込み 約 {reuse} bytes")
+
+
 if __name__ == "__main__":
     cfg = sys.argv[1] if len(sys.argv) > 1 else "sbcio-sdfs"
     ours = our_symbols()
@@ -112,3 +165,4 @@ if __name__ == "__main__":
     report(ROOT / f"build/stage1-{cfg}.lst", f"stage1 [{cfg}]", ours)
     if rom and sdfs:
         dup_report(rom, sdfs, ours)
+        reclaim_report(cfg, rom)
