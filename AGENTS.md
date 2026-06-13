@@ -44,6 +44,18 @@ GitHub Project の「Linked pull requests」列でPRを取りこぼさず追跡�
 - コミットに `Co-Authored-By` の生成AI署名を付けない。PR本文に「Generated with ...」等のフッタを付けない。
 - 道具名(解析ツール等)を手段として記載するのは痕跡ではないので可。
 
+## テスト実行
+
+- コード変更後と PR 作成前は、**必ず全テストを実行する**。正規手順は `make test`(ビルド前提込みで全テストを実行)。
+- 手順の詳細は `docs/development/workflow.md` の「テスト方針」を参照。
+- テストは pytest ではなくスクリプト直実行。エミュテストは先に base profile をビルドしないと環境失敗する(`make test` が自動で満たす)。
+
+## 改行コードを変更しない
+
+- ファイルの既存の改行コードを変更しない(正規化しない)。`src/main.asm` は CRLF、その他は LF。
+- 編集ツールは保存時に CRLF→LF 正規化することがあるため、CRLF ファイルはバイト保持の方法で編集する。
+- コミット前に `git diff --numstat` と `git diff --ignore-all-space --numstat` が一致することを確認する(乖離=改行コードが壊れた合図)。
+
 このリポジトリで Codex が作業する際のローカル運用ルールを定義する。
 
 ## 言語
