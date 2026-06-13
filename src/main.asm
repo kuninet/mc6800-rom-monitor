@@ -2718,6 +2718,20 @@ FAT32_INCLUDE_FILE_API equ 1
         include "fat32.asm"
  endif
 
+; ROMローダ公開API ジャンプテーブル(固定アドレス $FF00)。
+; SDFS/68・stage1 からS-Record/Intel-HEXローダを共用するための入口。
+; アドレス定義は include/hardware.inc の ROM_LDR_* を参照。並び順は変更不可。
+        org     ROM_LDR_API
+        jmp     READ_LOADER_RECORD
+        jmp     READ_LINE
+        jmp     READ_HEXBYTE_INPUT
+        jmp     ADD_TO_LOADER_SUM
+        jmp     HEX_TO_NIBBLE
+        jmp     PRINT_HEX8
+        jmp     PRINT_PROMPT
+        jmp     SHOW_ERROR
+        jmp     SHOW_LOADER_ERROR
+
         org     VEC_IRQ
         fdb     SPURIOUS_IRQ     ; VEC_IRQ
         fdb     SWI_HANDLER      ; VEC_SWI
