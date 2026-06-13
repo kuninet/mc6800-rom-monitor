@@ -231,7 +231,7 @@ endif
 
 ASL_INCLUDE := $(CURDIR)/$(OUTDIR)$(ASL_PATHSEP)$(CURDIR)/include$(ASL_PATHSEP)$(CURDIR)/src
 
-.PHONY: all clean bin check-rom-size srec ihex stage1 sdfs sdfs-tools sdfs-tools-srec sdfs-tools-com check-stage1-config rombin rombin-27c64 rombin-27c128 rombin-27c256 rombin-28c256 rombin-w27c512 program verify readback program-27c64 program-27c128 program-27c256 program-28c256 program-w27c512 program-upd28c256 FORCE
+.PHONY: all clean bin test check-rom-size srec ihex stage1 sdfs sdfs-tools sdfs-tools-srec sdfs-tools-com check-stage1-config rombin rombin-27c64 rombin-27c128 rombin-27c256 rombin-28c256 rombin-w27c512 program verify readback program-27c64 program-27c128 program-27c256 program-28c256 program-w27c512 program-upd28c256 FORCE
 
 all: check-rom-size srec ihex
 
@@ -251,6 +251,19 @@ $(BIN): $(OBJ)
 
 check-rom-size: $(BIN)
 	"$(PYTHON)" -c "from pathlib import Path; import sys; p=Path('$(BIN)'); size=p.stat().st_size; limit=int('$(ROM_CODE_LIMIT)', 0); print(f'{p}: {size}/{limit} bytes'); sys.exit(0 if limit <= 0 or size <= limit else 1)"
+
+# 全テストをビルド前提込みで実行する(CI windows-emu.yml と同等)。
+# エミュテストは最新ビルドのROM/listを使うため base と sbcio を先にビルドする。
+test:
+	$(MAKE) bin MONITOR_PROFILE=base
+	$(MAKE) bin MONITOR_PROFILE=sbcio
+	REQUIRE_BUILD_ROM=1 "$(PYTHON)" tests/test_smoke.py
+	REQUIRE_BUILD_ROM=1 "$(PYTHON)" tests/test_sd_fixture.py
+	REQUIRE_BUILD_ROM=1 MONITOR_PROFILE=sbcio MONITOR_ROM_PATH=$(OUTDIR)/mc6800-monitor-sbcio.bin MONITOR_LST_PATH=$(OUTDIR)/mc6800-monitor-sbcio.lst "$(PYTHON)" tests/test_smoke.py
+	REQUIRE_BUILD_ROM=1 MONITOR_PROFILE=sbcio MONITOR_ROM_PATH=$(OUTDIR)/mc6800-monitor-sbcio.bin MONITOR_LST_PATH=$(OUTDIR)/mc6800-monitor-sbcio.lst "$(PYTHON)" tests/test_sd_fixture.py
+	"$(PYTHON)" tests/test_sdfs68_build.py
+	"$(PYTHON)" tests/test_stage1_build.py
+	"$(PYTHON)" tests/test_mk_sdfs_image.py
 
 stage1: check-stage1-config $(STAGE1_BIN)
 

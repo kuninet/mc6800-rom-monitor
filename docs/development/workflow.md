@@ -83,13 +83,24 @@ PR 作成前に、差分へ不要ファイルが入っていないことを確�
 
 ## テスト方針
 
-PR 作成前に、原則として次を実行する。
+コード変更後と PR 作成前は、**必ず全テストを実行する**。一発で済む正規手順は `make test`。
 
-```powershell
-make bin
-$env:REQUIRE_BUILD_ROM='1'
-python tests/test_smoke.py
+```sh
+make test
 ```
+
+`make test` は次をまとめて行う(CI `.github/workflows/windows-emu.yml` と同等)。
+
+- 前提ROMを先にビルド: `make bin MONITOR_PROFILE=base` と `make bin MONITOR_PROFILE=sbcio`
+- エミュレータテスト(`REQUIRE_BUILD_ROM=1`、base と sbcio 両構成): `tests/test_smoke.py` / `tests/test_sd_fixture.py`
+- ビルド系テスト: `tests/test_sdfs68_build.py` / `tests/test_stage1_build.py` / `tests/test_mk_sdfs_image.py`
+
+注意点:
+
+- テストは pytest ではなく**スクリプト直実行**(各 `tests/test_*.py` を `python3` で実行)。
+- エミュテストは最新ビルドのROM/listを使うため、**先に base profile をビルドしないと**「build output missing」で**環境失敗**する(回帰ではない)。`make test` はこれを自動で満たす。
+- 個別実行例: `REQUIRE_BUILD_ROM=1 python3 tests/test_smoke.py`(事前に `make bin` 必須)。
+- Windows は `make` を使わず CI と同じ PowerShell 手順(`$env:REQUIRE_BUILD_ROM='1'` など)でもよい。
 
 実装で既存 smoke test にない振る舞いを追加・変更した場合は、対応するテストを追加する。
 
