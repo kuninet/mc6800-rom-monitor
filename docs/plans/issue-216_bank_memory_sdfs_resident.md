@@ -219,6 +219,10 @@ TPA境界を導入するIssueでは、`.COM` ABI文書とテストの更新を�
 | `.COM` ABI更新 | `USER_RAM_END` 低下時の最大サイズ、引数領域、復帰条件を再定義する | ABI文書とSDFS build testが更新される |
 | 実機・基板化前PoC | エミュレータまたは試作回路で `$C000` バンク窓を読み書きする | RAMTESTまたは専用診断でバンク切替が確認できる |
 
+## 関連調査(子Issue #219)
+
+子Issue #219 で、SDFS常駐部のサイズ削減余地として、ROMモニタとSDFSモジュールに二重実装されたS-Record/Intel-HEXローダ(構成正確に48ルーチン)を確認した。ROM側ローダの公開API化でSDFS常駐部から数百バイト回収できる見込みがあり、本検討の常駐サイズ評価に反映する。詳細と指摘表は [issue-219_loader_dedup_asm_analysis.md](issue-219_loader_dedup_asm_analysis.md) を参照。
+
 ## 採用候補
 
 現時点の本命は候補Cとする。

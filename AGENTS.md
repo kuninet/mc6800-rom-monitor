@@ -16,6 +16,25 @@
 - 対応IssueがそのPRで完了する場合、PR本文の対応Issue欄には `Closes #番号` を記載する。
 - 参照だけで完了しないIssueには `Refs #番号` を使う。
 
+## 親子Issue(sub-issue)
+
+- 親子関係のあるIssueは、本文の `Refs` 表記だけで済ませず、GitHub の sub-issue として必ず正式に紐づける。
+- `gh` CLI には sub-issue サブコマンドが無いため、GraphQL API で紐づける。
+  ```sh
+  P=$(gh issue view <親番号> --json id -q .id)
+  C=$(gh issue view <子番号> --json id -q .id)
+  gh api graphql -H "GraphQL-Features: sub_issues" \
+    -f query='mutation($p:ID!,$c:ID!){addSubIssue(input:{issueId:$p,subIssueId:$c}){subIssue{number}}}' \
+    -F p="$P" -F c="$C"
+  ```
+- close済みのIssueも sub-issue として追加できる。
+
+## 生成AIの痕跡を残さない
+
+- GitHub Issue、Pull Request、コミットメッセージに、生成AI由来であることを示す痕跡を一切残さない。
+- コミットに `Co-Authored-By` の生成AI署名を付けない。PR本文に「Generated with ...」等のフッタを付けない。
+- 道具名(解析ツール等)を手段として記載するのは痕跡ではないので可。
+
 このリポジトリで Codex が作業する際のローカル運用ルールを定義する。
 
 ## 言語
