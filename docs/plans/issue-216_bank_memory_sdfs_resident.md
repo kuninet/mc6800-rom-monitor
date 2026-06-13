@@ -4,6 +4,7 @@
 
 - 親Issue: #216
 - この計画文書の追加Issue: #217
+- SDFS/68固定領域16KB化Issue: #233
 - 対象領域: SDFS/68、stage1、SBC-IO系RAM拡張、K68-VDG系VRAM、将来のバンクメモリボード
 
 ## 背景
@@ -156,23 +157,92 @@ VRAMが表示中に切り替わる、SDFS実行中に自身を消す、といっ
 この候補は、基板初版では採用しない。
 将来版で検討する場合も、片側はVRAM固定、もう片側だけバンク窓にする運用を優先する。
 
-## バンクメモリボード案
+## 採用するRAM/バンクメモリカード仕様
 
-初版は、8KB単位の単純デコードを前提にする。
+2026-06-13時点の検討では、SBC-IOやK6802-SBC側のSRAMを外し、新RAM/バンクメモリカード側で低位RAMとバンク窓を担当する方針を採用候補にする。
+SBC-IOはI/O、PIA、2nd ACIA、SD接続の役割に寄せ、K68-VDGはVRAMを担当する。
 
 ```text
-74HC138  A15-A13 から8KBブロックを選択
-74HC74   バンクレジスタ
-74HC157  SRAM上位アドレス切替
-74HC00/32 CS/OE/WE調整
-SRAM     128KB以上、可能なら512KB品も搭載可能にする
+新RAM/バンクメモリカード
+
+32KB SRAM
+  $0000-$7FFF 固定RAM
+
+128KB SRAM
+  8KB bank window x 16 banks
+  窓位置は $A000-$BFFF または $C000-$DFFF をジャンパ選択
+
+K68-VDG VRAM
+  bank window ではない側の8KBを使う
 ```
 
-バンク窓は `$C000-$DFFF` を第一候補にする。
-バンク番号は4bit以上を持たせ、128KB SRAMなら16本の8KBページ、512KB SRAMなら64本の8KBページとして扱える。
+メモリマップは次の2構成を想定する。
 
-`$A000-$BFFF` はVRAM固定を第一候補にする。
-SBC-IO/VDG構成差のため、ジャンパまたはビルド構成で `$A000` と `$C000` のVRAM配置を切り替えられる余地は残すが、SDFS常駐領域とVRAMが同じ可変バンクに乗る設計は避ける。
+```text
+A案: VRAM=$A000、bank window=$C000
+
+$0000-$3FFF  ユーザーTPA
+$4000-$7FFF  SDFS/68固定領域
+$8000-$9FFF  I/O窓
+$A000-$BFFF  K68-VDG VRAM
+$C000-$DFFF  8KB bank window
+$E000-$FFFF  ROM
+```
+
+```text
+C案: bank window=$A000、VRAM=$C000
+
+$0000-$3FFF  ユーザーTPA
+$4000-$7FFF  SDFS/68固定領域
+$8000-$9FFF  I/O窓
+$A000-$BFFF  8KB bank window
+$C000-$DFFF  K68-VDG VRAM
+$E000-$FFFF  ROM
+```
+
+128KB SRAMを8KB単位で割るため、物理的には16 banksになる。
+ただし、SDFS/68が初期から16 banksすべてを管理する必要はない。
+初期SDFS仕様では、先頭4 banks程度だけをOS管理対象にする。
+
+```text
+bank 0  SDFS scratch / sector buffer拡張
+bank 1  FAT cache
+bank 2  directory cache
+bank 3  file data buffer / SAVE staging
+bank 4-7  将来予約
+bank 8-15 ユーザーRAM disk / overlay / 未定義
+```
+
+ハードウェア上は4bit bank registerを持たせる。
+ソフトウェア上は、初期段階では `bank 0-3` だけを定義済みとして扱い、残りはRAMTEST/BANKTESTで見える将来予約に留める。
+
+部品構成の初期案は次の通り。
+
+```text
+62256等 32KB SRAM x1     $0000-$7FFF 固定RAM
+628128等 128KB SRAM x1   8KB x16 bank RAM
+74HC138 x1               8KB単位デコード
+74HC273等 x1             bank register 4bit + control bit候補
+74HC00/32等              /CS, /OE, /WE 調整
+DIP SW/Jumper            bank window $A000/$C000 選択
+```
+
+アドレス接続の考え方は次の通り。
+
+```text
+32KB固定SRAM:
+  CPU A0-A14 -> SRAM A0-A14
+  /CS = A15=0
+
+128KB bank SRAM:
+  CPU A0-A12 -> SRAM A0-A12
+  bank register bit0-3 -> SRAM A13-A16
+  /CS = 選択された8KB窓
+```
+
+この構成により、低位RAMは単純な32KB固定RAMとして扱える。
+128KB SRAM側は8KB窓だけに見せるため、SDFS/68自身やVRAMがbank切替で消える事故を避けやすい。
+SDFS側は `BANK_WINDOW_BASE` を `$A000` / `$C000` でビルド時選択できるようにする。
 
 ## CP/M風メモリ管理案
 
@@ -211,7 +281,7 @@ TPA境界を導入するIssueでは、`.COM` ABI文書とテストの更新を�
 | --- | --- | --- |
 | SDFS/68現行メモリ使用量の棚卸し | stage1、SDFS、work、stack、VRAMの実使用と余白をlistingから整理する | サイズ表と制約がdocsに残る |
 | バンクメモリボード初版メモリマップ設計 | `$A000` VRAM固定、`$C000` 8KBバンク窓、SDFS常駐候補を設計する | 8KB単位のメモリマップ案と信号方針がdocs/designに残る |
-| `MEMORY_CONFIG` にSDFS常駐16KB案を追加 | `$4000-$7FFF` SDFS resident、`$C000-$DFFF` bank/window想定の構成軸を追加する | Make構成軸とMAP表示案が整理される |
+| `MEMORY_CONFIG` にSDFS固定領域16KB案を追加 | `$4000-$7FFF` SDFS固定領域、`$A000`または`$C000` bank window想定の構成軸を追加する | Make構成軸とMAP表示案が整理される。#233で扱う |
 | SDFS/68ロード先とstage1配置の変更PoC | SDFSを `$4000-$7FFF` または `$6000-$7FFF` に移す試験を行う | `make stage1 sdfs` と該当テストが通る |
 | SDFSメモリ上限API設計 | `SDFS_GET_MEMTOP` などの常駐APIと `.COM` / loader制限を設計する | ABI文書にAPI案と互換性が残る |
 | バンクレジスタABI設計 | バンク番号、保存復帰、割り込み/復帰時の扱いを決める | SDFS側から安全にバンク窓を使う規約がdocsに残る |
@@ -242,6 +312,31 @@ $E000-$FFFF  ROM
 
 候補Bは、ユーザーRAMを24KB残す妥協案として残す。
 ただし、8KB SDFS常駐は長期的に再び詰まる可能性が高いため、基板初版の標準案にはしない。
+
+## SDFS/68固定領域16KB化の位置づけ
+
+`$4000-$7FFF` を使う場合も、16KBすべてをSDFS本体に使えるわけではない。
+この領域には、SD sector buffer、work、stage1/boot services、SDFS resident、stack/API領域を同居させる。
+
+```text
+$4000-$41FF  SD sector buffer
+$4200-$43FF  SDFS/FAT work, line buffer, path buffer
+$4400-$4FFF  stage1 / boot services
+$5000-$77FF  SDFS resident
+$7800-$7FFF  stack / 予備 / API table
+```
+
+このため、正確には「SDFS/68固定領域を16KB級へ広げる」方針であり、「SDFS本体が16KB使える」わけではない。
+SDFS本体の実用上限は、おおむね10KB前後を目安にする。
+この変更は #216 のハード構成検討とは別に、#233 で扱う。
+
+## 将来のクリーンアーキテクチャ構想
+
+SBC6800前提、MIKBUG互換、`$8000`台I/O窓、`$E000-$FFFF` ROMという現行互換から離れ、I/Oを最上位付近へ寄せた新しい全体アーキテクチャも将来候補として考えられる。
+ただし、これは現行SBC6800/SBC-IO/K68-VDG/SDFS/68系の延長ではなく、別システムに近い。
+
+この親Issue #216 では、既存資産とSDFS/68の延長上で動くRAM/バンクメモリカードを扱う。
+クリーンアーキテクチャは、必要になった時点で別の親Issueとして切り出す。
 
 ## 検証方針
 
