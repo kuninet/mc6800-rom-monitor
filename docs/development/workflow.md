@@ -35,7 +35,9 @@ Issue は、実装・レビュー・テストが独立して判断できる単�
 - 低層 I/O、ファイル形式、コマンド統合、実機確認は分ける。
 - バグ修正は機能追加から分ける。たとえば `CMD_RESUME` 修正は SD/FAT 実装とは別 Issue にする。
 - 受け入れ条件は「動くこと」ではなく、入力、期待出力、確認方法が分かる形にする。
-- 親 Issue を使う場合でも、サブ Issue の PR から親 Issue を自動 close しない。本文では `Refs #番号` を使う。
+- 親 Issue を使う場合は、本文の `Refs #番号` だけで済ませず、GitHub の sub-issue として正式に紐づける。
+- GitHub CLI に sub-issue 専用サブコマンドがない場合は、GraphQL の `addSubIssue` mutation を使って親子関係を作る。
+- サブ Issue の PR から親 Issue を自動 close しない。サブ Issue のPRは自身のIssueを `Closes #番号`、親 Issue は `Refs #番号` と sub-issue ツリーで束ねる。
 - PoC や調査ブランチを main に直接統合しない。取り込む場合は、必要な変更を小さい Issue/PR に分け直す。
 
 ## Issue 単位の計画文書
