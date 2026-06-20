@@ -125,9 +125,11 @@ VDGなしのSBC-IOでSDFS/68を使う場合は、標準 `sbcio` profileを直接
 出力名を短く安定させるため、`BUILD_CONFIG_NAME` を付ける。
 
 ```sh
-MONITOR_PROFILE=sbcio FEATURE_SD=1 FEATURE_FAT=0 BUILD_CONFIG_NAME=sbcio-sdfs make bin
-MONITOR_PROFILE=sbcio FEATURE_SD=1 FEATURE_FAT=0 BUILD_CONFIG_NAME=sbcio-sdfs make stage1
-MONITOR_PROFILE=sbcio FEATURE_SD=1 FEATURE_FAT=0 BUILD_CONFIG_NAME=sbcio-sdfs make sdfs
+# 従来の8KBワーク構成 (ram64_c000_work)
+MONITOR_PROFILE=sbcio FEATURE_SD=1 FEATURE_FAT=0 BUILD_CONFIG_NAME=sbcio-sdfs make bin stage1 sdfs
+
+# 新しい16KB固定領域構成 (ram64_4000_work)
+MONITOR_PROFILE=sbcio MEMORY_CONFIG=ram64_4000_work FEATURE_SD=1 FEATURE_FAT=0 BUILD_CONFIG_NAME=sbcio-4000 make bin stage1 sdfs
 ```
 
 主な出力:
@@ -138,8 +140,8 @@ MONITOR_PROFILE=sbcio FEATURE_SD=1 FEATURE_FAT=0 BUILD_CONFIG_NAME=sbcio-sdfs ma
 | `k6802_vdg` | `build/stage1-k6802-vdg.bin` |
 | `sbcio` + `FEATURE_SD=1 BUILD_CONFIG_NAME=sbcio-sdfs` | `build/stage1-sbcio-sdfs.bin` |
 
-stage1 v1の配置は、`MEMORY_CONFIG=ram64_c000_work` が `$C400-$CFFF`、`MEMORY_CONFIG=ram64_a000_work` が `$A400-$AFFF` である。
-SDFS/68本体の初期ロード領域はそれぞれ `$D000-$DEFF`、`$B000-$BEFF` とする。
+stage1 v1の配置は、`MEMORY_CONFIG=ram64_c000_work` が `$C400-$CFFF`、`MEMORY_CONFIG=ram64_a000_work` が `$A400-$AFFF`、`MEMORY_CONFIG=ram64_4000_work` が `$4400-$4FFF` である。
+SDFS/68本体の初期ロード領域はそれぞれ `$D000-$DEFF`、`$B000-$BEFF`、`$5000-$7EFF` とする。
 
 `sdfs` ターゲットは FAT root の `SDFS.BIN` として配置するSDFS/68本体を生成する。
 出力はsuffix付きの `build/SDFS-sbcio-vdg.BIN`、`build/SDFS-k6802-vdg.BIN`、`build/SDFS-sbcio-sdfs.BIN` などで、SDイメージ作成時に root の8.3名 `SDFS.BIN` として格納する。
