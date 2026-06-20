@@ -59,6 +59,46 @@ SBCIO_SD_AXIS = {
 }
 
 
+SBCIO_4000_SD_AXIS = {
+    "profile": "sbcio",
+    "suffix": "-sbcio-4000",
+    "S1_BASE": 0x4400,
+    "S1_LIMIT": 0x4FFF,
+    "SDFS_LOAD_BASE": 0x5000,
+    "SDFS_LOAD_LIMIT": 0x7EFF,
+    "make_args": [
+        "MEMORY_CONFIG=ram64_4000_work",
+        "FEATURE_SD=1",
+        "FEATURE_FAT=0",
+        "BUILD_CONFIG_NAME=sbcio-4000",
+    ],
+}
+
+
+def test_stage1_accepts_sd_axis_4000() -> None:
+    config = SBCIO_4000_SD_AXIS
+    _run_make(config["profile"], make_args=config["make_args"])
+    suffix = config["suffix"]
+    bin_path = PROJECT_ROOT / "build" / f"stage1{suffix}.bin"
+    lst_path = PROJECT_ROOT / "build" / f"stage1{suffix}.lst"
+    data = bin_path.read_bytes()
+    symbols = _load_symbols(
+        lst_path,
+        "S1_BASE",
+        "S1_LIMIT",
+        "SDFS_LOAD_BASE",
+        "SDFS_LOAD_LIMIT",
+        "S1_BOOT_SDFS",
+    )
+    assert symbols["S1_BASE"] == config["S1_BASE"]
+    assert symbols["S1_LIMIT"] == config["S1_LIMIT"]
+    assert symbols["SDFS_LOAD_BASE"] == config["SDFS_LOAD_BASE"]
+    assert symbols["SDFS_LOAD_LIMIT"] == config["SDFS_LOAD_LIMIT"]
+    assert len(data) <= symbols["S1_LIMIT"] - symbols["S1_BASE"] + 1
+    _assert_stage1_header(data, symbols["S1_BOOT_SDFS"])
+    print("[PASS] test_stage1_accepts_sd_axis_4000")
+
+
 def test_stage1_rejects_base_profile() -> None:
     result = _run_make("base", expect_success=False)
     assert result.returncode != 0
@@ -700,6 +740,7 @@ def main() -> None:
     tests = [
         test_stage1_rejects_base_profile,
         test_stage1_accepts_sd_axis_without_vdg,
+        test_stage1_accepts_sd_axis_4000,
         test_stage1_profiles_build_and_match_layout,
         test_stage1_read_sector_service_reads_known_fixture_sector,
         test_stage1_mount_service_accepts_fat32_fixtures,

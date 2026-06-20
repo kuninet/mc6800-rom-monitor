@@ -289,6 +289,12 @@ def _is_k6802_vdg_build() -> bool:
     return "-k6802-vdg" in BUILD_ROM_PATH.stem or os.environ.get("MONITOR_PROFILE") == "k6802_vdg"
 
 
+def _is_ram64_4000_work_build() -> bool:
+    if os.environ.get("MEMORY_CONFIG") == "ram64_4000_work":
+        return True
+    return "-ram64_4000_work-" in BUILD_ROM_PATH.stem
+
+
 def _is_sd_build() -> bool:
     if os.environ.get("FEATURE_SD") in ("0", "1"):
         return os.environ["FEATURE_SD"] == "1"
@@ -524,7 +530,13 @@ def test_rom_profile_memory_layout() -> None:
     if _is_vdg_build():
         names.extend(["VDG_CTL", "VDG_VRAM_START", "VDG_VRAM_END"])
     symbols = _load_symbol_addresses(*names)
-    if _is_k6802_vdg_build():
+    if _is_ram64_4000_work_build():
+        expected_sector_buf = 0xA000 if (_is_vdg_build() and os.environ.get("VDG_VRAM_CONFIG", "a000") == "c000") else 0xC000
+        expected_monitor_base = 0x4200
+        expected_user_ram_end = 0x3FFF
+        expected_work_start = 0x4000
+        expected_work_end = 0x7FFF
+    elif _is_k6802_vdg_build():
         expected_sector_buf = 0xA000
         expected_monitor_base = 0xA200
         expected_user_ram_end = 0x7FFF

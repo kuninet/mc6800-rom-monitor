@@ -65,6 +65,25 @@ MEMORY_CONFIGS = {
         "RAMTEST2_START": "$A000",
         "RAMTEST2_END": "$BFFF",
     },
+    "ram64_4000_work": {
+        "RAM_END": "$7FFF",
+        "USER_RAM_END": "$3FFF",
+        "WORK_RAM_START": "$4000",
+        "WORK_RAM_END": "$7FFF",
+        "MIKBUG_VAR_BASE": "$4300",
+        "MIKBUG_STACK_TOP": "$7FFF",
+        "MONITOR_RAM_BASE": "$4200",
+        "S1_SUPPORTED": "1",
+        "S1_BASE": "$4400",
+        "S1_LIMIT": "$4FFF",
+        "SDFS_LOAD_BASE": "$5000",
+        "SDFS_LOAD_LIMIT": "$7EFF",
+        "RAMTEST1_ENABLED": "1",
+        "RAMTEST1_END": "$3FFF",
+        "RAMTEST2_ENABLED": "1",
+        "RAMTEST2_START": "$4000",
+        "RAMTEST2_END": "$7FFF",
+    },
 }
 
 SD_SECTOR_BUF = {
@@ -147,8 +166,9 @@ def main() -> None:
     ])
 
     if args.feature_sd:
+        buf_addr = ("$C000" if args.vdg_vram_config == "a000" else "$A000") if args.memory_config == "ram64_4000_work" else SD_SECTOR_BUF[args.memory_config]
         lines.extend([
-            f"SD_SECTOR_BUF    equ {SD_SECTOR_BUF[args.memory_config]}",
+            f"SD_SECTOR_BUF    equ {buf_addr}",
             "",
         ])
 
