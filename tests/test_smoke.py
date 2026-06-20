@@ -23,6 +23,8 @@ def _default_build_rom_path() -> Path:
         "sbcio": "-sbcio",
         "sbcio_vdg": "-sbcio-vdg",
         "k6802_vdg": "-k6802-vdg",
+        "sbcio_4000": "-sbcio-4000",
+        "k6802_4000": "-k6802-4000",
     }
     suffix = suffix_by_profile.get(os.environ.get("MONITOR_PROFILE", "base"), "")
     return PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin"
@@ -230,13 +232,27 @@ def expected_help_prefix() -> str:
     return "D M MAP RAMTEST G L"
 
 
+def is_sbcio_4000_build() -> bool:
+    if os.environ.get("MONITOR_PROFILE") == "sbcio_4000":
+        return True
+    return "-sbcio-4000" in BUILD_ROM_PATH.stem
+
+
+def is_k6802_4000_build() -> bool:
+    if os.environ.get("MONITOR_PROFILE") == "k6802_4000":
+        return True
+    return "-k6802-4000" in BUILD_ROM_PATH.stem
+
+
 def is_sbcio_build() -> bool:
     if os.environ.get("BOARD_IO") in ("none", "sbcio"):
         return os.environ["BOARD_IO"] == "sbcio"
     return (
         "-sbcio" in BUILD_ROM_PATH.stem
         or "-k6802-vdg" in BUILD_ROM_PATH.stem
-        or os.environ.get("MONITOR_PROFILE") in ("sbcio", "sbcio_vdg", "k6802_vdg")
+        or is_sbcio_4000_build()
+        or is_k6802_4000_build()
+        or os.environ.get("MONITOR_PROFILE") in ("sbcio", "sbcio_vdg", "k6802_vdg", "sbcio_4000", "k6802_4000")
     )
 
 
@@ -259,19 +275,19 @@ def is_k6802_vdg_build() -> bool:
 def is_ram64_4000_work_build() -> bool:
     if os.environ.get("MEMORY_CONFIG") == "ram64_4000_work":
         return True
-    return "-ram64_4000_work-" in BUILD_ROM_PATH.stem
+    return is_sbcio_4000_build() or is_k6802_4000_build() or "-ram64_4000_work-" in BUILD_ROM_PATH.stem
 
 
 def is_sd_build() -> bool:
     if os.environ.get("FEATURE_SD") in ("0", "1"):
         return os.environ["FEATURE_SD"] == "1"
     profile = os.environ.get("MONITOR_PROFILE")
-    if profile in ("sbcio_vdg", "k6802_vdg"):
+    if profile in ("sbcio_vdg", "k6802_vdg", "sbcio_4000", "k6802_4000"):
         return True
     if profile in ("base", "sbcio"):
         return False
     stem = BUILD_ROM_PATH.stem
-    return "-sbcio-vdg" in stem or "-k6802-vdg" in stem or "-sd1-" in stem
+    return "-sbcio-vdg" in stem or "-k6802-vdg" in stem or "-sbcio-4000" in stem or "-k6802-4000" in stem or "-sd1-" in stem
 
 
 def is_fat_build() -> bool:
@@ -326,7 +342,12 @@ def test_map_command():
             "KEY 8094-8095",
         ]
     elif is_ram64_4000_work_build():
-        header = "MAP SBCIO VDG" if is_vdg_build() else "MAP SBCIO"
+        if is_k6802_4000_build():
+            header = "MAP K6802 4000"
+        elif is_sbcio_4000_build():
+            header = "MAP SBCIO 4000"
+        else:
+            header = "MAP SBCIO VDG" if is_vdg_build() else "MAP SBCIO"
         expected = [
             header,
             "RAM 0000-7FFF",
@@ -337,7 +358,7 @@ def test_map_command():
             "STK 7FFF",
         ]
         if is_sd_build():
-            sd_addr = "A000" if (is_vdg_build() and vdg_vram_base() == 0xC000) else "C000"
+            sd_addr = "A000" if (is_k6802_4000_build() or (is_vdg_build() and vdg_vram_base() == 0xC000)) else "C000"
             expected.insert(4, f"SD {sd_addr}")
         if is_keyboard_build():
             expected.append("KEY 8094-8095")

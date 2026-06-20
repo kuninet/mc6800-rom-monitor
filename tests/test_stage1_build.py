@@ -42,6 +42,20 @@ EXPECTED = {
         "SDFS_LOAD_BASE": 0xB000,
         "SDFS_LOAD_LIMIT": 0xBEFF,
     },
+    "sbcio_4000": {
+        "suffix": "-sbcio-4000",
+        "S1_BASE": 0x4400,
+        "S1_LIMIT": 0x4FFF,
+        "SDFS_LOAD_BASE": 0x5000,
+        "SDFS_LOAD_LIMIT": 0x7EFF,
+    },
+    "k6802_4000": {
+        "suffix": "-k6802-4000",
+        "S1_BASE": 0x4400,
+        "S1_LIMIT": 0x4FFF,
+        "SDFS_LOAD_BASE": 0x5000,
+        "SDFS_LOAD_LIMIT": 0x7EFF,
+    },
 }
 
 SBCIO_SD_AXIS = {

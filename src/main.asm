@@ -1090,6 +1090,12 @@ CMD_MAP:
  if MONITOR_PROFILE_K6802_VDG
         ldx     #TXT_MAP_K6802_VDG
  else
+ if MONITOR_PROFILE_K6802_4000
+        ldx     #TXT_MAP_K6802_4000
+ else
+ if MONITOR_PROFILE_SBCIO_4000
+        ldx     #TXT_MAP_SBCIO_4000
+ else
  if MONITOR_PROFILE_SBCIO
  if MONITOR_FEATURE_VDG
         ldx     #TXT_MAP_SBCIO_VDG
@@ -1098,6 +1104,8 @@ CMD_MAP:
  endif
  else
         ldx     #TXT_MAP_BASE
+ endif
+ endif
  endif
  endif
         jsr     MAP_PRINT_LINE
@@ -2556,6 +2564,14 @@ TXT_MAP_SBCIO_VDG:  fcc     "MAP SBCIO VDG"
 TXT_MAP_SBCIO:      fcc     "MAP SBCIO"
                     fcb     $04
  endif
+ endif
+ if MONITOR_PROFILE_SBCIO_4000
+TXT_MAP_SBCIO_4000: fcc     "MAP SBCIO 4000"
+                    fcb     $04
+ endif
+ if MONITOR_PROFILE_K6802_4000
+TXT_MAP_K6802_4000: fcc     "MAP K6802 4000"
+                    fcb     $04
  endif
  if MONITOR_PROFILE_K6802_VDG
 TXT_MAP_K6802_VDG:  fcc     "MAP K6802 VDG"

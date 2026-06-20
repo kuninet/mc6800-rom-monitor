@@ -69,6 +69,8 @@ VDGはSBC-IOとは独立した外部表示装備として扱い、VRAM範囲は 
 | `sbcio` | `ram64_c000_work` | `sbcio` | `0` | `0` | `0` | `1` | `0` | SBC-IO RAM拡張と2nd ACIAキーボード。SDなし |
 | `sbcio_vdg` | `ram64_c000_work` | `sbcio` | `1` | `0` | `1` | `1` | `0` | SBC-IO構成でVRAM `$A000-$BFFF`、ROM FATなし |
 | `k6802_vdg` | `ram64_a000_work` | `sbcio` | `1` | `0` | `1` | `1` | `0` | K6802-SBC向けにワークRAM `$A000-$BFFF`、VRAM `$C000-$DFFF`、ROM FATなし |
+| `sbcio_4000` | `ram64_4000_work` | `sbcio` | `1` | `0` | `0` | `1` | `0` | SBC-IO 16KB固定領域構成、VRAM `$A000-$BFFF` 想定 (SDバッファ `$C000` 配置) |
+| `k6802_4000` | `ram64_4000_work` | `sbcio` | `1` | `0` | `0` | `1` | `0` | K6802-SBC向け16KB固定構成、VRAM `$C000-$DFFF` 想定 (SDバッファ `$A000` 配置) |
 
 `FEATURE_KEYBOARD` は2nd ACIAキーボード入力PoCの構成軸であり、SBC-IOの2nd ACIA `$8094-$8095` を前提にする。
 既存profile名はユーザー向け入口として残し、`MONITOR_PROFILE=base` などのビルド互換を壊さない。
