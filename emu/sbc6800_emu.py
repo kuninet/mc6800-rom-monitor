@@ -1117,9 +1117,27 @@ class MC6800:
             self.a = result & 0xFF
             self.update_nz(self.a)
 
+        elif opcode == 0x89:  # ADCA #imm
+            val = self.addr_imm8()
+            carry_in = 1 if self.cc_c else 0
+            result = self.a + val + carry_in
+            self.cc_c = result > 0xFF
+            self.cc_v = bool((~(self.a ^ val) & (self.a ^ result)) & 0x80)
+            self.a = result & 0xFF
+            self.update_nz(self.a)
+
         elif opcode == 0x80:  # SUBA #imm
             val = self.addr_imm8()
             result = self.a - val
+            self.cc_c = result < 0
+            self.cc_v = bool(((self.a ^ val) & (self.a ^ result)) & 0x80)
+            self.a = result & 0xFF
+            self.update_nz(self.a)
+
+        elif opcode == 0x82:  # SBCA #imm
+            val = self.addr_imm8()
+            carry_in = 1 if self.cc_c else 0
+            result = self.a - val - carry_in
             self.cc_c = result < 0
             self.cc_v = bool(((self.a ^ val) & (self.a ^ result)) & 0x80)
             self.a = result & 0xFF
@@ -1170,10 +1188,30 @@ class MC6800:
             self.a = result & 0xFF
             self.update_nz(self.a)
 
+        elif opcode == 0x99:  # ADCA direct
+            addr = self.addr_direct()
+            val = self.read(addr)
+            carry_in = 1 if self.cc_c else 0
+            result = self.a + val + carry_in
+            self.cc_c = result > 0xFF
+            self.cc_v = bool((~(self.a ^ val) & (self.a ^ result)) & 0x80)
+            self.a = result & 0xFF
+            self.update_nz(self.a)
+
         elif opcode == 0x90:  # SUBA direct
             addr = self.addr_direct()
             val = self.read(addr)
             result = self.a - val
+            self.cc_c = result < 0
+            self.cc_v = bool(((self.a ^ val) & (self.a ^ result)) & 0x80)
+            self.a = result & 0xFF
+            self.update_nz(self.a)
+
+        elif opcode == 0x92:  # SBCA direct
+            addr = self.addr_direct()
+            val = self.read(addr)
+            carry_in = 1 if self.cc_c else 0
+            result = self.a - val - carry_in
             self.cc_c = result < 0
             self.cc_v = bool(((self.a ^ val) & (self.a ^ result)) & 0x80)
             self.a = result & 0xFF
@@ -1228,10 +1266,30 @@ class MC6800:
             self.a = result & 0xFF
             self.update_nz(self.a)
 
+        elif opcode == 0xA9:  # ADCA indexed
+            addr = self.addr_indexed()
+            val = self.read(addr)
+            carry_in = 1 if self.cc_c else 0
+            result = self.a + val + carry_in
+            self.cc_c = result > 0xFF
+            self.cc_v = bool((~(self.a ^ val) & (self.a ^ result)) & 0x80)
+            self.a = result & 0xFF
+            self.update_nz(self.a)
+
         elif opcode == 0xA0:  # SUBA indexed
             addr = self.addr_indexed()
             val = self.read(addr)
             result = self.a - val
+            self.cc_c = result < 0
+            self.cc_v = bool(((self.a ^ val) & (self.a ^ result)) & 0x80)
+            self.a = result & 0xFF
+            self.update_nz(self.a)
+
+        elif opcode == 0xA2:  # SBCA indexed
+            addr = self.addr_indexed()
+            val = self.read(addr)
+            carry_in = 1 if self.cc_c else 0
+            result = self.a - val - carry_in
             self.cc_c = result < 0
             self.cc_v = bool(((self.a ^ val) & (self.a ^ result)) & 0x80)
             self.a = result & 0xFF
@@ -1286,10 +1344,30 @@ class MC6800:
             self.a = result & 0xFF
             self.update_nz(self.a)
 
+        elif opcode == 0xB9:  # ADCA extended
+            addr = self.addr_extended()
+            val = self.read(addr)
+            carry_in = 1 if self.cc_c else 0
+            result = self.a + val + carry_in
+            self.cc_c = result > 0xFF
+            self.cc_v = bool((~(self.a ^ val) & (self.a ^ result)) & 0x80)
+            self.a = result & 0xFF
+            self.update_nz(self.a)
+
         elif opcode == 0xB0:  # SUBA extended
             addr = self.addr_extended()
             val = self.read(addr)
             result = self.a - val
+            self.cc_c = result < 0
+            self.cc_v = bool(((self.a ^ val) & (self.a ^ result)) & 0x80)
+            self.a = result & 0xFF
+            self.update_nz(self.a)
+
+        elif opcode == 0xB2:  # SBCA extended
+            addr = self.addr_extended()
+            val = self.read(addr)
+            carry_in = 1 if self.cc_c else 0
+            result = self.a - val - carry_in
             self.cc_c = result < 0
             self.cc_v = bool(((self.a ^ val) & (self.a ^ result)) & 0x80)
             self.a = result & 0xFF
@@ -1342,9 +1420,27 @@ class MC6800:
             self.b = result & 0xFF
             self.update_nz(self.b)
 
+        elif opcode == 0xC9:  # ADCB #imm
+            val = self.addr_imm8()
+            carry_in = 1 if self.cc_c else 0
+            result = self.b + val + carry_in
+            self.cc_c = result > 0xFF
+            self.cc_v = bool((~(self.b ^ val) & (self.b ^ result)) & 0x80)
+            self.b = result & 0xFF
+            self.update_nz(self.b)
+
         elif opcode == 0xC0:  # SUBB #imm
             val = self.addr_imm8()
             result = self.b - val
+            self.cc_c = result < 0
+            self.cc_v = bool(((self.b ^ val) & (self.b ^ result)) & 0x80)
+            self.b = result & 0xFF
+            self.update_nz(self.b)
+
+        elif opcode == 0xC2:  # SBCB #imm
+            val = self.addr_imm8()
+            carry_in = 1 if self.cc_c else 0
+            result = self.b - val - carry_in
             self.cc_c = result < 0
             self.cc_v = bool(((self.b ^ val) & (self.b ^ result)) & 0x80)
             self.b = result & 0xFF
@@ -1616,6 +1712,36 @@ class MC6800:
             self.b = result & 0xFF
             self.update_nz(self.b)
 
+        elif opcode == 0xD9:  # ADCB direct
+            addr = self.addr_direct()
+            val = self.read(addr)
+            carry_in = 1 if self.cc_c else 0
+            result = self.b + val + carry_in
+            self.cc_c = result > 0xFF
+            self.cc_v = bool((~(self.b ^ val) & (self.b ^ result)) & 0x80)
+            self.b = result & 0xFF
+            self.update_nz(self.b)
+
+        elif opcode == 0xE9:  # ADCB indexed
+            addr = self.addr_indexed()
+            val = self.read(addr)
+            carry_in = 1 if self.cc_c else 0
+            result = self.b + val + carry_in
+            self.cc_c = result > 0xFF
+            self.cc_v = bool((~(self.b ^ val) & (self.b ^ result)) & 0x80)
+            self.b = result & 0xFF
+            self.update_nz(self.b)
+
+        elif opcode == 0xF9:  # ADCB extended
+            addr = self.addr_extended()
+            val = self.read(addr)
+            carry_in = 1 if self.cc_c else 0
+            result = self.b + val + carry_in
+            self.cc_c = result > 0xFF
+            self.cc_v = bool((~(self.b ^ val) & (self.b ^ result)) & 0x80)
+            self.b = result & 0xFF
+            self.update_nz(self.b)
+
         elif opcode == 0xD0:  # SUBB direct
             addr = self.addr_direct()
             val = self.read(addr)
@@ -1638,6 +1764,36 @@ class MC6800:
             addr = self.addr_extended()
             val = self.read(addr)
             result = self.b - val
+            self.cc_c = result < 0
+            self.cc_v = bool(((self.b ^ val) & (self.b ^ result)) & 0x80)
+            self.b = result & 0xFF
+            self.update_nz(self.b)
+
+        elif opcode == 0xD2:  # SBCB direct
+            addr = self.addr_direct()
+            val = self.read(addr)
+            carry_in = 1 if self.cc_c else 0
+            result = self.b - val - carry_in
+            self.cc_c = result < 0
+            self.cc_v = bool(((self.b ^ val) & (self.b ^ result)) & 0x80)
+            self.b = result & 0xFF
+            self.update_nz(self.b)
+
+        elif opcode == 0xE2:  # SBCB indexed
+            addr = self.addr_indexed()
+            val = self.read(addr)
+            carry_in = 1 if self.cc_c else 0
+            result = self.b - val - carry_in
+            self.cc_c = result < 0
+            self.cc_v = bool(((self.b ^ val) & (self.b ^ result)) & 0x80)
+            self.b = result & 0xFF
+            self.update_nz(self.b)
+
+        elif opcode == 0xF2:  # SBCB extended
+            addr = self.addr_extended()
+            val = self.read(addr)
+            carry_in = 1 if self.cc_c else 0
+            result = self.b - val - carry_in
             self.cc_c = result < 0
             self.cc_v = bool(((self.b ^ val) & (self.b ^ result)) & 0x80)
             self.b = result & 0xFF

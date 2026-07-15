@@ -109,6 +109,9 @@ def test_stage1_profiles_build_and_match_layout() -> None:
             "S1_FIND_83",
             "S1_LOAD_FILE_83",
             "S1_GET_ERROR",
+            "S1_STREAM_OPEN",
+            "S1_STREAM_GETC",
+            "S1_STREAM_BYTES_REMAIN",
             "S1_BOOT_SDFS",
             "S1_END",
         )
@@ -128,6 +131,9 @@ def test_stage1_profiles_build_and_match_layout() -> None:
         _assert_jump(data, 25, symbols["S1_FIND_83"])
         _assert_jump(data, 28, symbols["S1_LOAD_FILE_83"])
         _assert_jump(data, 31, symbols["S1_GET_ERROR"])
+        _assert_jump(data, 34, symbols["S1_STREAM_OPEN"])
+        _assert_jump(data, 37, symbols["S1_STREAM_GETC"])
+        _assert_jump(data, 40, symbols["S1_STREAM_BYTES_REMAIN"])
     print("[PASS] test_stage1_profiles_build_and_match_layout")
 
 
@@ -304,7 +310,7 @@ def test_stage1_boot_sdfs_rejects_invalid_headers() -> None:
 def _assert_stage1_header(data: bytes, boot_entry: int) -> None:
     assert data[0:7] == b"S1API68"
     assert data[7] == 1, "API version mismatch"
-    assert data[8] == 6, "API count mismatch"
+    assert data[8] == 9, "API count mismatch"
     assert data[9] == 0, "flags mismatch"
     actual_boot_entry = (data[10] << 8) | data[11]
     assert actual_boot_entry == boot_entry, "boot entry mismatch"
