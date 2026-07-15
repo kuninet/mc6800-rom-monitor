@@ -3,7 +3,7 @@
         include "../include/hardware.inc"
 
 S1_API_VERSION  equ 1
-S1_API_COUNT    equ 9
+S1_API_COUNT    equ 12
 S1_FLAG_NONE    equ 0
 S1_ERR_NONE     equ 0
 S1_ERR_UNIMPL   equ 1
@@ -38,6 +38,9 @@ S1_JUMP_TABLE:
         jmp     S1_STREAM_OPEN
         jmp     S1_STREAM_GETC
         jmp     S1_STREAM_BYTES_REMAIN
+        jmp     S1_CLUSTER_TO_SD_LBA
+        jmp     S1_NEXT_CLUSTER
+        jmp     S1_COPY_NEXT_TO_CUR
 
 S1_INIT:
         clr     FAT_ERROR
@@ -170,6 +173,15 @@ S1_STREAM_GETC:
 
 S1_STREAM_BYTES_REMAIN:
         jmp     FAT_BYTES_REMAIN
+
+S1_CLUSTER_TO_SD_LBA:
+        jmp     FAT_CLUSTER_TO_SD_LBA
+
+S1_NEXT_CLUSTER:
+        jmp     FAT32_NEXT_CLUSTER
+
+S1_COPY_NEXT_TO_CUR:
+        jmp     FAT_COPY_NEXT_TO_CUR
 
 S1_SDFS_NAME:
         fcc     "SDFS    BIN"

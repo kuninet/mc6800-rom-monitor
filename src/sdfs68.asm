@@ -5,7 +5,7 @@
 SDFS_FORMAT_VERSION equ 1
 SDFS_HDR_SIZE   equ 16
 SDFS_S1_VERSION equ 1
-SDFS_S1_COUNT   equ 6
+SDFS_S1_COUNT   equ 12
 SDFS_COM_LOAD_BASE equ $0100
 SDFS_COM_MAX_SIZE equ USER_RAM_END-SDFS_COM_LOAD_BASE+1
 SDFS_COM_MAX_HI equ SDFS_COM_MAX_SIZE/256
@@ -170,7 +170,7 @@ SDFS_K_LOAD_FILE:
         bcs     SDFS_CMD_LOAD_FAIL
         jsr     SDFS_RESOLVE_FILE_SAVED
         bcs     SDFS_CMD_LOAD_FAIL
-        jsr     SDFS_STREAM_OPEN
+        jsr     SDFS_API_STREAM_OPEN
         bcs     SDFS_CMD_LOAD_FAIL
 SDFS_LOAD_LOOP:
         jsr     SDFS_READ_LOADER_RECORD
@@ -314,7 +314,7 @@ SDFS_CMD_COM:
         bcs     SDFS_CMD_COM_FAIL
         jsr     SDFS_COM_CHECK_SIZE
         bcs     SDFS_CMD_COM_FAIL
-        jsr     SDFS_STREAM_OPEN
+        jsr     SDFS_API_STREAM_OPEN
         bcs     SDFS_CMD_COM_FAIL
         jsr     SDFS_COM_LOAD_RAW
         bcs     SDFS_CMD_COM_FAIL
@@ -354,9 +354,9 @@ SDFS_COM_LOAD_RAW:
         ldx     #SDFS_COM_LOAD_BASE
         stx     FAT_READ_PTR
 SDFS_COM_LOAD_LOOP:
-        jsr     SDFS_BYTES_REMAIN
+        jsr     SDFS_API_STREAM_BYTES_REMAIN
         bcc     SDFS_COM_LOAD_DONE
-        jsr     SDFS_STREAM_GETC
+        jsr     SDFS_API_STREAM_GETC
         bcs     SDFS_COM_LOAD_FAIL
         ldx     FAT_READ_PTR
         staa    0,x
@@ -404,7 +404,7 @@ SDFS_K_DIR_PATH:
         jsr     SDFS_RESOLVE_DIR_SAVED
         bcs     SDFS_K_DIR_FAIL
 SDFS_K_DIR_CLUSTER_LOOP:
-        jsr     SDFS_CLUSTER_TO_SD_LBA
+        jsr     SDFS_API_CLUSTER_TO_SD_LBA
         ldx     #SD_SECTOR_BUF
         jsr     SDFS_API_READ_SECTOR
         bcs     SDFS_K_DIR_FAIL
@@ -425,9 +425,9 @@ SDFS_K_DIR_NEXT_ENTRY:
         jsr     SDFS_K_ADVANCE_ENTRY_PTR
         dec     FAT_DIR_COUNT
         bne     SDFS_K_DIR_ENTRY_LOOP
-        jsr     SDFS_NEXT_CLUSTER
+        jsr     SDFS_API_NEXT_CLUSTER
         bcs     SDFS_K_DIR_DONE
-        jsr     SDFS_COPY_NEXT_TO_CUR
+        jsr     SDFS_API_COPY_NEXT_TO_CUR
         bra     SDFS_K_DIR_CLUSTER_LOOP
 SDFS_K_DIR_DONE:
         clc
@@ -601,7 +601,7 @@ SDFS_PATH_SKIP_TRAILING_FAIL:
         rts
 
 SDFS_FIND_IN_CUR:
-        jsr     SDFS_CLUSTER_TO_SD_LBA
+        jsr     SDFS_API_CLUSTER_TO_SD_LBA
         ldx     #SD_SECTOR_BUF
         jsr     SDFS_API_READ_SECTOR
         bcs     SDFS_FIND_IN_CUR_FAIL
@@ -628,9 +628,9 @@ SDFS_FIND_IN_CUR_NEXT_ENTRY:
         jsr     SDFS_K_ADVANCE_ENTRY_PTR
         dec     FAT_DIR_COUNT
         bne     SDFS_FIND_IN_CUR_ENTRY_LOOP
-        jsr     SDFS_NEXT_CLUSTER
+        jsr     SDFS_API_NEXT_CLUSTER
         bcs     SDFS_FIND_IN_CUR_FAIL
-        jsr     SDFS_COPY_NEXT_TO_CUR
+        jsr     SDFS_API_COPY_NEXT_TO_CUR
         bra     SDFS_FIND_IN_CUR
 SDFS_FIND_IN_CUR_MATCH:
         jsr     SDFS_STORE_FILE_ENTRY
@@ -912,6 +912,30 @@ SDFS_API_LOAD_FILE_83:
 
 SDFS_API_GET_ERROR:
         jsr     S1_BASE+31
+        rts
+
+SDFS_API_STREAM_OPEN:
+        jsr     S1_BASE+34
+        rts
+
+SDFS_API_STREAM_GETC:
+        jsr     S1_BASE+37
+        rts
+
+SDFS_API_STREAM_BYTES_REMAIN:
+        jsr     S1_BASE+40
+        rts
+
+SDFS_API_CLUSTER_TO_SD_LBA:
+        jsr     S1_BASE+43
+        rts
+
+SDFS_API_NEXT_CLUSTER:
+        jsr     S1_BASE+46
+        rts
+
+SDFS_API_COPY_NEXT_TO_CUR:
+        jsr     S1_BASE+49
         rts
 
 SDFS_READ_LINE:
@@ -1296,265 +1320,6 @@ SDFS_PARSE_HEX16_FAIL:
         sec
         rts
 
-SDFS_STREAM_OPEN:
-        ldaa    FAT_FILE_CLUS0
-        staa    FAT_CUR_CLUS0
-        ldaa    FAT_FILE_CLUS1
-        staa    FAT_CUR_CLUS1
-        ldaa    FAT_FILE_CLUS2
-        staa    FAT_CUR_CLUS2
-        ldaa    FAT_FILE_CLUS3
-        staa    FAT_CUR_CLUS3
-        ldaa    FAT_FILE_SIZE0
-        staa    FAT_BYTES_REM0
-        ldaa    FAT_FILE_SIZE1
-        staa    FAT_BYTES_REM1
-        ldaa    FAT_FILE_SIZE2
-        staa    FAT_BYTES_REM2
-        ldaa    FAT_FILE_SIZE3
-        staa    FAT_BYTES_REM3
-        clr     FAT_COPY_COUNT
-        clr     FAT_COPY_COUNT+1
-        clr     FAT_SECTOR_IN_CLUS
-        ldx     #SD_SECTOR_BUF
-        stx     FAT_ENTRY_PTR
-        clc
-        rts
-
-SDFS_STREAM_GETC:
-        jsr     SDFS_BYTES_REMAIN
-        bcs     SDFS_STREAM_HAS_REMAIN
-        sec
-        rts
-SDFS_STREAM_HAS_REMAIN:
-        ldaa    FAT_COPY_COUNT
-        oraa    FAT_COPY_COUNT+1
-        bne     SDFS_STREAM_HAVE_SECTOR
-        jsr     SDFS_STREAM_LOAD_SECTOR
-        bcc     SDFS_STREAM_HAVE_SECTOR
-        sec
-        rts
-SDFS_STREAM_HAVE_SECTOR:
-        ldx     FAT_ENTRY_PTR
-        ldaa    0,x
-        inx
-        stx     FAT_ENTRY_PTR
-        psha
-        ldx     FAT_COPY_COUNT
-        dex
-        stx     FAT_COPY_COUNT
-        jsr     SDFS_DEC_BYTES_REM_ONE
-        ldaa    FAT_COPY_COUNT
-        oraa    FAT_COPY_COUNT+1
-        bne     SDFS_STREAM_RETURN_BYTE
-        jsr     SDFS_BYTES_REMAIN
-        bcc     SDFS_STREAM_RETURN_BYTE
-        jsr     SDFS_ADVANCE_FILE_SECTOR
-        bcc     SDFS_STREAM_RETURN_BYTE
-        pula
-        sec
-        rts
-SDFS_STREAM_RETURN_BYTE:
-        pula
-        clc
-        rts
-
-SDFS_STREAM_LOAD_SECTOR:
-        jsr     SDFS_SECTOR_TO_SD_LBA
-        ldx     #SD_SECTOR_BUF
-        jsr     SDFS_API_READ_SECTOR
-        bcc     SDFS_STREAM_LOAD_OK
-        sec
-        rts
-SDFS_STREAM_LOAD_OK:
-        jsr     SDFS_PREP_COPY_COUNT
-        ldx     #SD_SECTOR_BUF
-        stx     FAT_ENTRY_PTR
-        clc
-        rts
-
-SDFS_SECTOR_TO_SD_LBA:
-        jsr     SDFS_CLUSTER_TO_SD_LBA
-        ldab    FAT_SECTOR_IN_CLUS
-        beq     SDFS_SECTOR_TO_SD_LBA_DONE
-SDFS_SECTOR_TO_SD_LBA_LOOP:
-        jsr     SDFS_INC_SD_LBA
-        decb
-        bne     SDFS_SECTOR_TO_SD_LBA_LOOP
-SDFS_SECTOR_TO_SD_LBA_DONE:
-        rts
-
-SDFS_CLUSTER_TO_SD_LBA:
-        ldaa    FAT_DATA_LBA0
-        staa    SD_LBA0
-        ldaa    FAT_DATA_LBA1
-        staa    SD_LBA1
-        ldaa    FAT_DATA_LBA2
-        staa    SD_LBA2
-        ldaa    FAT_DATA_LBA3
-        staa    SD_LBA3
-        ldaa    FAT_CUR_CLUS3
-        suba    #$02
-        staa    FAT_TMP
-SDFS_CLUSTER_ADD_LOOP:
-        ldaa    FAT_TMP
-        beq     SDFS_CLUSTER_ADD_DONE
-        ldab    FAT_SEC_PER_CLUS
-SDFS_CLUSTER_ADD_SECTOR_LOOP:
-        jsr     SDFS_INC_SD_LBA
-        decb
-        bne     SDFS_CLUSTER_ADD_SECTOR_LOOP
-        dec     FAT_TMP
-        bra     SDFS_CLUSTER_ADD_LOOP
-SDFS_CLUSTER_ADD_DONE:
-        rts
-
-SDFS_INC_SD_LBA:
-        inc     SD_LBA3
-        bne     SDFS_INC_SD_LBA_DONE
-        inc     SD_LBA2
-        bne     SDFS_INC_SD_LBA_DONE
-        inc     SD_LBA1
-        bne     SDFS_INC_SD_LBA_DONE
-        inc     SD_LBA0
-SDFS_INC_SD_LBA_DONE:
-        rts
-
-SDFS_ADVANCE_FILE_SECTOR:
-        inc     FAT_SECTOR_IN_CLUS
-        ldaa    FAT_SECTOR_IN_CLUS
-        cmpa    FAT_SEC_PER_CLUS
-        blo     SDFS_ADVANCE_SAME_CLUSTER
-        clr     FAT_SECTOR_IN_CLUS
-        jsr     SDFS_NEXT_CLUSTER
-        bcc     SDFS_ADVANCE_NEXT_CLUSTER
-        sec
-        rts
-SDFS_ADVANCE_NEXT_CLUSTER:
-        jsr     SDFS_COPY_NEXT_TO_CUR
-SDFS_ADVANCE_SAME_CLUSTER:
-        clc
-        rts
-
-SDFS_NEXT_CLUSTER:
-        ldaa    FAT_FAT_LBA0
-        staa    SD_LBA0
-        ldaa    FAT_FAT_LBA1
-        staa    SD_LBA1
-        ldaa    FAT_FAT_LBA2
-        staa    SD_LBA2
-        ldaa    FAT_FAT_LBA3
-        staa    SD_LBA3
-        ldx     #SD_SECTOR_BUF
-        jsr     SDFS_API_READ_SECTOR
-        bcc     SDFS_NEXT_OFFSET_PREP
-        sec
-        rts
-SDFS_NEXT_OFFSET_PREP:
-        ldaa    FAT_CUR_CLUS3
-        asla
-        asla
-        tab
-        ldx     #SD_SECTOR_BUF
-SDFS_NEXT_OFFSET_LOOP:
-        tstb
-        beq     SDFS_NEXT_READ
-        inx
-        decb
-        bra     SDFS_NEXT_OFFSET_LOOP
-SDFS_NEXT_READ:
-        ldaa    3,x
-        anda    #$0F
-        staa    FAT_NEXT_CLUS0
-        ldaa    2,x
-        staa    FAT_NEXT_CLUS1
-        ldaa    1,x
-        staa    FAT_NEXT_CLUS2
-        ldaa    0,x
-        staa    FAT_NEXT_CLUS3
-        ldaa    FAT_NEXT_CLUS0
-        cmpa    #$0F
-        bne     SDFS_NEXT_NOT_EOC
-        ldaa    FAT_NEXT_CLUS1
-        cmpa    #$FF
-        bne     SDFS_NEXT_NOT_EOC
-        ldaa    FAT_NEXT_CLUS2
-        cmpa    #$FF
-        bne     SDFS_NEXT_NOT_EOC
-        ldaa    FAT_NEXT_CLUS3
-        cmpa    #$F8
-        blo     SDFS_NEXT_NOT_EOC
-        sec
-        rts
-SDFS_NEXT_NOT_EOC:
-        clc
-        rts
-
-SDFS_COPY_NEXT_TO_CUR:
-        ldaa    FAT_NEXT_CLUS0
-        staa    FAT_CUR_CLUS0
-        ldaa    FAT_NEXT_CLUS1
-        staa    FAT_CUR_CLUS1
-        ldaa    FAT_NEXT_CLUS2
-        staa    FAT_CUR_CLUS2
-        ldaa    FAT_NEXT_CLUS3
-        staa    FAT_CUR_CLUS3
-        rts
-
-SDFS_BYTES_REMAIN:
-        ldaa    FAT_BYTES_REM0
-        oraa    FAT_BYTES_REM1
-        oraa    FAT_BYTES_REM2
-        oraa    FAT_BYTES_REM3
-        bne     SDFS_BYTES_REMAIN_YES
-        clc
-        rts
-SDFS_BYTES_REMAIN_YES:
-        sec
-        rts
-
-SDFS_PREP_COPY_COUNT:
-        ldaa    FAT_BYTES_REM0
-        oraa    FAT_BYTES_REM1
-        bne     SDFS_PREP_COPY_512
-        ldaa    FAT_BYTES_REM2
-        cmpa    #$02
-        bhs     SDFS_PREP_COPY_512
-        staa    FAT_COPY_COUNT
-        ldaa    FAT_BYTES_REM3
-        staa    FAT_COPY_COUNT+1
-        rts
-SDFS_PREP_COPY_512:
-        ldaa    #$02
-        staa    FAT_COPY_COUNT
-        clr     FAT_COPY_COUNT+1
-        rts
-
-SDFS_DEC_BYTES_REM_ONE:
-        ldaa    FAT_BYTES_REM3
-        bne     SDFS_DEC_REM_LO
-        ldaa    #$FF
-        staa    FAT_BYTES_REM3
-        ldaa    FAT_BYTES_REM2
-        bne     SDFS_DEC_REM_B2
-        ldaa    #$FF
-        staa    FAT_BYTES_REM2
-        ldaa    FAT_BYTES_REM1
-        bne     SDFS_DEC_REM_B1
-        ldaa    #$FF
-        staa    FAT_BYTES_REM1
-        dec     FAT_BYTES_REM0
-        rts
-SDFS_DEC_REM_B1:
-        dec     FAT_BYTES_REM1
-        rts
-SDFS_DEC_REM_B2:
-        dec     FAT_BYTES_REM2
-        rts
-SDFS_DEC_REM_LO:
-        dec     FAT_BYTES_REM3
-        rts
-
 SDFS_READ_LOADER_RECORD:
         jsr     SDFS_READ_RECORD_HEAD
         bcs     SDFS_READ_LOADER_RECORD_FAIL
@@ -1586,7 +1351,7 @@ SDFS_READ_LOADER_RECORD_FAIL:
         rts
 
 SDFS_READ_RECORD_HEAD:
-        jsr     SDFS_STREAM_GETC
+        jsr     SDFS_API_STREAM_GETC
         bcs     SDFS_READ_RECORD_HEAD_FAIL
         cmpa    #CHR_LF
         beq     SDFS_READ_RECORD_HEAD
@@ -1602,7 +1367,7 @@ SDFS_READ_RECORD_HEAD_FAIL:
         rts
 
 SDFS_READ_RECORD_TRAILER:
-        jsr     SDFS_STREAM_GETC
+        jsr     SDFS_API_STREAM_GETC
         bcs     SDFS_READ_RECORD_TRAILER_OK
         cmpa    #CHR_LF
         beq     SDFS_READ_RECORD_TRAILER_OK
@@ -1617,7 +1382,7 @@ SDFS_READ_RECORD_TRAILER_OK:
 
 SDFS_READ_HEXBYTE_INPUT:
         pshb
-        jsr     SDFS_STREAM_GETC
+        jsr     SDFS_API_STREAM_GETC
         bcs     SDFS_READ_HEXBYTE_INPUT_FAIL
         jsr     SDFS_HEX_TO_NIBBLE
         bcs     SDFS_READ_HEXBYTE_INPUT_FAIL
@@ -1626,7 +1391,7 @@ SDFS_READ_HEXBYTE_INPUT:
         lsla
         lsla
         tab
-        jsr     SDFS_STREAM_GETC
+        jsr     SDFS_API_STREAM_GETC
         bcs     SDFS_READ_HEXBYTE_INPUT_FAIL
         jsr     SDFS_HEX_TO_NIBBLE
         bcs     SDFS_READ_HEXBYTE_INPUT_FAIL
@@ -1647,7 +1412,7 @@ SDFS_READ_SREC_RECORD:
 SDFS_READ_SREC_HEAD_OK:
         ldaa    #1
         staa    LOADER_STAGE
-        jsr     SDFS_STREAM_GETC
+        jsr     SDFS_API_STREAM_GETC
         bcs     SDFS_READ_SREC_FAIL_NEAR0
         staa    LOADER_TYPE
         cmpa    #'0'

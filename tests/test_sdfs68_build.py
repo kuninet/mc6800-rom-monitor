@@ -161,6 +161,12 @@ def test_sdfs_api_wrappers_target_stage1_jump_table() -> None:
         "SDFS_API_FIND_83",
         "SDFS_API_LOAD_FILE_83",
         "SDFS_API_GET_ERROR",
+        "SDFS_API_STREAM_OPEN",
+        "SDFS_API_STREAM_GETC",
+        "SDFS_API_STREAM_BYTES_REMAIN",
+        "SDFS_API_CLUSTER_TO_SD_LBA",
+        "SDFS_API_NEXT_CLUSTER",
+        "SDFS_API_COPY_NEXT_TO_CUR",
     )
     wrappers = {
         "SDFS_API_INIT": 16,
@@ -169,6 +175,12 @@ def test_sdfs_api_wrappers_target_stage1_jump_table() -> None:
         "SDFS_API_FIND_83": 25,
         "SDFS_API_LOAD_FILE_83": 28,
         "SDFS_API_GET_ERROR": 31,
+        "SDFS_API_STREAM_OPEN": 34,
+        "SDFS_API_STREAM_GETC": 37,
+        "SDFS_API_STREAM_BYTES_REMAIN": 40,
+        "SDFS_API_CLUSTER_TO_SD_LBA": 43,
+        "SDFS_API_NEXT_CLUSTER": 46,
+        "SDFS_API_COPY_NEXT_TO_CUR": 49,
     }
     for name, offset in wrappers.items():
         index = symbols[name] - symbols["SDFS_LOAD_BASE"]
