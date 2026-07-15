@@ -20,6 +20,7 @@ from sd_fixtures import (  # noqa: E402
     MULTI_CLUSTER_2_PREFIX,
     TEST_S_CONTENT,
     build_fat32_image,
+    build_high_cluster_image,
     layout_for_image,
 )
 from fat32_image import Fat32File, build_fat32_image_from_files  # noqa: E402
@@ -263,6 +264,90 @@ def test_stage1_load_file_83_service_loads_multisector_files() -> None:
     assert result == 0x42, f"S1_LOAD_FILE_83 failed to load BIGSREC.S: {result:02X}"
     assert bytes(data[:len(BIG_S_CONTENT)]) == BIG_S_CONTENT
     print("[PASS] test_stage1_load_file_83_service_loads_multisector_files")
+
+
+def test_stage1_next_cluster_handles_cluster_ge_64() -> None:
+    """FAT32_NEXT_CLUSTER (#243 fix) must handle clusters where the byte
+    offset within the FAT sector exceeds 255 (i.e., cluster * 4 > 255,
+    meaning cluster >= 64). This exercises the 16-bit offset path.
+    """
+    profile = "sbcio_vdg"
+    _run_make(profile)
+    _run_make(profile, target="bin")
+    expected = EXPECTED[profile]
+    suffix = expected["suffix"]
+    stage1_data = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+    symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"stage1{suffix}.lst",
+        "S1_BASE",
+        "SDFS_LOAD_BASE",
+        "FAT_CUR_CLUS0",
+        "FAT_CUR_CLUS3",
+        "FAT_NEXT_CLUS3",
+    )
+    result_addr = symbols["SDFS_LOAD_BASE"]
+    harness_addr = 0x0100
+    # Slots (V2 stage1):
+    #   S1_INIT              = S1_BASE + 16
+    #   S1_MOUNT             = S1_BASE + 22
+    #   S1_NEXT_CLUSTER      = S1_BASE + 46
+    harness = [
+        # jsr S1_INIT
+        0xBD, ((symbols["S1_BASE"] + 16) >> 8) & 0xFF, (symbols["S1_BASE"] + 16) & 0xFF,
+        # bcs err (relative +$1B forward to error branch)
+        0x25, 0x22,
+        # jsr S1_MOUNT
+        0xBD, ((symbols["S1_BASE"] + 22) >> 8) & 0xFF, (symbols["S1_BASE"] + 22) & 0xFF,
+        0x25, 0x1D,
+        # clr FAT_CUR_CLUS0
+        0x7F, (symbols["FAT_CUR_CLUS0"] >> 8) & 0xFF, symbols["FAT_CUR_CLUS0"] & 0xFF,
+        # clr FAT_CUR_CLUS0+1
+        0x7F, ((symbols["FAT_CUR_CLUS0"] + 1) >> 8) & 0xFF, (symbols["FAT_CUR_CLUS0"] + 1) & 0xFF,
+        # clr FAT_CUR_CLUS0+2
+        0x7F, ((symbols["FAT_CUR_CLUS0"] + 2) >> 8) & 0xFF, (symbols["FAT_CUR_CLUS0"] + 2) & 0xFF,
+        # ldaa #100
+        0x86, 0x64,
+        # staa FAT_CUR_CLUS3
+        0xB7, (symbols["FAT_CUR_CLUS3"] >> 8) & 0xFF, symbols["FAT_CUR_CLUS3"] & 0xFF,
+        # jsr S1_NEXT_CLUSTER
+        0xBD, ((symbols["S1_BASE"] + 46) >> 8) & 0xFF, (symbols["S1_BASE"] + 46) & 0xFF,
+        0x25, 0x08,
+        # ldaa FAT_NEXT_CLUS3 (should be 101 after fix)
+        0xB6, (symbols["FAT_NEXT_CLUS3"] >> 8) & 0xFF, symbols["FAT_NEXT_CLUS3"] & 0xFF,
+        # staa result_addr
+        0xB7, (result_addr >> 8) & 0xFF, result_addr & 0xFF,
+        0x3F,
+        # error path: store $E1 and halt
+        0x86, 0xE1,
+        0xB7, (result_addr >> 8) & 0xFF, result_addr & 0xFF,
+        0x3F,
+    ]
+    sd_image = build_high_cluster_image(with_mbr=True)
+    input_text = (
+        f"M{symbols['S1_BASE']:04X}\r"
+        f"{_hex_bytes(list(stage1_data))}\r.\r"
+        f"M{harness_addr:04X}\r"
+        f"{_hex_bytes(harness)}\r.\r"
+        f"G{harness_addr:04X}\r"
+        f"D{result_addr:04X}-{result_addr:04X}\r"
+        "\r"
+    )
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
+        input_text=input_text,
+        sd_image=sd_image,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    line = _dump_line(stdout, result_addr)
+    match = re.search(rf"{result_addr:04X}\s+([0-9A-Fa-f]{{2}})", line)
+    if not match:
+        raise AssertionError(f"missing next-cluster result byte: {line!r}\nstdout={stdout!r}")
+    value = int(match.group(1), 16)
+    assert value == 101, (
+        f"S1_NEXT_CLUSTER for cluster 100 returned {value:02X}, expected 65 (=101) "
+        f"— cluster >= 64 fix (#243) regressed. stdout={stdout!r}"
+    )
+    print("[PASS] test_stage1_next_cluster_handles_cluster_ge_64")
 
 
 def test_stage1_load_file_83_service_rejects_unsupported_files() -> None:
@@ -720,6 +805,7 @@ def main() -> None:
         test_stage1_find_83_service_rejects_missing_name,
         test_stage1_load_file_83_service_loads_one_sector_file,
         test_stage1_load_file_83_service_loads_multisector_files,
+        test_stage1_next_cluster_handles_cluster_ge_64,
         test_stage1_load_file_83_service_rejects_unsupported_files,
         test_stage1_boot_sdfs_jumps_to_valid_entry,
         test_stage1_boot_sdfs_loads_multisector_entry,
