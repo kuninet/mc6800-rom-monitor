@@ -209,3 +209,82 @@ def _write_file_data(image: bytearray, layout: Fat32Layout, clusters: tuple[int,
 
 def _padded(prefix: bytes, fill: int) -> bytes:
     return prefix + bytes([fill]) * (SECTOR_SIZE - len(prefix))
+
+
+HIGH_CLUSTER_TOTAL_VOLUME_SECTORS = 256
+HIGH_CLUSTER_TARGET_1 = 100
+HIGH_CLUSTER_TARGET_2 = 101
+HIGH_CLUSTER_PAYLOAD_1_PREFIX = b"HIGH-CLUSTER-100"
+HIGH_CLUSTER_PAYLOAD_2_PREFIX = b"HIGH-CLUSTER-101"
+
+
+def high_cluster_layout(with_mbr: bool) -> Fat32Layout:
+    return _layout_for_image(
+        with_mbr=with_mbr,
+        partition_start_lba=PARTITION_START_LBA,
+        total_volume_sectors=HIGH_CLUSTER_TOTAL_VOLUME_SECTORS,
+        reserved_sectors=RESERVED_SECTORS,
+        fat_count=FAT_COUNT,
+        fat_size_sectors=FAT_SIZE_SECTORS,
+        sectors_per_cluster=1,
+        root_cluster=ROOT_CLUSTER,
+    )
+
+
+def build_high_cluster_image(with_mbr: bool = True) -> bytes:
+    """FAT chain at cluster >= 64 to exercise FAT32_NEXT_CLUSTER fix (#243).
+
+    The image places a 2-cluster file "HIGH.BIN" whose first cluster is 100
+    and whose second cluster is 101. Reading it via S1_STREAM_GETC forces
+    the loader to compute a byte offset > 255 in the FAT sector, which was
+    silently wrapped by the old implementation.
+    """
+    volume_start = PARTITION_START_LBA if with_mbr else 0
+    total_sectors = volume_start + HIGH_CLUSTER_TOTAL_VOLUME_SECTORS
+    image = bytearray(total_sectors * SECTOR_SIZE)
+    layout = high_cluster_layout(with_mbr=with_mbr)
+
+    if with_mbr:
+        _write_mbr(image, volume_start, HIGH_CLUSTER_TOTAL_VOLUME_SECTORS)
+
+    _write_vbr_common(
+        image,
+        volume_start,
+        total_volume_sectors=HIGH_CLUSTER_TOTAL_VOLUME_SECTORS,
+        reserved_sectors=RESERVED_SECTORS,
+        fat_count=FAT_COUNT,
+        fat_size_sectors=FAT_SIZE_SECTORS,
+        sectors_per_cluster=1,
+        root_cluster=ROOT_CLUSTER,
+    )
+    _write_fsinfo(image, volume_start + 1)
+
+    # FAT: entries 0 and 1 are the standard reserved values;
+    # cluster 100 -> cluster 101; cluster 101 -> EOC; ROOT_CLUSTER is EOC.
+    fat = bytearray(SECTOR_SIZE)
+    entries = {
+        0: 0x0FFFFFF8,
+        1: EOC,
+        ROOT_CLUSTER: EOC,
+        HIGH_CLUSTER_TARGET_1: HIGH_CLUSTER_TARGET_2,
+        HIGH_CLUSTER_TARGET_2: EOC,
+    }
+    for cluster, value in entries.items():
+        offset = cluster * 4
+        fat[offset:offset + 4] = value.to_bytes(4, "little")
+    for copy_index in range(FAT_COUNT):
+        _write_sector(image, layout.fat_lba + copy_index * FAT_SIZE_SECTORS, fat)
+
+    # Root dir: single entry HIGH.BIN pointing at cluster 100, size = 2 sectors.
+    root = bytearray(SECTOR_SIZE)
+    root[0:32] = root_entry(
+        b"HIGH    BIN", 0x20, HIGH_CLUSTER_TARGET_1, SECTOR_SIZE * 2
+    )
+    root[32] = 0x00
+    _write_sector(image, layout.root_dir_lba, root)
+
+    # File data: distinct payloads per cluster
+    _write_cluster(image, layout, HIGH_CLUSTER_TARGET_1, _padded(HIGH_CLUSTER_PAYLOAD_1_PREFIX, 0xAA))
+    _write_cluster(image, layout, HIGH_CLUSTER_TARGET_2, _padded(HIGH_CLUSTER_PAYLOAD_2_PREFIX, 0x55))
+
+    return bytes(image)

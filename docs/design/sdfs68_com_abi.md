@@ -157,9 +157,15 @@ SDFS/68 は初期実装では `.COM` が低RAM内のどの領域を使うかま�
 
 ## SDFS/68本体サイズ
 
-2026-06-11 時点の V1.3 実装では、`make sdfs MONITOR_PROFILE=sbcio_vdg` の `SDFS.BIN` は 3614 byte である。
+2026-07-15 の #245 FAT dedup refactor で、SDFS/68 が独自に持っていた FAT chain 追跡コード (`SDFS_STREAM_OPEN` / `SDFS_STREAM_GETC` / `SDFS_NEXT_CLUSTER` / `SDFS_CLUSTER_TO_SD_LBA` 他 12 関数) を削除し、stage1 API 経由に統一した。
 
-`SDFS_LOAD_BASE` から `SDFS_LOAD_LIMIT` までの枠は 3840 byte なので、現時点の余裕は 226 byte である。
+- `make sdfs MONITOR_PROFILE=sbcio_vdg` の `SDFS.BIN` は 3614 byte → **3144 byte** (`SDFS_LOAD_LIMIT` 枠 3840 byte 中、余り 226 byte → **696 byte**)。
+- stage1 側 API を 6 → 12 slot に拡張 (streaming 3 + cluster プリミティブ 3 追加、S1_API_VERSION は 1 据置)。
+- 同時に `FAT32_NEXT_CLUSTER` を cluster >= 64 対応済に修正 (#243)。SDFS/68 側から共用するため修正は 1 箇所に集約。
+
+参考: [stage1 API 仕様](stage1_api.md)。
+
+以前(V1.3 = 2026-06-11 時点)は 3614 byte で、`SDFS_LOAD_BASE` から `SDFS_LOAD_LIMIT` までの枠 3840 byte 中の余裕は 226 byte だった。
 `.COM` 対応は SDFS/68 本体を肥大化させすぎないよう、実装を次に限定する。
 
 - 先頭トークン `.COM` 判定。

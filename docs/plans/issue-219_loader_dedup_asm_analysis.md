@@ -102,6 +102,16 @@ SDFS本体(非ローダ)から呼ばれる再利用入口は **9個**: `READ_LOA
 - 案1採用で SDFS常駐部から約730バイト(モジュールコードの約2割)を解放できる見込み。#216 の候補B/Cでの常駐サイズ評価に反映する。
 - 削減後の正確なバイト数は、API化の実装後に `tools/lst_analyze.py` と `make` のサイズ確認で再計測する。
 
+## 別軸の dedup: stage1 ↔ SDFS/68 の FAT ヘルパ(2026-07 #245)
+
+本書の指摘は ROM ↔ SDFS の loader 系重複が中心だが、これとは別に **stage1 ↔ SDFS/68** で FAT chain 追跡ヘルパが二重実装されていた。#245 でこちらを先に解消した。
+
+- 削除対象(SDFS/68 側): `SDFS_STREAM_OPEN` / `SDFS_STREAM_GETC` / `SDFS_STREAM_LOAD_SECTOR` / `SDFS_SECTOR_TO_SD_LBA` / `SDFS_CLUSTER_TO_SD_LBA` / `SDFS_INC_SD_LBA` / `SDFS_ADVANCE_FILE_SECTOR` / `SDFS_NEXT_CLUSTER` / `SDFS_COPY_NEXT_TO_CUR` / `SDFS_BYTES_REMAIN` / `SDFS_PREP_COPY_COUNT` / `SDFS_DEC_BYTES_REM_ONE`(計 12 関数)。
+- 追加した stage1 API: `S1_STREAM_OPEN` / `S1_STREAM_GETC` / `S1_STREAM_BYTES_REMAIN` / `S1_CLUSTER_TO_SD_LBA` / `S1_NEXT_CLUSTER` / `S1_COPY_NEXT_TO_CUR`(6 slot、`S1_API_COUNT` 6 → 12)。既存 `FAT32_*` / `FAT_*` 実装を jump table に露出したのみで stage1 バイナリ増加は 18 byte。
+- 副次効果として #243 の cluster >= 64 バグ修正が SDFS/68 側にも自動波及した。
+- 効果測定: `SDFS.BIN` (k6802_vdg / sbcio_vdg / sbcio-sdfs) が 3614 → **3144 byte**(-470 byte)。`SDFS_LOAD_LIMIT` 枠 3840 中の余裕は 226 → **696 byte**。
+- ROM ↔ SDFS の loader 系 dedup(本書本題)は未着手のまま残っている。730 byte 見込みの回収は依然として有効。
+
 ## 整備した解析基盤(保全)
 
 - `tools/lst_analyze.py`: ASL の `.lst` シンボルテーブルをパースし、構成別に「未使用シンボル(`*`)」「ROM↔SDFS の真の重複対」「案1の回収見積りバイト数」を出力する。構成名を引数で指定(既定 `sbcio-sdfs`)。
