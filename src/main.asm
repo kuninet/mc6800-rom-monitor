@@ -1387,6 +1387,16 @@ VDG_CLEAR_DONE:
         rts
 
 VDG_PUTC:
+        cmpa    #CHR_LF
+        beq     VDG_PUTC_ENTER
+        cmpa    #CHR_CR
+        beq     VDG_PUTC_ENTER
+        cmpa    #CHR_BS
+        beq     VDG_PUTC_ENTER
+        cmpa    #CHR_SPACE
+        bhs     VDG_PUTC_ENTER
+        rts
+VDG_PUTC_ENTER:
         psha
         pshb
         stx     VDG_SAVE_X
@@ -1401,8 +1411,6 @@ VDG_PUTC:
         beq     VDG_PUTC_BS
         cmpa    #CHR_DEL
         beq     VDG_PUTC_BS
-        cmpa    #CHR_SPACE
-        blo     VDG_PUTC_DONE
         clr     VDG_LAST_CR
         jsr     VDG_ASCII_TO_CHAR
         ldx     VDG_CURSOR
