@@ -55,6 +55,8 @@ ROM常駐FATを確認したい場合は、profileではなく直接構成軸で 
 - [plans/issue-130_sdfs68_loader.md](plans/issue-130_sdfs68_loader.md): SDFS/68 v1 HEX/S-recordロード
 - [plans/issue-sdfs68_responsibility_boundary.md](plans/issue-sdfs68_responsibility_boundary.md): SDFS/68とROMモニタの責務境界
 - [plans/issue-sdfs68_v2_roadmap.md](plans/issue-sdfs68_v2_roadmap.md): SDFS/68 v2 第2段DOS基本操作ロードマップ
+- [plans/sdfs68_v3/README.md](plans/sdfs68_v3/README.md): SDFS/68 v3 設計メモ
+- [plans/sdfs68_v3/issue-255_boundary.md](plans/sdfs68_v3/issue-255_boundary.md): SDFS/68 v3 責務境界とv2互換性方針
 - [plans/issue-141_sdfs68_load.md](plans/issue-141_sdfs68_load.md): SDFS/68 LOAD正式化
 - [plans/issue-149_sdfs68_run_addr.md](plans/issue-149_sdfs68_run_addr.md): SDFS/68 RUN addr
 - [plans/issue-150_sdfs68_run_file.md](plans/issue-150_sdfs68_run_file.md): SDFS/68 RUN filename
