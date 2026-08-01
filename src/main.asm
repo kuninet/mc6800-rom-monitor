@@ -1728,6 +1728,48 @@ BOOT_FAIL_A:
         staa    FAT_ERROR
         sec
         rts
+
+SDFS3_API_MAJOR    equ 1
+SDFS3_API_MIN_COUNT equ 7
+
+SDFS3_FIND_API:
+        ldx     #SDFS_LOAD_BASE
+        ldaa    0,x
+        cmpa    #'S'
+        bne     SDFS3_FIND_API_FAIL
+        ldaa    1,x
+        cmpa    #'D'
+        bne     SDFS3_FIND_API_FAIL
+        ldaa    2,x
+        cmpa    #'F'
+        bne     SDFS3_FIND_API_FAIL
+        ldaa    3,x
+        cmpa    #'S'
+        bne     SDFS3_FIND_API_FAIL
+        ldaa    4,x
+        cmpa    #'3'
+        bne     SDFS3_FIND_API_FAIL
+        ldaa    5,x
+        cmpa    #'A'
+        bne     SDFS3_FIND_API_FAIL
+        ldaa    6,x
+        cmpa    #'P'
+        bne     SDFS3_FIND_API_FAIL
+        ldaa    7,x
+        cmpa    #'I'
+        bne     SDFS3_FIND_API_FAIL
+        ldaa    8,x
+        cmpa    #SDFS3_API_MAJOR
+        bne     SDFS3_FIND_API_FAIL
+        ldaa    10,x
+        cmpa    #SDFS3_API_MIN_COUNT
+        blo     SDFS3_FIND_API_FAIL
+        ldx     #SDFS_LOAD_BASE
+        clc
+        rts
+SDFS3_FIND_API_FAIL:
+        sec
+        rts
  endif
  endif
  if MONITOR_FEATURE_FAT
