@@ -152,6 +152,11 @@ ROM容量が厳しい場合は、headerのみchecksumから始め、system全体
 現行の生成ツールは `DEFAULT_PARTITION_START_LBA=32`、`DEFAULT_STAGE1_LBA=16` で、デフォルトFAT32 imageは最小FAT32クラスタ数を満たす約32.5MiBである。
 v3で16KB級system imageを置く場合、LBA 0からpartition開始まで32 sectorsだけでは余裕が小さいため、partition開始LBAを広げる設計を優先する。
 
+現行SD層は、CMD8とOCRのCCS bitを確認するSDHC/SDXC block addressing前提であり、旧SDSCの2GBカードを対象にしない。
+そのため、v3 phase 1の容量目標は「旧2GB SDカード対応」ではなく、「4GB以上のSDHCカード上に先頭予約領域 + 2GB程度のFAT32 partitionを作る」方針にする。
+現行FATリーダーはcluster番号を実質16bit範囲で扱うため、32KB/clusterなら2GB級partitionが現実的な上限目標になる。
+8GB/16GB全域をFATとして安定利用する対応は、32bit cluster対応の後続Issueとして分ける。
+
 16KB上限は、#260の `$4000-$7FFF` 16KB resident/window案と対応しやすい。
 ただし、v3 phase 1で必ず16KBを使い切る前提にはしない。
 resident常駐部は小さく保ち、bank RAMやcacheを使う拡張はheader `flags` と #260 のメモリマップ設計で分ける。
