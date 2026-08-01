@@ -37,6 +37,7 @@ v3では、この2系統を同じ前提として扱わず、phase 1の機能互�
 | 案D: 64KB Bank RAM | 構成依存 | 8KBまたは16KB候補 | 構成依存 | 構成依存 | 任意拡張 | 中 | cache/staging PoC候補 |
 | 案E: 128KB Bank RAM | 構成依存 | `$4000-$7FFF` 16KB候補 | `$0000-$3FFF`中心 | 追加8KB RAM/VRAM配置次第 | 任意拡張 | 低い | 将来拡張候補 |
 | 案F: 8KB resident目標 + 16KB予約枠 | 実体は8KB目標、枠は `$4000-$7FFF` | 任意 | 実装サイズ次第で `$0000-$5FFF` などへ拡張余地 | 16KB枠を全消費しなければ緩和 | 不要 | 中から高 | phase 1のサイズ目標 |
+| 案G: `$A000/$C000` 8KB固定resident + 16KB bank window | `$A000-$BFFF` または `$C000-$DFFF` | `$4000-$7FFF` 16KB | `$0000-$3FFF`中心 | resident配置とVRAM配置が排他 | bank window活用時は必要 | 中 | 旧128KBボード活用時の有力候補 |
 
 ### 案A: `$4000-$7FFF` 固定16KB resident + `$A000/$C000` 8KB bank window
 
@@ -164,10 +165,42 @@ SDFS/68 v3 resident本体を8KB以内へ押し込むことを目標にする案�
 メモリマップとしては16KB枠を予約し、実装結果が8KBへ収まるかを測る。
 収まった場合は、#260後続のメモリマップIssueで `memtop` を上げる、bufferへ使う、または8KB固定resident構成を正式化する。
 
+### 案G: `$A000/$C000` 8KB固定resident + `$4000-$7FFF` 16KB bank window
+
+SDFS/68 v3 residentを `$A000-$BFFF` または `$C000-$DFFF` の8KB固定領域へ置き、旧128KBバンクボード案の `$4000-$7FFF` 16KB bank windowをそのまま活かす案。
+ユーザーが想定していた8KB resident案はこの構成に近い。
+
+```text
+$0000-$3FFF  fixed RAM / user TPA
+$4000-$7FFF  16KB bank window
+$8000-$9FFF  I/O / board dependent
+$A000-$BFFF  SDFS v3 resident or VRAM
+$C000-$DFFF  SDFS v3 resident or VRAM
+$E000-$FFFF  ROM
+```
+
+良い点:
+
+- residentを8KBへ抑えられれば、旧128KBバンクボードの16KB windowを最大限活かせる。
+- FAT cache、directory cache、file buffer、SAVE/write stagingを16KB bank window側へ逃がせる。
+- `$4000-$7FFF` を固定residentで塞がないため、過去のbank制御回路案との相性がよい。
+- VDGなし構成では、`$A000` または `$C000` の8KB固定residentは比較的自然に置ける。
+
+懸念:
+
+- VDGあり構成では、VRAM候補の `$A000-$BFFF` / `$C000-$DFFF` とresidentが排他になる。
+- resident本体を8KBへ抑える必要があり、FAT write、BASIC SAVE、system update実機コマンドまでは同居しにくい。
+- Bank RAM windowが前提に近くなるため、Bank RAMなしの最小構成とは別MEMORY_CONFIGとして扱う必要がある。
+- ROM/BASICから常に呼べるAPI header、dispatch入口、work領域を8KB固定resident内に安定配置する必要がある。
+
+案Gは、v3 phase 1の単純な最小PoCよりも、旧128KBバンクボード活用時の有力候補として残す。
+resident実体が8KBへ収まり、VDGなしまたはVRAM反対側配置で成立することが確認できた場合、16KB固定resident枠案から本線を切り替える候補にする。
+
 ## 採用する初期判断
 
-v3 phase 1では、案Aまたは案Cに近い「`$4000-$7FFF` 固定16KB resident枠」を本線にする。
+v3 phase 1では、案Aまたは案Cに近い「`$4000-$7FFF` 固定16KB resident枠」を初期本線にする。
 ただし、実体のresident本体は案Fの8KB級へ抑えることをサイズ目標にする。
+旧128KBバンクボードを活かす構成では、案Gの `$A000/$C000` 8KB固定resident + `$4000-$7FFF` 16KB bank windowを有力候補として残す。
 Bank RAMは必須にしない。
 Bank RAMがある場合は、resident本体の置き場ではなく、FAT cache、directory cache、file buffer、SAVE/write staging、system update stagingに使う任意拡張として扱う。
 
@@ -177,7 +210,7 @@ Bank RAMがある場合は、resident本体の置き場ではなく、FAT cache�
 - v3 phase 1の機能互換は、Bank RAMなしでも検証できるべきである。
 - Bank RAMを必須にすると、SDFS/68 v3の最初の導入がハードウェア設計に引きずられる。
 - 8KB residentを目標にすることで、BASICやユーザーTPAへの圧迫を抑えられる。ただし8KBを超えた時点で設計を破綻させないため、16KB枠を予約しておく。
-- 旧128KBバンクボード案は有用だが、`$4000-$7FFF` をbank windowにする構成はv3 phase 1の本線ではなく、拡張構成として比較を継続する方がよい。
+- 旧128KBバンクボード案は有用であり、8KB residentが成立するなら `$4000-$7FFF` をbank windowにする案Gは本線昇格候補になる。
 
 ## Bank RAMの位置づけ
 
@@ -194,6 +227,8 @@ Bank RAMは「あった方がよい」が「必須ではない」とする。
 
 resident APIでは、`GET_CAPS` のbank bitと、必要ならbank window情報を返す。
 Bank RAM非搭載時は、同じAPIで縮退して動くことを目標にする。
+案Gのように `$4000-$7FFF` 16KB bank windowを主に使う構成では、Bank RAMはcache/staging用の任意拡張を超えて、構成そのものの前提になる。
+その場合でも、v3 resident APIはbank有無をcapabilityとして返し、Bank RAMなし構成とは別MEMORY_CONFIGとして扱う。
 
 ## VRAM / BASIC互換への影響
 
@@ -207,13 +242,13 @@ BASIC SAVE/LOADでは、#261でBASICの使用領域、変数領域、SDFS reside
 
 ## #233 / #238への影響
 
-#238で追加済みの `ram64_4000_work` は、v3 phase 1の固定16KB resident本線候補として活かす。
+#238で追加済みの `ram64_4000_work` は、v3 phase 1の固定16KB resident初期本線候補として活かす。
 ただし、#238の時点ではv3 resident API、system image、system update、2GB級FAT目標、Bank RAM任意拡張までは整理されていなかった。
 そのため、#238をそのまま最終仕様とはみなさない。
 
 #233は「SDFS/68固定領域を16KB級へ拡張する」Issueとして、v3 phase 1の本線候補と整合する。
-一方、旧128KBバンクボードの `$4000-$7FFF` 16KB bank window案は、#233/#238とは別の拡張構成として残す。
-後続実装Issueでは、`ram64_4000_work` をv3固定resident PoCの土台にし、Bank RAM window対応はcapabilityつきの追加Issueへ分ける。
+一方、旧128KBバンクボードの `$4000-$7FFF` 16KB bank window案は、#233/#238とは別の案G系構成として残す。
+後続実装Issueでは、`ram64_4000_work` をv3固定resident PoCの土台にしつつ、案Gの `$A000/$C000` 8KB固定resident構成を別MEMORY_CONFIG候補としてサイズ評価する。
 
 ## 後続実装Issueへの分割案
 
@@ -223,7 +258,8 @@ BASIC SAVE/LOADでは、#261でBASICの使用領域、変数領域、SDFS reside
 4. Bank RAM capability bitとbank window情報の返却形式を定義する。
 5. 8KB bank window (`$A000` / `$C000`) をcache/staging用途で使う実装Issueを分ける。
 6. 旧128KBバンクボード互換の `$4000-$7FFF` 16KB window構成を、別MEMORY_CONFIG候補として再評価する。
-7. VDG構成ごとのVRAMとbank windowの排他関係をMAP表示とテストに反映する。
+7. 案Gの `$A000/$C000` 8KB固定resident + `$4000-$7FFF` 16KB bank window構成で、residentが8KBへ収まるかサイズ評価する。
+8. VDG構成ごとのVRAMとbank window/residentの排他関係をMAP表示とテストに反映する。
 
 ## 対象外
 
