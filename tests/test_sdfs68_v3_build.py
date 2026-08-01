@@ -6,10 +6,12 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+EMU_PATH = PROJECT_ROOT / "emu" / "sbc6800_emu.py"
 
 
 EXPECTED = {
@@ -118,8 +120,159 @@ def test_sdfs3_rejects_base_profile() -> None:
     print("[PASS] test_sdfs3_rejects_base_profile")
 
 
+def test_rom_detects_sdfs3_api_header() -> None:
+    profile = "sbcio_4000"
+    expected = EXPECTED[profile]
+    _run_make(profile, "bin")
+    suffix = expected["suffix"]
+    symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.lst",
+        "SDFS3_FIND_API",
+        "SDFS_LOAD_BASE",
+    )
+    status_addr = 0x0200
+    result_addr = 0x0201
+    harness_addr = 0x0100
+    find_api = symbols["SDFS3_FIND_API"]
+    harness = bytes(
+        [
+            0xBD,
+            (find_api >> 8) & 0xFF,
+            find_api & 0xFF,
+            0x25,
+            0x09,
+            0xFF,
+            (result_addr >> 8) & 0xFF,
+            result_addr & 0xFF,
+            0x86,
+            0x42,
+            0xB7,
+            (status_addr >> 8) & 0xFF,
+            status_addr & 0xFF,
+            0x3F,
+            0x86,
+            0xE1,
+            0xB7,
+            (status_addr >> 8) & 0xFF,
+            status_addr & 0xFF,
+            0x3F,
+        ]
+    )
+
+    cases = [
+        ("valid", _sdfs3_header(symbols["SDFS_LOAD_BASE"]), 0x42),
+        ("bad magic", b"XDFS3API" + _sdfs3_header(symbols["SDFS_LOAD_BASE"])[8:], 0xE1),
+        ("bad major", _mutated_header(symbols["SDFS_LOAD_BASE"], 8, 0x02), 0xE1),
+        ("short api count", _mutated_header(symbols["SDFS_LOAD_BASE"], 10, 0x06), 0xE1),
+    ]
+    for label, header, expected_status in cases:
+        stdout, stderr, rc = _run_emu(
+            rom_path=PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
+            input_text=(
+                f"M{symbols['SDFS_LOAD_BASE']:04X}\r"
+                f"{_hex_bytes(header)}\r.\r"
+                f"M{harness_addr:04X}\r"
+                f"{_hex_bytes(harness)}\r.\r"
+                f"G{harness_addr:04X}\r"
+                f"D{status_addr:04X}-{result_addr + 1:04X}\r"
+                "\r"
+            ),
+            max_cycles=20_000_000,
+        )
+        assert rc == 0 and "[TIMEOUT]" not in stderr, (
+            f"emulator failed for {label}: rc={rc} stderr={stderr!r}"
+        )
+        values = _dump_bytes(stdout, status_addr)
+        assert values[0] == expected_status, (
+            f"{label} status mismatch: {values!r}\nstdout={stdout!r}"
+        )
+        if expected_status == 0x42:
+            assert values[1:3] == [
+                (symbols["SDFS_LOAD_BASE"] >> 8) & 0xFF,
+                symbols["SDFS_LOAD_BASE"] & 0xFF,
+            ], f"{label} returned header address mismatch: {values!r}"
+    print("[PASS] test_rom_detects_sdfs3_api_header")
+
+
 def _word(data: bytes, offset: int) -> int:
     return (data[offset] << 8) | data[offset + 1]
+
+
+def _sdfs3_header(load_base: int) -> bytes:
+    return bytes(
+        [
+            *b"SDFS3API",
+            0x01,
+            0x00,
+            0x07,
+            0x00,
+            (load_base >> 8) & 0xFF,
+            load_base & 0xFF,
+            (load_base >> 8) & 0xFF,
+            load_base & 0xFF,
+            (load_base >> 8) & 0xFF,
+            load_base & 0xFF,
+            0x3F,
+            0xFF,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+        ]
+    )
+
+
+def _mutated_header(load_base: int, offset: int, value: int) -> bytes:
+    data = bytearray(_sdfs3_header(load_base))
+    data[offset] = value
+    return bytes(data)
+
+
+def _hex_bytes(data: bytes) -> str:
+    return "\r".join(f"{value:02X}" for value in data)
+
+
+def _run_emu(
+    *,
+    rom_path: Path,
+    input_text: str,
+    max_cycles: int,
+) -> tuple[str, str, int]:
+    with tempfile.NamedTemporaryFile("w", encoding="ascii", delete=False) as f:
+        f.write(input_text)
+        input_path = Path(f.name)
+    try:
+        cmd = [
+            sys.executable,
+            str(EMU_PATH),
+            str(rom_path),
+            "--input",
+            str(input_path),
+            "--max-cycles",
+            str(max_cycles),
+            "--dump-memory",
+            "0200-0202",
+        ]
+        result = subprocess.run(
+            cmd,
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        )
+    finally:
+        input_path.unlink(missing_ok=True)
+    return result.stdout, result.stderr, result.returncode
+
+
+def _dump_bytes(stdout: str, address: int) -> list[int]:
+    for line in stdout.splitlines():
+        if line.startswith(f"{address:04X} "):
+            parts = re.findall(r"\b[0-9A-Fa-f]{2}\b", line.split("  ", 1)[0])
+            return [int(part, 16) for part in parts]
+    raise AssertionError(f"missing dump line for {address:04X}: {stdout!r}")
 
 
 def _run_make(
@@ -170,6 +323,7 @@ def main() -> None:
         test_sdfs3_rejects_base_profile,
         test_sdfs3_profiles_build_and_match_header,
         test_sdfs3_get_info_matches_calling_convention,
+        test_rom_detects_sdfs3_api_header,
     ]
     passed = 0
     failed = 0

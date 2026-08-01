@@ -64,6 +64,7 @@ ROM常駐FATを確認したい場合は、profileではなく直接構成軸で 
 - [plans/sdfs68_v3/issue-260_memory_bankram.md](plans/sdfs68_v3/issue-260_memory_bankram.md): SDFS/68 v3 メモリマップとBank RAM利用方針
 - [plans/sdfs68_v3/issue-261_basic_save_load.md](plans/sdfs68_v3/issue-261_basic_save_load.md): SDFS/68 v3 BASIC SAVE/LOAD連携方式
 - [plans/sdfs68_v3/issue-271_resident_stub.md](plans/sdfs68_v3/issue-271_resident_stub.md): SDFS/68 v3 resident API stub とビルド基盤
+- [plans/sdfs68_v3/issue-275_resident_detect.md](plans/sdfs68_v3/issue-275_resident_detect.md): SDFS/68 v3 ROM側resident header検出
 - [plans/issue-141_sdfs68_load.md](plans/issue-141_sdfs68_load.md): SDFS/68 LOAD正式化
 - [plans/issue-149_sdfs68_run_addr.md](plans/issue-149_sdfs68_run_addr.md): SDFS/68 RUN addr
 - [plans/issue-150_sdfs68_run_file.md](plans/issue-150_sdfs68_run_file.md): SDFS/68 RUN filename
