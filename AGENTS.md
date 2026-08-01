@@ -47,6 +47,7 @@ GitHub Project の「Linked pull requests」列でPRを取りこぼさず追跡�
 ## テスト実行
 
 - コード変更後と PR 作成前は、**必ず全テストを実行する**。正規手順は `make test`(ビルド前提込みで全テストを実行)。
+- ドキュメントのみの変更では `make test` を省略してよい。その場合は PR 本文に「ドキュメントのみのためテスト省略」と明記する。
 - 手順の詳細は `docs/development/workflow.md` の「テスト方針」を参照。
 - テストは pytest ではなくスクリプト直実行。エミュテストは先に base profile をビルドしないと環境失敗する(`make test` が自動で満たす)。
 

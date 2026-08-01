@@ -44,6 +44,7 @@ python tests/test_smoke.py
 ```
 
 `REQUIRE_BUILD_ROM=1` を付けると、fixture ではなく最新ソースから生成した `build/mc6800-monitor.bin` を要求する。PR 前の確認ではこの経路を使う。
+ドキュメントのみの変更ではローカルの `make test` を省略してよい。GitHub Actions も docs / Markdown / Issue・PRテンプレートのみの変更では起動しない。
 
 新しい振る舞いを実装する場合は、既存 smoke test が通るだけでは不十分である。追加した機能に対応するテストを追加し、入力と期待結果を固定する。
 
