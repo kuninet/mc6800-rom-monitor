@@ -11,7 +11,17 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "tools"))
 EMU_PATH = PROJECT_ROOT / "emu" / "sbc6800_emu.py"
+
+from mk_sdfs3sys import (  # noqa: E402
+    FLAG_CHECKSUM16,
+    HEADER_SIZE,
+    MAGIC,
+    build_sdfs3sys_image,
+    checksum16,
+    parse_sdfs3sys_header,
+)
 
 
 EXPECTED = {
@@ -151,6 +161,118 @@ def test_sdfs3_memtop_and_caps_match_calling_convention() -> None:
             ]
         )
     print("[PASS] test_sdfs3_memtop_and_caps_match_calling_convention")
+
+
+def test_sdfs3sys_profiles_build_and_match_header() -> None:
+    for profile, expected in EXPECTED.items():
+        _run_make(profile, "sdfs3sys")
+        suffix = expected["suffix"]
+        sys_path = PROJECT_ROOT / "build" / f"SDFS3SYS{suffix}.BIN"
+        bin_path = PROJECT_ROOT / "build" / f"SDFS3{suffix}.BIN"
+        lst_path = PROJECT_ROOT / "build" / f"SDFS3{suffix}.lst"
+        image = sys_path.read_bytes()
+        payload = bin_path.read_bytes()
+        symbols = _load_symbols(
+            lst_path,
+            "SDFS_LOAD_BASE",
+            "SDFS_LOAD_LIMIT",
+            "SDFS3_JUMP_TABLE",
+            "SDFS3_GET_INFO",
+        )
+        header = parse_sdfs3sys_header(image)
+        assert image[0:8] == MAGIC
+        assert header.header_version == 1
+        assert header.abi_major == 1
+        assert header.abi_minor == 0
+        assert header.flags == FLAG_CHECKSUM16
+        assert header.load_address == expected["SDFS_LOAD_BASE"]
+        assert header.load_address == symbols["SDFS_LOAD_BASE"]
+        assert len(payload) <= symbols["SDFS_LOAD_LIMIT"] - symbols["SDFS_LOAD_BASE"] + 1
+        assert header.image_size == HEADER_SIZE + len(payload)
+        assert header.entry_offset == symbols["SDFS3_GET_INFO"] - symbols["SDFS_LOAD_BASE"]
+        assert header.api_table_offset == symbols["SDFS3_JUMP_TABLE"] - symbols["SDFS_LOAD_BASE"]
+        assert header.work_min == 0
+        assert header.bank_window_hint == 0
+        assert header.header_size == HEADER_SIZE
+        assert header.checksum == checksum16(image)
+        assert image[HEADER_SIZE:] == payload
+    print("[PASS] test_sdfs3sys_profiles_build_and_match_header")
+
+
+def test_sdfs3sys_rejects_bad_header_and_checksum() -> None:
+    payload = b"SDFS3API" + bytes(range(64))
+    image = build_sdfs3sys_image(
+        resident_data=payload,
+        load_address=0x5000,
+        load_limit=0x7EFF,
+        entry_address=0x5018,
+        api_table_address=0x5018,
+    )
+    bad_magic = bytearray(image)
+    bad_magic[0] = ord("X")
+    try:
+        parse_sdfs3sys_header(bytes(bad_magic))
+    except ValueError as exc:
+        assert "magic" in str(exc)
+    else:
+        raise AssertionError("bad SDFS3SYS magic should be rejected")
+
+    bad_checksum = bytearray(image)
+    bad_checksum[-1] ^= 0x01
+    try:
+        parse_sdfs3sys_header(bytes(bad_checksum))
+    except ValueError as exc:
+        assert "checksum" in str(exc)
+    else:
+        raise AssertionError("bad SDFS3SYS checksum should be rejected")
+    print("[PASS] test_sdfs3sys_rejects_bad_header_and_checksum")
+
+
+def test_sdfs3sys_rejects_payload_outside_load_range() -> None:
+    try:
+        build_sdfs3sys_image(
+            resident_data=b"X" * 2,
+            load_address=0x5000,
+            load_limit=0x5000,
+            entry_address=0x5000,
+            api_table_address=0x5000,
+        )
+    except ValueError as exc:
+        assert "load range" in str(exc)
+    else:
+        raise AssertionError("payload outside SDFS load range should be rejected")
+    print("[PASS] test_sdfs3sys_rejects_payload_outside_load_range")
+
+
+def test_sdfs3sys_cli_reports_bad_input() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        payload = root / "SDFS3.BIN"
+        listing = root / "SDFS3.lst"
+        output = root / "SDFS3SYS.BIN"
+        payload.write_bytes(b"SDFS3API")
+        listing.write_text("", encoding="ascii")
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PROJECT_ROOT / "tools" / "mk_sdfs3sys.py"),
+                "--input",
+                str(payload),
+                "--listing",
+                str(listing),
+                "--output",
+                str(output),
+            ],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=10,
+        )
+        assert result.returncode == 2
+        assert "mk-sdfs3sys:" in result.stderr
+        assert not output.exists()
+    print("[PASS] test_sdfs3sys_cli_reports_bad_input")
 
 
 def test_sdfs3_rejects_base_profile() -> None:
@@ -473,6 +595,10 @@ def main() -> None:
         test_sdfs3_profiles_build_and_match_header,
         test_sdfs3_get_info_matches_calling_convention,
         test_sdfs3_memtop_and_caps_match_calling_convention,
+        test_sdfs3sys_profiles_build_and_match_header,
+        test_sdfs3sys_rejects_bad_header_and_checksum,
+        test_sdfs3sys_rejects_payload_outside_load_range,
+        test_sdfs3sys_cli_reports_bad_input,
         test_rom_detects_sdfs3_api_header,
         test_rom_cmd_gateway_calls_resident_dispatch,
     ]

@@ -105,8 +105,10 @@ ROM_CODE_LIMIT=0 make bin
 | SDFS/68本体 | `MONITOR_PROFILE=sbcio_vdg make sdfs` | `build/SDFS-sbcio-vdg.BIN` |
 | SDFS/68 stage1 (16k) | `MONITOR_PROFILE=sbcio_4000 make stage1` | `build/stage1-sbcio-4000.bin` |
 | SDFS/68本体 (16k) | `MONITOR_PROFILE=sbcio_4000 make sdfs` | `build/SDFS-sbcio-4000.BIN` |
+| SDFS/68 v3 resident system image (16k) | `MONITOR_PROFILE=sbcio_4000 make sdfs3sys` | `build/SDFS3SYS-sbcio-4000.BIN` |
 | SDFS/68 stage1 (k6802-16k) | `MONITOR_PROFILE=k6802_4000 make stage1` | `build/stage1-k6802-4000.bin` |
 | SDFS/68本体 (k6802-16k) | `MONITOR_PROFILE=k6802_4000 make sdfs` | `build/SDFS-k6802-4000.BIN` |
+| SDFS/68 v3 resident system image (k6802-16k) | `MONITOR_PROFILE=k6802_4000 make sdfs3sys` | `build/SDFS3SYS-k6802-4000.BIN` |
 
 成果物の所属は次の通り。
 
@@ -115,13 +117,15 @@ ROM_CODE_LIMIT=0 make bin
 | `make bin` / `make rombin` | ROMモニタ | EPROM/EEPROMへ焼く本体。低レベル操作と `BOOT` 入口を持つ |
 | `make stage1` | system SD fixed boot area | ROM `BOOT` から読まれる第1段loader |
 | `make sdfs` | system SD FAT root | `SDFS.BIN` として置く第2段DOS本体 |
+| `make sdfs3sys` | system SD fixed system area | v3 residentを `SDFS3SYS` headerで包んだ固定LBA system image |
 | `tools/mk_sdfs_image.py` | ホストPC上の補助ツール | stage1、`SDFS.BIN`、利用者ファイルをまとめた system SD image を作る |
+| `tools/mk_sdfs3sys.py` | ホストPC上の補助ツール | v3 resident binaryに `SDFS3SYS` headerを付ける |
 
 ## SDFS/68 stage1
 
 `stage1` ターゲットは SDFS/68 の固定LBA boot areaへ置くstage1 loaderを単体生成する。
 生成可否はprofile名ではなく構成軸で決まる。
-`FEATURE_SD=1`、`BOARD_IO=sbcio`、stage1対応RAM配置である `MEMORY_CONFIG=ram64_c000_work` または `ram64_a000_work` の組み合わせで有効になる。
+`FEATURE_SD=1`、`BOARD_IO=sbcio`、stage1対応RAM配置である `MEMORY_CONFIG=ram64_c000_work`、`ram64_a000_work`、`ram64_4000_work` の組み合わせで有効になる。
 `base` profileや `FEATURE_SD=0` の構成では生成しない。
 
 ```sh
@@ -167,6 +171,10 @@ SDFS/68本体の初期ロード領域はそれぞれ `$D000-$DEFF`、`$B000-$BEF
 
 `sdfs` ターゲットは FAT root の `SDFS.BIN` として配置するSDFS/68本体を生成する。
 出力はsuffix付きの `build/SDFS-sbcio-vdg.BIN`、`build/SDFS-k6802-vdg.BIN`、`build/SDFS-sbcio-sdfs.BIN` などで、SDイメージ作成時に root の8.3名 `SDFS.BIN` として格納する。
+
+`sdfs3sys` ターゲットは v3 resident binaryを `SDFS3SYS` header付きsystem imageへ包む。
+出力はsuffix付きの `build/SDFS3SYS-sbcio-4000.BIN`、`build/SDFS3SYS-k6802-4000.BIN` などで、後続の固定LBA loaderが読むsystem領域へ配置する。
+このtargetは `make sdfs3` を前提にし、resident listingからload address、load limit、entry offset、resident API table offsetを取得する。
 
 ROM profileでは `FEATURE_SD` と `FEATURE_FAT` を分ける。
 `FEATURE_SD=1` はraw SD sector readと `BOOT` の前提、`FEATURE_FAT=1` はROM常駐の `DIR` / `LF` を含める設定である。
