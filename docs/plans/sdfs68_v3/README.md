@@ -22,3 +22,9 @@ v3 は、現行の `BOOT -> stage1 -> SDFS.BIN -> SDFS> ` 方式を単純に拡�
 - v3設計文書はこのディレクトリに置く。
 - 実装Issueは、#256から#261の設計が固まってから分割する。
 - v2系の既存文書、テスト、`SDFS.BIN`、stage1は、v3検討中も旧系統として壊さない。
+
+## 実装Issue
+
+| Issue | 文書 | 内容 |
+| --- | --- | --- |
+| #271 | [issue-271_resident_stub.md](issue-271_resident_stub.md) | resident API stub とビルド基盤 |
