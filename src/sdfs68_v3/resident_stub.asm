@@ -4,9 +4,10 @@
 
 SDFS3_API_MAJOR    equ 1
 SDFS3_API_MINOR    equ 0
-SDFS3_API_COUNT    equ 7
+SDFS3_API_COUNT    equ 9
 SDFS3_API_HDR_SIZE equ $18
 SDFS3_FLAG_NONE    equ 0
+SDFS3_CAPS_NONE    equ 0
 SDFS3_ERR_NONE     equ 0
 SDFS3_ERR_NOT_IMPL equ 1
 
@@ -37,6 +38,8 @@ SDFS3_JUMP_TABLE:
         fdb     SDFS3_READ_STREAM_GETC
         fdb     SDFS3_READ_STREAM_CLOSE
         fdb     SDFS3_GET_ERROR
+        fdb     SDFS3_GET_MEMTOP
+        fdb     SDFS3_GET_CAPS
 
 SDFS3_GET_INFO:
         ldaa    #SDFS3_API_MAJOR
@@ -68,6 +71,18 @@ SDFS3_NOT_IMPLEMENTED:
 
 SDFS3_GET_ERROR:
         ldaa    SDFS3_LAST_ERROR
+        clc
+        rts
+
+SDFS3_GET_MEMTOP:
+        ldx     #USER_RAM_END
+        clc
+        rts
+
+SDFS3_GET_CAPS:
+        ldaa    #SDFS3_CAPS_NONE
+        ldab    #SDFS3_CAPS_NONE
+        ldx     #SDFS3_API_HEADER
         clc
         rts
 

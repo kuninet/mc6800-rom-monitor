@@ -29,3 +29,4 @@ v3 は、現行の `BOOT -> stage1 -> SDFS.BIN -> SDFS> ` 方式を単純に拡�
 | --- | --- | --- |
 | #271 | [issue-271_resident_stub.md](issue-271_resident_stub.md) | resident API stub とビルド基盤 |
 | #275 | [issue-275_resident_detect.md](issue-275_resident_detect.md) | ROM側resident header検出 |
+| #279 | [issue-279_memtop_caps.md](issue-279_memtop_caps.md) | GET_MEMTOP / GET_CAPS API |
