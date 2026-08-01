@@ -186,6 +186,7 @@ SDFS3_TARGET := SDFS3$(TARGET_SUFFIX)
 SDFS3_OBJ := $(OUTDIR)/$(SDFS3_TARGET).p
 SDFS3_LST := $(OUTDIR)/$(SDFS3_TARGET).lst
 SDFS3_BIN := $(OUTDIR)/$(SDFS3_TARGET).BIN
+SDFS3SYS_BIN := $(OUTDIR)/SDFS3SYS$(TARGET_SUFFIX).BIN
 SDFS_TOOLS_DIR := sdfs_tools
 SDFS_TOOL_HELLO_S_SRC := $(SDFS_TOOLS_DIR)/HELLO_S.ASM
 SDFS_TOOL_HELLO_COM_SRC := $(SDFS_TOOLS_DIR)/HELLO_COM.ASM
@@ -256,7 +257,7 @@ endif
 
 ASL_INCLUDE := $(CURDIR)/$(OUTDIR)$(ASL_PATHSEP)$(CURDIR)/include$(ASL_PATHSEP)$(CURDIR)/src
 
-.PHONY: all clean bin test check-rom-size srec ihex stage1 sdfs sdfs3 sdfs-tools sdfs-tools-srec sdfs-tools-com check-stage1-config rombin rombin-27c64 rombin-27c128 rombin-27c256 rombin-28c256 rombin-w27c512 program verify readback program-27c64 program-27c128 program-27c256 program-28c256 program-w27c512 program-upd28c256 FORCE
+.PHONY: all clean bin test check-rom-size srec ihex stage1 sdfs sdfs3 sdfs3sys sdfs-tools sdfs-tools-srec sdfs-tools-com check-stage1-config rombin rombin-27c64 rombin-27c128 rombin-27c256 rombin-28c256 rombin-w27c512 program verify readback program-27c64 program-27c128 program-27c256 program-28c256 program-w27c512 program-upd28c256 FORCE
 
 all: check-rom-size srec ihex
 
@@ -297,6 +298,8 @@ sdfs: check-stage1-config $(SDFS_BIN)
 
 sdfs3: check-stage1-config $(SDFS3_BIN)
 
+sdfs3sys: check-stage1-config $(SDFS3SYS_BIN)
+
 check-stage1-config:
 	"$(PYTHON)" -c "import sys; sd='$(FEATURE_SD)'; board='$(BOARD_IO)'; memory='$(MEMORY_CONFIG)'; ok = sd == '1' and board == 'sbcio' and memory in ('ram64_c000_work', 'ram64_a000_work', 'ram64_4000_work'); sys.exit(0 if ok else 1)" || (echo "stage1 target requires FEATURE_SD=1 BOARD_IO=sbcio and MEMORY_CONFIG=ram64_c000_work, ram64_a000_work or ram64_4000_work" && exit 1)
 
@@ -317,6 +320,11 @@ $(SDFS3_OBJ): FORCE $(SDFS3_TOPSRC) include/hardware.inc $(CONFIG_INC) | $(OUTDI
 
 $(SDFS3_BIN): $(SDFS3_OBJ)
 	"$(P2BIN)" $(SDFS3_OBJ) $(SDFS3_BIN) -q
+
+$(SDFS3_LST): $(SDFS3_OBJ)
+
+$(SDFS3SYS_BIN): $(SDFS3_BIN) $(SDFS3_LST) tools/mk_sdfs3sys.py
+	"$(PYTHON)" tools/mk_sdfs3sys.py --input "$(SDFS3_BIN)" --listing "$(SDFS3_LST)" --output "$(SDFS3SYS_BIN)"
 
 sdfs-tools: sdfs-tools-srec sdfs-tools-com
 

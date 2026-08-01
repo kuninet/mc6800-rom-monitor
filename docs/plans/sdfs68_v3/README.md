@@ -31,3 +31,4 @@ v3 は、現行の `BOOT -> stage1 -> SDFS.BIN -> SDFS> ` 方式を単純に拡�
 | #275 | [issue-275_resident_detect.md](issue-275_resident_detect.md) | ROM側resident header検出 |
 | #279 | [issue-279_memtop_caps.md](issue-279_memtop_caps.md) | GET_MEMTOP / GET_CAPS API |
 | #276 | [issue-276_cmd_gateway.md](issue-276_cmd_gateway.md) | ROM CMD gateway |
+| #278 | [issue-278_sdfs3sys_image.md](issue-278_sdfs3sys_image.md) | SDFS3SYS system image生成 |
