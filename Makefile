@@ -181,6 +181,11 @@ SDFS_TARGET := SDFS$(TARGET_SUFFIX)
 SDFS_OBJ := $(OUTDIR)/$(SDFS_TARGET).p
 SDFS_LST := $(OUTDIR)/$(SDFS_TARGET).lst
 SDFS_BIN := $(OUTDIR)/$(SDFS_TARGET).BIN
+SDFS3_TOPSRC := src/sdfs68_v3/resident_stub.asm
+SDFS3_TARGET := SDFS3$(TARGET_SUFFIX)
+SDFS3_OBJ := $(OUTDIR)/$(SDFS3_TARGET).p
+SDFS3_LST := $(OUTDIR)/$(SDFS3_TARGET).lst
+SDFS3_BIN := $(OUTDIR)/$(SDFS3_TARGET).BIN
 SDFS_TOOLS_DIR := sdfs_tools
 SDFS_TOOL_HELLO_S_SRC := $(SDFS_TOOLS_DIR)/HELLO_S.ASM
 SDFS_TOOL_HELLO_COM_SRC := $(SDFS_TOOLS_DIR)/HELLO_COM.ASM
@@ -251,7 +256,7 @@ endif
 
 ASL_INCLUDE := $(CURDIR)/$(OUTDIR)$(ASL_PATHSEP)$(CURDIR)/include$(ASL_PATHSEP)$(CURDIR)/src
 
-.PHONY: all clean bin test check-rom-size srec ihex stage1 sdfs sdfs-tools sdfs-tools-srec sdfs-tools-com check-stage1-config rombin rombin-27c64 rombin-27c128 rombin-27c256 rombin-28c256 rombin-w27c512 program verify readback program-27c64 program-27c128 program-27c256 program-28c256 program-w27c512 program-upd28c256 FORCE
+.PHONY: all clean bin test check-rom-size srec ihex stage1 sdfs sdfs3 sdfs-tools sdfs-tools-srec sdfs-tools-com check-stage1-config rombin rombin-27c64 rombin-27c128 rombin-27c256 rombin-28c256 rombin-w27c512 program verify readback program-27c64 program-27c128 program-27c256 program-28c256 program-w27c512 program-upd28c256 FORCE
 
 all: check-rom-size srec ihex
 
@@ -282,12 +287,15 @@ test:
 	REQUIRE_BUILD_ROM=1 MONITOR_PROFILE=sbcio MONITOR_ROM_PATH=$(OUTDIR)/mc6800-monitor-sbcio.bin MONITOR_LST_PATH=$(OUTDIR)/mc6800-monitor-sbcio.lst "$(PYTHON)" tests/test_smoke.py
 	REQUIRE_BUILD_ROM=1 MONITOR_PROFILE=sbcio MONITOR_ROM_PATH=$(OUTDIR)/mc6800-monitor-sbcio.bin MONITOR_LST_PATH=$(OUTDIR)/mc6800-monitor-sbcio.lst "$(PYTHON)" tests/test_sd_fixture.py
 	"$(PYTHON)" tests/test_sdfs68_build.py
+	"$(PYTHON)" tests/test_sdfs68_v3_build.py
 	"$(PYTHON)" tests/test_stage1_build.py
 	"$(PYTHON)" tests/test_mk_sdfs_image.py
 
 stage1: check-stage1-config $(STAGE1_BIN)
 
 sdfs: check-stage1-config $(SDFS_BIN)
+
+sdfs3: check-stage1-config $(SDFS3_BIN)
 
 check-stage1-config:
 	"$(PYTHON)" -c "import sys; sd='$(FEATURE_SD)'; board='$(BOARD_IO)'; memory='$(MEMORY_CONFIG)'; ok = sd == '1' and board == 'sbcio' and memory in ('ram64_c000_work', 'ram64_a000_work', 'ram64_4000_work'); sys.exit(0 if ok else 1)" || (echo "stage1 target requires FEATURE_SD=1 BOARD_IO=sbcio and MEMORY_CONFIG=ram64_c000_work, ram64_a000_work or ram64_4000_work" && exit 1)
@@ -303,6 +311,12 @@ $(SDFS_OBJ): FORCE $(SDFS_TOPSRC) include/hardware.inc $(CONFIG_INC) | $(OUTDIR)
 
 $(SDFS_BIN): $(SDFS_OBJ)
 	"$(P2BIN)" $(SDFS_OBJ) $(SDFS_BIN) -q
+
+$(SDFS3_OBJ): FORCE $(SDFS3_TOPSRC) include/hardware.inc $(CONFIG_INC) | $(OUTDIR)
+	"$(ASL)" -q -L -olist $(SDFS3_LST) -o $(SDFS3_OBJ) -i $(ASL_INCLUDE_ARG) $(SDFS3_TOPSRC)
+
+$(SDFS3_BIN): $(SDFS3_OBJ)
+	"$(P2BIN)" $(SDFS3_OBJ) $(SDFS3_BIN) -q
 
 sdfs-tools: sdfs-tools-srec sdfs-tools-com
 
