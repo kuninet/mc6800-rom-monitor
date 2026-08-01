@@ -50,6 +50,7 @@ ROM単体で使える低レベル操作、復旧口、マシン語デバッグ�
 | コマンド | 用途 |
 | --- | --- |
 | `BOOT` | 固定LBAからSDFS/68 stage1 loaderを読み込んで、第2段システムへ移行する。`FEATURE_SD=1` かつ stage1対応RAM構成のROMで有効 |
+| `CMD <tail>` | RAM上のSDFS/68 v3 resident APIを検出し、slot 1 `SDFS3_CMD_DISPATCH` へ `tail` を渡す。`FEATURE_SD=1` かつ stage1対応RAM構成のROMで有効 |
 
 ### ROM常駐FAT互換コマンド
 
@@ -363,7 +364,7 @@ D M MAP RAMTEST G L B C R U H F
 
 ```text
 ] H
-D M MAP RAMTEST G L BOOT B C R U H F
+D M MAP RAMTEST G L BOOT CMD B C R U H F
 ]
 ```
 
@@ -371,7 +372,7 @@ D M MAP RAMTEST G L BOOT B C R U H F
 
 ```text
 ] H
-D DIR M MAP RAMTEST G L LF BOOT B C R U H F
+D DIR M MAP RAMTEST G L LF BOOT CMD B C R U H F
 ]
 ```
 
@@ -379,7 +380,7 @@ D DIR M MAP RAMTEST G L LF BOOT B C R U H F
 
 ```text
 ] H
-D M MAP RAMTEST G L BOOT B C R U H F
+D M MAP RAMTEST G L BOOT CMD B C R U H F
 ]
 ```
 

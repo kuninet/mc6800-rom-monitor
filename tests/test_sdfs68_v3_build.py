@@ -235,11 +235,118 @@ def test_rom_detects_sdfs3_api_header() -> None:
     print("[PASS] test_rom_detects_sdfs3_api_header")
 
 
+def test_rom_cmd_gateway_calls_resident_dispatch() -> None:
+    profile = "sbcio_4000"
+    expected = EXPECTED[profile]
+    _run_make(profile, "bin")
+    suffix = expected["suffix"]
+    symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.lst",
+        "LINE_BUF",
+        "SDFS_LOAD_BASE",
+    )
+    status_addr = 0x0200
+    b_addr = 0x0201
+    x_addr = 0x0202
+    load_base = symbols["SDFS_LOAD_BASE"]
+    jump_table = load_base + 0x18
+    dispatch = jump_table + 0x12
+    header = _sdfs3_header(load_base, jump_table=jump_table, work_end=dispatch + 13)
+    jump_table_data = bytes(
+        [
+            0x00,
+            0x00,
+            (dispatch >> 8) & 0xFF,
+            dispatch & 0xFF,
+            *([0x00, 0x00] * 7),
+        ]
+    )
+    dispatch_stub = bytes(
+        [
+            0xB7,
+            (status_addr >> 8) & 0xFF,
+            status_addr & 0xFF,
+            0xF7,
+            (b_addr >> 8) & 0xFF,
+            b_addr & 0xFF,
+            0xFF,
+            (x_addr >> 8) & 0xFF,
+            x_addr & 0xFF,
+            0x0C,
+            0x39,
+        ]
+    )
+    stdout, stderr, rc = _run_emu(
+        rom_path=PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
+        input_text=(
+            f"M{load_base:04X}\r"
+            f"{_hex_bytes(header)}\r.\r"
+            f"M{jump_table:04X}\r"
+            f"{_hex_bytes(jump_table_data)}\r.\r"
+            f"M{dispatch:04X}\r"
+            f"{_hex_bytes(dispatch_stub)}\r.\r"
+            "CMD DIR\r"
+            f"D{status_addr:04X}-{x_addr + 1:04X}\r"
+            "\r"
+        ),
+        max_cycles=20_000_000,
+        dump_range=f"{status_addr:04X}-{x_addr + 1:04X}",
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, (
+        f"emulator failed for CMD gateway: rc={rc} stderr={stderr!r}"
+    )
+    values = _dump_bytes(stdout, status_addr)
+    assert values[0] == 0x00, f"CMD gateway should pass A=0: {values!r}\nstdout={stdout!r}"
+    assert values[1] == 3, f"CMD gateway should pass tail length 3: {values!r}"
+    assert values[2:4] == [
+        ((symbols["LINE_BUF"] + 4) >> 8) & 0xFF,
+        (symbols["LINE_BUF"] + 4) & 0xFF,
+    ], f"CMD gateway should pass tail pointer LINE_BUF+4: {values!r}"
+
+    failing_dispatch = bytes([0x86, 0x01, 0x0D, 0x39])
+    stdout, stderr, rc = _run_emu(
+        rom_path=PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
+        input_text=(
+            f"M{load_base:04X}\r"
+            f"{_hex_bytes(header)}\r.\r"
+            f"M{jump_table:04X}\r"
+            f"{_hex_bytes(jump_table_data)}\r.\r"
+            f"M{dispatch:04X}\r"
+            f"{_hex_bytes(failing_dispatch)}\r.\r"
+            "CMD DIR\r"
+            "\r"
+        ),
+        max_cycles=20_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, (
+        f"emulator failed for failing CMD gateway: rc={rc} stderr={stderr!r}"
+    )
+    assert "?" in stdout, f"CMD dispatch carry set should return error: {stdout!r}"
+
+    stdout, stderr, rc = _run_emu(
+        rom_path=PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
+        input_text="CMD DIR\r\r",
+        max_cycles=20_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, (
+        f"emulator failed for unloaded CMD gateway: rc={rc} stderr={stderr!r}"
+    )
+    assert "?" in stdout, f"CMD without resident should return error: {stdout!r}"
+    print("[PASS] test_rom_cmd_gateway_calls_resident_dispatch")
+
+
 def _word(data: bytes, offset: int) -> int:
     return (data[offset] << 8) | data[offset + 1]
 
 
-def _sdfs3_header(load_base: int) -> bytes:
+def _sdfs3_header(
+    load_base: int,
+    *,
+    jump_table: int | None = None,
+    work_end: int | None = None,
+) -> bytes:
+    jump_table = jump_table if jump_table is not None else load_base
+    work_end = work_end if work_end is not None else load_base
     return bytes(
         [
             *b"SDFS3API",
@@ -247,12 +354,12 @@ def _sdfs3_header(load_base: int) -> bytes:
             0x00,
             0x09,
             0x00,
+            (jump_table >> 8) & 0xFF,
+            jump_table & 0xFF,
             (load_base >> 8) & 0xFF,
             load_base & 0xFF,
-            (load_base >> 8) & 0xFF,
-            load_base & 0xFF,
-            (load_base >> 8) & 0xFF,
-            load_base & 0xFF,
+            (work_end >> 8) & 0xFF,
+            work_end & 0xFF,
             0x3F,
             0xFF,
             0x00,
@@ -278,6 +385,7 @@ def _run_emu(
     rom_path: Path,
     input_text: str,
     max_cycles: int,
+    dump_range: str = "0200-0202",
 ) -> tuple[str, str, int]:
     with tempfile.NamedTemporaryFile("w", encoding="ascii", delete=False) as f:
         f.write(input_text)
@@ -292,7 +400,7 @@ def _run_emu(
             "--max-cycles",
             str(max_cycles),
             "--dump-memory",
-            "0200-0202",
+            dump_range,
         ]
         result = subprocess.run(
             cmd,
@@ -366,6 +474,7 @@ def main() -> None:
         test_sdfs3_get_info_matches_calling_convention,
         test_sdfs3_memtop_and_caps_match_calling_convention,
         test_rom_detects_sdfs3_api_header,
+        test_rom_cmd_gateway_calls_resident_dispatch,
     ]
     passed = 0
     failed = 0
