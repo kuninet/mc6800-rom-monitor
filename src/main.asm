@@ -134,6 +134,14 @@ MAIN_DISPATCH_RESUME:
 CHK_CMD_CLEAR:
         cmpa    #'C'
         bne     CHK_CMD_UNASM
+ if MONITOR_FEATURE_SD
+ if S1_SUPPORTED
+        jsr     IS_CMD_CMD
+        bcs     MAIN_DISPATCH_CLEAR
+        jmp     CMD_SDFS3
+MAIN_DISPATCH_CLEAR:
+ endif
+ endif
         jmp     CMD_BREAK_CLEAR
 CHK_CMD_UNASM:
         cmpa    #'U'
@@ -275,6 +283,26 @@ IS_CMD_BOOT:
         clc
         rts
 IS_CMD_BOOT_FAIL:
+        sec
+        rts
+
+IS_CMD_CMD:
+        ldab    LINE_LEN
+        cmpb    #4
+        blo     IS_CMD_CMD_FAIL
+        ldaa    LINE_BUF+1
+        cmpa    #'M'
+        bne     IS_CMD_CMD_FAIL
+        ldaa    LINE_BUF+2
+        cmpa    #'D'
+        bne     IS_CMD_CMD_FAIL
+        ldaa    LINE_BUF+3
+        cmpa    #CHR_SPACE
+        bne     IS_CMD_CMD_FAIL
+IS_CMD_CMD_OK:
+        clc
+        rts
+IS_CMD_CMD_FAIL:
         sec
         rts
  endif
@@ -1770,6 +1798,44 @@ SDFS3_FIND_API:
 SDFS3_FIND_API_FAIL:
         sec
         rts
+
+CMD_SDFS3:
+        ldab    LINE_LEN
+        cmpb    #4
+        blo     CMD_SDFS3_ERROR
+        ldaa    LINE_BUF+3
+        cmpa    #CHR_SPACE
+        bne     CMD_SDFS3_ERROR
+        ldx     #LINE_BUF+4
+        subb    #4
+        bra     CMD_SDFS3_CALL
+CMD_SDFS3_CALL:
+        stx     ARG_PTR
+        stab    ARG_LEN
+        jsr     SDFS3_FIND_API
+        bcs     CMD_SDFS3_ERROR
+        ldx     12,x
+        ldx     2,x
+        stx     SDFS3_DISPATCH
+        ldx     #CMD_SDFS3_RETURN
+        stx     SDFS3_RETURN
+        ldaa    SDFS3_RETURN+1
+        psha
+        ldaa    SDFS3_RETURN
+        psha
+        ldaa    SDFS3_DISPATCH+1
+        psha
+        ldaa    SDFS3_DISPATCH
+        psha
+        ldx     ARG_PTR
+        ldab    ARG_LEN
+        clra
+        rts
+CMD_SDFS3_RETURN:
+        bcs     CMD_SDFS3_ERROR
+        jmp     MAIN_LOOP
+CMD_SDFS3_ERROR:
+        jmp     MAIN_LOOP_ERROR
  endif
  endif
  if MONITOR_FEATURE_FAT
@@ -2554,17 +2620,17 @@ TXT_WELCOME:    fcc     "MC6800 MONITOR"
 TXT_HELP:
  if MONITOR_FEATURE_FAT
  if MONITOR_FEATURE_VDG
-                fcc     "D DS DIR M MAP RAMTEST G L LF BOOT B C R U UW H F"
+                fcc     "D DS DIR M MAP RAMTEST G L LF BOOT CMD B C R U UW H F"
  else
-                fcc     "D DIR M MAP RAMTEST G L LF BOOT B C R U H F"
+                fcc     "D DIR M MAP RAMTEST G L LF BOOT CMD B C R U H F"
  endif
  else
  if MONITOR_FEATURE_SD
  if S1_SUPPORTED
  if MONITOR_FEATURE_VDG
-                fcc     "D DS M MAP RAMTEST G L BOOT B C R U UW H F"
+                fcc     "D DS M MAP RAMTEST G L BOOT CMD B C R U UW H F"
  else
-                fcc     "D M MAP RAMTEST G L BOOT B C R U H F"
+                fcc     "D M MAP RAMTEST G L BOOT CMD B C R U H F"
  endif
  else
  if MONITOR_FEATURE_VDG
