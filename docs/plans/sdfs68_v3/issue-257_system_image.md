@@ -146,6 +146,12 @@ ROM容量が厳しい場合は、headerのみchecksumから始め、system全体
 | 最大sector数 | 32 sectors / 16KBを初期上限候補 |
 | ROM loader最小読み込み | 1 sectorでheader検査後、必要sectorを追加読み込み |
 
+案Bでは、SDカード全体を小さいsystem image専用にする必要はない。
+先頭にsystem用の予約領域を置き、その後ろからFAT partitionを開始すれば、16GB級カードでも予約領域を除いたほぼ全域をFATとして使える。
+たとえば先頭1MiBを予約し、v3 system imageをその中の固定LBAに置き、FAT partitionをLBA 2048から開始する構成が候補になる。
+現行の生成ツールは `DEFAULT_PARTITION_START_LBA=32`、`DEFAULT_STAGE1_LBA=16` で、デフォルトFAT32 imageは最小FAT32クラスタ数を満たす約32.5MiBである。
+v3で16KB級system imageを置く場合、LBA 0からpartition開始まで32 sectorsだけでは余裕が小さいため、partition開始LBAを広げる設計を優先する。
+
 16KB上限は、#260の `$4000-$7FFF` 16KB resident/window案と対応しやすい。
 ただし、v3 phase 1で必ず16KBを使い切る前提にはしない。
 resident常駐部は小さく保ち、bank RAMやcacheを使う拡張はheader `flags` と #260 のメモリマップ設計で分ける。
