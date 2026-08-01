@@ -1730,7 +1730,7 @@ BOOT_FAIL_A:
         rts
 
 SDFS3_API_MAJOR    equ 1
-SDFS3_API_MIN_COUNT equ 7
+SDFS3_API_MIN_COUNT equ 9
 
 SDFS3_FIND_API:
         ldx     #SDFS_LOAD_BASE

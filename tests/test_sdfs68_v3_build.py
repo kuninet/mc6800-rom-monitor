@@ -51,6 +51,8 @@ def test_sdfs3_profiles_build_and_match_header() -> None:
             "SDFS3_READ_STREAM_GETC",
             "SDFS3_READ_STREAM_CLOSE",
             "SDFS3_GET_ERROR",
+            "SDFS3_GET_MEMTOP",
+            "SDFS3_GET_CAPS",
             "SDFS3_END",
         )
         assert symbols["SDFS_LOAD_BASE"] == expected["SDFS_LOAD_BASE"]
@@ -62,7 +64,7 @@ def test_sdfs3_profiles_build_and_match_header() -> None:
         assert data[0:8] == b"SDFS3API"
         assert data[8] == 1, "SDFS3 api major mismatch"
         assert data[9] == 0, "SDFS3 api minor mismatch"
-        assert data[10] == 7, "SDFS3 api count mismatch"
+        assert data[10] == 9, "SDFS3 api count mismatch"
         assert data[11] == 0, "SDFS3 flags should be zero in stub"
         assert _word(data, 0x0C) == symbols["SDFS3_JUMP_TABLE"]
         assert _word(data, 0x0E) == symbols["SDFS_LOAD_BASE"]
@@ -78,6 +80,8 @@ def test_sdfs3_profiles_build_and_match_header() -> None:
         assert _word(data, jump_table + 8) == symbols["SDFS3_READ_STREAM_GETC"]
         assert _word(data, jump_table + 10) == symbols["SDFS3_READ_STREAM_CLOSE"]
         assert _word(data, jump_table + 12) == symbols["SDFS3_GET_ERROR"]
+        assert _word(data, jump_table + 14) == symbols["SDFS3_GET_MEMTOP"]
+        assert _word(data, jump_table + 16) == symbols["SDFS3_GET_CAPS"]
         get_error = symbols["SDFS3_GET_ERROR"] - symbols["SDFS_LOAD_BASE"]
         assert data[get_error + 3 : get_error + 5] == bytes([0x0C, 0x39])
     print("[PASS] test_sdfs3_profiles_build_and_match_header")
@@ -111,6 +115,42 @@ def test_sdfs3_get_info_matches_calling_convention() -> None:
     )
     assert data[get_info + 8] == 0x39
     print("[PASS] test_sdfs3_get_info_matches_calling_convention")
+
+
+def test_sdfs3_memtop_and_caps_match_calling_convention() -> None:
+    for profile, expected in EXPECTED.items():
+        _run_make(profile, "sdfs3")
+        suffix = expected["suffix"]
+        data = (PROJECT_ROOT / "build" / f"SDFS3{suffix}.BIN").read_bytes()
+        symbols = _load_symbols(
+            PROJECT_ROOT / "build" / f"SDFS3{suffix}.lst",
+            "SDFS_LOAD_BASE",
+            "SDFS3_API_HEADER",
+            "SDFS3_GET_MEMTOP",
+            "SDFS3_GET_CAPS",
+        )
+        get_memtop = symbols["SDFS3_GET_MEMTOP"] - symbols["SDFS_LOAD_BASE"]
+        memtop = expected["USER_RAM_END"]
+        assert data[get_memtop : get_memtop + 5] == bytes(
+            [0xCE, (memtop >> 8) & 0xFF, memtop & 0xFF, 0x0C, 0x39]
+        )
+
+        get_caps = symbols["SDFS3_GET_CAPS"] - symbols["SDFS_LOAD_BASE"]
+        header = symbols["SDFS3_API_HEADER"]
+        assert data[get_caps : get_caps + 9] == bytes(
+            [
+                0x86,
+                0x00,
+                0xC6,
+                0x00,
+                0xCE,
+                (header >> 8) & 0xFF,
+                header & 0xFF,
+                0x0C,
+                0x39,
+            ]
+        )
+    print("[PASS] test_sdfs3_memtop_and_caps_match_calling_convention")
 
 
 def test_sdfs3_rejects_base_profile() -> None:
@@ -163,7 +203,8 @@ def test_rom_detects_sdfs3_api_header() -> None:
         ("valid", _sdfs3_header(symbols["SDFS_LOAD_BASE"]), 0x42),
         ("bad magic", b"XDFS3API" + _sdfs3_header(symbols["SDFS_LOAD_BASE"])[8:], 0xE1),
         ("bad major", _mutated_header(symbols["SDFS_LOAD_BASE"], 8, 0x02), 0xE1),
-        ("short api count", _mutated_header(symbols["SDFS_LOAD_BASE"], 10, 0x06), 0xE1),
+        ("legacy api count 7", _mutated_header(symbols["SDFS_LOAD_BASE"], 10, 0x07), 0xE1),
+        ("short api count 8", _mutated_header(symbols["SDFS_LOAD_BASE"], 10, 0x08), 0xE1),
     ]
     for label, header, expected_status in cases:
         stdout, stderr, rc = _run_emu(
@@ -204,7 +245,7 @@ def _sdfs3_header(load_base: int) -> bytes:
             *b"SDFS3API",
             0x01,
             0x00,
-            0x07,
+            0x09,
             0x00,
             (load_base >> 8) & 0xFF,
             load_base & 0xFF,
@@ -323,6 +364,7 @@ def main() -> None:
         test_sdfs3_rejects_base_profile,
         test_sdfs3_profiles_build_and_match_header,
         test_sdfs3_get_info_matches_calling_convention,
+        test_sdfs3_memtop_and_caps_match_calling_convention,
         test_rom_detects_sdfs3_api_header,
     ]
     passed = 0
