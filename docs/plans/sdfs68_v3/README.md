@@ -15,7 +15,7 @@ v3 は、現行の `BOOT -> stage1 -> SDFS.BIN -> SDFS> ` 方式を単純に拡�
 | #258 | [issue-258_system_update.md](issue-258_system_update.md) | system領域更新方式 |
 | #259 | [issue-259_resident_api.md](issue-259_resident_api.md) | resident API最小セット |
 | #260 | [issue-260_memory_bankram.md](issue-260_memory_bankram.md) | メモリマップとBank RAM利用方針 |
-| #261 | 後続PRで追加 | BASIC SAVE/LOAD連携方式 |
+| #261 | [issue-261_basic_save_load.md](issue-261_basic_save_load.md) | BASIC SAVE/LOAD連携方式 |
 
 ## 運用
 

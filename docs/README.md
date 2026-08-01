@@ -58,6 +58,11 @@ ROM常駐FATを確認したい場合は、profileではなく直接構成軸で 
 - [plans/sdfs68_v3/README.md](plans/sdfs68_v3/README.md): SDFS/68 v3 設計メモ
 - [plans/sdfs68_v3/issue-255_boundary.md](plans/sdfs68_v3/issue-255_boundary.md): SDFS/68 v3 責務境界とv2互換性方針
 - [plans/sdfs68_v3/issue-256_rom_dispatch.md](plans/sdfs68_v3/issue-256_rom_dispatch.md): SDFS/68 v3 ROM command dispatch / resident API入口設計
+- [plans/sdfs68_v3/issue-257_system_image.md](plans/sdfs68_v3/issue-257_system_image.md): SDFS/68 v3 固定LBA system image形式と1発ロード方式
+- [plans/sdfs68_v3/issue-258_system_update.md](plans/sdfs68_v3/issue-258_system_update.md): SDFS/68 v3 system領域更新方式
+- [plans/sdfs68_v3/issue-259_resident_api.md](plans/sdfs68_v3/issue-259_resident_api.md): SDFS/68 v3 resident API最小セット
+- [plans/sdfs68_v3/issue-260_memory_bankram.md](plans/sdfs68_v3/issue-260_memory_bankram.md): SDFS/68 v3 メモリマップとBank RAM利用方針
+- [plans/sdfs68_v3/issue-261_basic_save_load.md](plans/sdfs68_v3/issue-261_basic_save_load.md): SDFS/68 v3 BASIC SAVE/LOAD連携方式
 - [plans/issue-141_sdfs68_load.md](plans/issue-141_sdfs68_load.md): SDFS/68 LOAD正式化
 - [plans/issue-149_sdfs68_run_addr.md](plans/issue-149_sdfs68_run_addr.md): SDFS/68 RUN addr
 - [plans/issue-150_sdfs68_run_file.md](plans/issue-150_sdfs68_run_file.md): SDFS/68 RUN filename
