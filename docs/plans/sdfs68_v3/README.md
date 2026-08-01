@@ -12,7 +12,7 @@ v3 は、現行の `BOOT -> stage1 -> SDFS.BIN -> SDFS> ` 方式を単純に拡�
 | #255 | [issue-255_boundary.md](issue-255_boundary.md) | 責務境界とv2互換性方針 |
 | #256 | [issue-256_rom_dispatch.md](issue-256_rom_dispatch.md) | ROMモニタ側command dispatchとSDFS API呼び出し口 |
 | #257 | [issue-257_system_image.md](issue-257_system_image.md) | 固定LBA system image形式と1発ロード方式 |
-| #258 | 後続PRで追加 | system領域更新方式 |
+| #258 | [issue-258_system_update.md](issue-258_system_update.md) | system領域更新方式 |
 | #259 | 後続PRで追加 | resident API最小セット |
 | #260 | 後続PRで追加 | メモリマップとBank RAM利用方針 |
 | #261 | 後続PRで追加 | BASIC SAVE/LOAD連携方式 |
