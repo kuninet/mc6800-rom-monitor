@@ -197,6 +197,25 @@ ROM E000-FFFF
 ]
 ```
 
+新SDFS/68固定領域（16KB級拡張）の `ram64_4000_work` 構成では、TPA（ユーザーRAM）が `$3FFF` 上限へ下がり、作業領域が `$4000-$7FFF` に移るため、次のような表示になります（VDG無効・SD有効の例）。
+
+```text
+] MAP
+MAP SBCIO
+RAM 0000-7FFF
+USER 0000-3FFF
+WORK 4000-7FFF
+SD C000
+MON 4200
+MIK 4300
+STK 7FFF
+KEY 8094-8095
+ROM E000-FFFF
+]
+```
+
+SDセクタバッファの番地は、S1/SDFS固定領域 `$4000-$7FFF` の中ではなく、ジャンパ選択されたバンク窓（上の例では `$C000`）へ正しく残されます。
+
 ## K68-VDG表示
 
 `FEATURE_VDG=1` のROMでは、起動メッセージ、プロンプト、通常の文字出力をUARTとK68-VDG画面の両方へ出す。

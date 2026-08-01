@@ -1090,6 +1090,12 @@ CMD_MAP:
  if MONITOR_PROFILE_K6802_VDG
         ldx     #TXT_MAP_K6802_VDG
  else
+ if MONITOR_PROFILE_K6802_4000
+        ldx     #TXT_MAP_K6802_4000
+ else
+ if MONITOR_PROFILE_SBCIO_4000
+        ldx     #TXT_MAP_SBCIO_4000
+ else
  if MONITOR_PROFILE_SBCIO
  if MONITOR_FEATURE_VDG
         ldx     #TXT_MAP_SBCIO_VDG
@@ -1098,6 +1104,8 @@ CMD_MAP:
  endif
  else
         ldx     #TXT_MAP_BASE
+ endif
+ endif
  endif
  endif
         jsr     MAP_PRINT_LINE
@@ -1156,6 +1164,25 @@ CMD_MAP:
         ldx     #TXT_MAP_K6802_MIK
         jsr     MAP_PRINT_LINE
         ldx     #TXT_MAP_K6802_STK
+        jsr     MAP_PRINT_LINE
+ endif
+
+ if BUILD_MEMORY_CONFIG_RAM64_4000_WORK
+        ldx     #TXT_MAP_RAM64_4000_RAM
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_RAM64_4000_USER
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_RAM64_4000_WORK
+        jsr     MAP_PRINT_LINE
+ if MONITOR_FEATURE_SD
+         ldx     #TXT_MAP_RAM64_4000_SD
+         jsr     MAP_PRINT_LINE
+ endif
+        ldx     #TXT_MAP_RAM64_4000_MON
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_RAM64_4000_MIK
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_RAM64_4000_STK
         jsr     MAP_PRINT_LINE
  endif
 
@@ -2546,6 +2573,14 @@ TXT_MAP_SBCIO:      fcc     "MAP SBCIO"
                     fcb     $04
  endif
  endif
+ if MONITOR_PROFILE_SBCIO_4000
+TXT_MAP_SBCIO_4000: fcc     "MAP SBCIO 4000"
+                    fcb     $04
+ endif
+ if MONITOR_PROFILE_K6802_4000
+TXT_MAP_K6802_4000: fcc     "MAP K6802 4000"
+                    fcb     $04
+ endif
  if MONITOR_PROFILE_K6802_VDG
 TXT_MAP_K6802_VDG:  fcc     "MAP K6802 VDG"
                     fcb     $04
@@ -2560,6 +2595,14 @@ TXT_MAP_SBCIO_USER: fcc     "USER 0000-7FFF"
 TXT_MAP_SBCIO_RAM:  fcc     "RAM 0000-7FFF"
                     fcb     $04
 TXT_MAP_SBCIO_USER: fcc     "USER 0000-7FFF"
+                    fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_4000_WORK
+TXT_MAP_RAM64_4000_RAM:  fcc     "RAM 0000-7FFF"
+                    fcb     $04
+TXT_MAP_RAM64_4000_USER: fcc     "USER 0000-3FFF"
+                    fcb     $04
+TXT_MAP_RAM64_4000_WORK: fcc     "WORK 4000-7FFF"
                     fcb     $04
  endif
  if BUILD_MEMORY_CONFIG_RAM64_C000_WORK
@@ -2579,6 +2622,15 @@ TXT_MAP_SBCIO_SD:   fcc     "SD C000"
 TXT_MAP_K6802_SD:   fcc     "SD A000"
                     fcb     $04
  endif
+ if BUILD_MEMORY_CONFIG_RAM64_4000_WORK
+ if BUILD_VDG_VRAM_C000
+TXT_MAP_RAM64_4000_SD:   fcc     "SD A000"
+                    fcb     $04
+ else
+TXT_MAP_RAM64_4000_SD:   fcc     "SD C000"
+                    fcb     $04
+ endif
+ endif
  endif
  if BUILD_MEMORY_CONFIG_RAM64_C000_WORK
 TXT_MAP_SBCIO_MON:  fcc     "MON C200"
@@ -2586,6 +2638,10 @@ TXT_MAP_SBCIO_MON:  fcc     "MON C200"
  endif
  if BUILD_MEMORY_CONFIG_RAM64_A000_WORK
 TXT_MAP_K6802_MON:  fcc     "MON A200"
+                    fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_4000_WORK
+TXT_MAP_RAM64_4000_MON:  fcc     "MON 4200"
                     fcb     $04
  endif
  if BUILD_MEMORY_CONFIG_BASE8K
@@ -2602,12 +2658,20 @@ TXT_MAP_SBCIO_MIK:  fcc     "MIK C300"
 TXT_MAP_K6802_MIK:  fcc     "MIK A300"
                     fcb     $04
  endif
+ if BUILD_MEMORY_CONFIG_RAM64_4000_WORK
+TXT_MAP_RAM64_4000_MIK:  fcc     "MIK 4300"
+                    fcb     $04
+ endif
  if BUILD_MEMORY_CONFIG_RAM64_C000_WORK
 TXT_MAP_SBCIO_STK:  fcc     "STK DFFF"
                     fcb     $04
  endif
  if BUILD_MEMORY_CONFIG_RAM64_A000_WORK
 TXT_MAP_K6802_STK:  fcc     "STK BFFF"
+                    fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_4000_WORK
+TXT_MAP_RAM64_4000_STK:  fcc     "STK 7FFF"
                     fcb     $04
  endif
  if MONITOR_FEATURE_VDG

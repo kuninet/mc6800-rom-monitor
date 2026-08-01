@@ -23,6 +23,8 @@ def _default_build_rom_path() -> Path:
         "sbcio": "-sbcio",
         "sbcio_vdg": "-sbcio-vdg",
         "k6802_vdg": "-k6802-vdg",
+        "sbcio_4000": "-sbcio-4000",
+        "k6802_4000": "-k6802-4000",
     }
     suffix = suffix_by_profile.get(os.environ.get("MONITOR_PROFILE", "base"), "")
     return PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin"
@@ -230,13 +232,27 @@ def expected_help_prefix() -> str:
     return "D M MAP RAMTEST G L"
 
 
+def is_sbcio_4000_build() -> bool:
+    if os.environ.get("MONITOR_PROFILE") == "sbcio_4000":
+        return True
+    return "-sbcio-4000" in BUILD_ROM_PATH.stem
+
+
+def is_k6802_4000_build() -> bool:
+    if os.environ.get("MONITOR_PROFILE") == "k6802_4000":
+        return True
+    return "-k6802-4000" in BUILD_ROM_PATH.stem
+
+
 def is_sbcio_build() -> bool:
     if os.environ.get("BOARD_IO") in ("none", "sbcio"):
         return os.environ["BOARD_IO"] == "sbcio"
     return (
         "-sbcio" in BUILD_ROM_PATH.stem
         or "-k6802-vdg" in BUILD_ROM_PATH.stem
-        or os.environ.get("MONITOR_PROFILE") in ("sbcio", "sbcio_vdg", "k6802_vdg")
+        or is_sbcio_4000_build()
+        or is_k6802_4000_build()
+        or os.environ.get("MONITOR_PROFILE") in ("sbcio", "sbcio_vdg", "k6802_vdg", "sbcio_4000", "k6802_4000")
     )
 
 
@@ -256,16 +272,22 @@ def is_k6802_vdg_build() -> bool:
     return "-k6802-vdg" in BUILD_ROM_PATH.stem or os.environ.get("MONITOR_PROFILE") == "k6802_vdg"
 
 
+def is_ram64_4000_work_build() -> bool:
+    if os.environ.get("MEMORY_CONFIG") == "ram64_4000_work":
+        return True
+    return is_sbcio_4000_build() or is_k6802_4000_build() or "-ram64_4000_work-" in BUILD_ROM_PATH.stem
+
+
 def is_sd_build() -> bool:
     if os.environ.get("FEATURE_SD") in ("0", "1"):
         return os.environ["FEATURE_SD"] == "1"
     profile = os.environ.get("MONITOR_PROFILE")
-    if profile in ("sbcio_vdg", "k6802_vdg"):
+    if profile in ("sbcio_vdg", "k6802_vdg", "sbcio_4000", "k6802_4000"):
         return True
     if profile in ("base", "sbcio"):
         return False
     stem = BUILD_ROM_PATH.stem
-    return "-sbcio-vdg" in stem or "-k6802-vdg" in stem or "-sd1-" in stem
+    return "-sbcio-vdg" in stem or "-k6802-vdg" in stem or "-sbcio-4000" in stem or "-k6802-4000" in stem or "-sd1-" in stem
 
 
 def is_fat_build() -> bool:
@@ -319,6 +341,27 @@ def test_map_command():
             "VDG 8110",
             "KEY 8094-8095",
         ]
+    elif is_ram64_4000_work_build():
+        if is_k6802_4000_build():
+            header = "MAP K6802 4000"
+        elif is_sbcio_4000_build():
+            header = "MAP SBCIO 4000"
+        else:
+            header = "MAP SBCIO VDG" if is_vdg_build() else "MAP SBCIO"
+        expected = [
+            header,
+            "RAM 0000-7FFF",
+            "USER 0000-3FFF",
+            "WORK 4000-7FFF",
+            "MON 4200",
+            "MIK 4300",
+            "STK 7FFF",
+        ]
+        if is_sd_build():
+            sd_addr = "A000" if (is_k6802_4000_build() or (is_vdg_build() and vdg_vram_base() == 0xC000)) else "C000"
+            expected.insert(4, f"SD {sd_addr}")
+        if is_keyboard_build():
+            expected.append("KEY 8094-8095")
     elif is_sbcio_build():
         expected = [
             "MAP SBCIO",
@@ -617,7 +660,18 @@ def test_ramtest_command():
     )
     stdout, stderr, rc = run_emu(input_text, max_cycles=80_000_000)
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
-    if is_k6802_vdg_build():
+    if is_ram64_4000_work_build():
+        assert "RAMTEST 0100-1BFF" in stdout, f"missing low RAMTEST range echo: {stdout!r}"
+        assert "RAMTEST 0100-01FF" in stdout, f"missing low subrange echo: {stdout!r}"
+        assert "RAMTEST 1BFF-2000" in stdout, f"missing low boundary-crossing RAM echo: {stdout!r}"
+        assert "RAMTEST 2000-3FFF" in stdout, f"missing extended subrange echo: {stdout!r}"
+        assert "RAMTEST 4000-7FFF" in stdout, f"missing upper extended subrange echo: {stdout!r}"
+        assert "RAMTEST C000-DFFF\nOK" not in stdout, f"high RAMTEST range must be rejected: {stdout!r}"
+        assert "RAMTEST C200-C2FF\nOK" not in stdout, f"high RAMTEST subrange must be rejected: {stdout!r}"
+        assert stdout.count("OK") >= 5, f"ram64_4000_work RAMTEST ranges should pass in emulator: {stdout!r}"
+        assert "NG" not in stdout, f"ram64_4000_work RAMTEST should not report NG: {stdout!r}"
+        assert stdout.count("?") >= 17, f"invalid RAMTEST ranges should be rejected: {stdout!r}"
+    elif is_k6802_vdg_build():
         assert "RAMTEST 0100-1BFF" in stdout, f"missing low RAMTEST range echo: {stdout!r}"
         assert "RAMTEST 0100-01FF" in stdout, f"missing low subrange echo: {stdout!r}"
         assert "RAMTEST 1BFF-2000" in stdout, f"missing low boundary-crossing RAM echo: {stdout!r}"
@@ -736,7 +790,10 @@ def test_breakpoint_resume_restores_user_sp():
 
 
 def test_ramtest_does_not_break_resume_state():
-    work_range = "A000-BFFF" if is_k6802_vdg_build() else "C000-DFFF"
+    if is_ram64_4000_work_build():
+        work_range = "4000-7FFF"
+    else:
+        work_range = "A000-BFFF" if is_k6802_vdg_build() else "C000-DFFF"
     input_text = (
         "M0100\r"
         "86\r42\rB7\r01\r20\r86\r99\rB7\r01\r21\r3F\r.\r"
@@ -750,10 +807,10 @@ def test_ramtest_does_not_break_resume_state():
     stdout, stderr, rc = run_emu(input_text, max_cycles=40_000_000)
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
     assert "BRK 0105" in stdout, f"missing breakpoint hit: {stdout!r}"
-    if is_sbcio_build():
-        assert f"RAMTEST {work_range}" in stdout and "OK" in stdout, f"SBCIO RAMTEST should run: {stdout!r}"
+    if is_ram64_4000_work_build() or is_sbcio_build():
+        assert f"RAMTEST {work_range}" in stdout and "OK" in stdout, f"RAMTEST should run: {stdout!r}"
     else:
-        assert "OK" not in stdout, f"base should reject C000-DFFF RAMTEST: {stdout!r}"
+        assert "OK" not in stdout, f"base should reject RAMTEST: {stdout!r}"
     assert "0120 42 99" in stdout, f"resume state was broken by RAMTEST handling: {stdout!r}"
     print("[PASS] test_ramtest_does_not_break_resume_state")
 

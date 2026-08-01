@@ -60,6 +60,8 @@ ROM_CODE_LIMIT=0 make bin
 | SBC-IO + 2nd ACIAキーボード | `MONITOR_PROFILE=sbcio make bin` | `build/mc6800-monitor-sbcio.bin` |
 | SBC-IO + K68-VDG、VRAM `$A000-$BFFF` | `MONITOR_PROFILE=sbcio_vdg make bin` | `build/mc6800-monitor-sbcio-vdg.bin` |
 | K6802-SBC + K68-VDG、VRAM `$C000-$DFFF` | `MONITOR_PROFILE=k6802_vdg make bin` | `build/mc6800-monitor-k6802-vdg.bin` |
+| SBC-IO + 16KB固定構成 (VRAM `$A000-$BFFF` 想定) | `MONITOR_PROFILE=sbcio_4000 make bin` | `build/mc6800-monitor-sbcio-4000.bin` |
+| K6802 + 16KB固定構成 (VRAM `$C000-$DFFF` 想定) | `MONITOR_PROFILE=k6802_4000 make bin` | `build/mc6800-monitor-k6802-4000.bin` |
 
 ## profileごとの違い
 
@@ -72,6 +74,8 @@ ROM_CODE_LIMIT=0 make bin
 | `sbcio` | SBC-IO RAM拡張profile | なし | なし | 不要 | SBC-IO RAM拡張と2nd ACIAキーボード |
 | `sbcio_vdg` | `BOOT + SDFS/68` 本線profile | なし | あり | 必要 | SBC-IO + K68-VDG + SDFS/68 |
 | `k6802_vdg` | `BOOT + SDFS/68` 本線profile | なし | あり | 必要 | K6802-SBC + K68-VDG + SDFS/68 |
+| `sbcio_4000` | `BOOT + SDFS/68` 16KB固定構成 (SBC-IO) | なし | あり | 必要 | SBC-IO + SDFS/68 16KB固定 |
+| `k6802_4000` | `BOOT + SDFS/68` 16KB固定構成 (K6802) | なし | あり | 必要 | K6802-SBC + SDFS/68 16KB固定 |
 
 メモリ配置と装備の差分は次の通り。
 
@@ -81,6 +85,8 @@ ROM_CODE_LIMIT=0 make bin
 | `sbcio` | `RAM 0000-7FFF`, `WORK C000-DFFF` | あり | なし | なし | あり | なし |
 | `sbcio_vdg` | `RAM 0000-7FFF`, `WORK C000-DFFF` | あり | あり | あり | あり | `$A000-$BFFF` |
 | `k6802_vdg` | `RAM 0000-7FFF`, `WORK A000-BFFF` | あり | あり | あり | あり | `$C000-$DFFF` |
+| `sbcio_4000` | `RAM 0000-7FFF`, `WORK 4000-7FFF` | あり | あり | なし | あり | `$A000-$BFFF` |
+| `k6802_4000` | `RAM 0000-7FFF`, `WORK 4000-7FFF` | あり | あり | なし | あり | `$C000-$DFFF` |
 
 `KEY hw` は2nd ACIA `$8094-$8095` の接続想定を示す。ROM常駐の `KEYTEST` コマンドは容量節約のため外し、必要な確認は `diagnostics/KEYTEST.S` をSDからロードして行う。
 
@@ -97,6 +103,10 @@ ROM_CODE_LIMIT=0 make bin
 | ROMライタ用の容量合わせ済みバイナリ | `MONITOR_PROFILE=sbcio make rombin ROM_KIND=W27C512` | `build/mc6800-monitor-sbcio-W27C512.bin` |
 | SDFS/68 stage1 | `MONITOR_PROFILE=sbcio_vdg make stage1` | `build/stage1-sbcio-vdg.bin` |
 | SDFS/68本体 | `MONITOR_PROFILE=sbcio_vdg make sdfs` | `build/SDFS-sbcio-vdg.BIN` |
+| SDFS/68 stage1 (16k) | `MONITOR_PROFILE=sbcio_4000 make stage1` | `build/stage1-sbcio-4000.bin` |
+| SDFS/68本体 (16k) | `MONITOR_PROFILE=sbcio_4000 make sdfs` | `build/SDFS-sbcio-4000.BIN` |
+| SDFS/68 stage1 (k6802-16k) | `MONITOR_PROFILE=k6802_4000 make stage1` | `build/stage1-k6802-4000.bin` |
+| SDFS/68本体 (k6802-16k) | `MONITOR_PROFILE=k6802_4000 make sdfs` | `build/SDFS-k6802-4000.BIN` |
 
 成果物の所属は次の通り。
 
@@ -121,13 +131,25 @@ MONITOR_PROFILE=sbcio_vdg make sdfs
 MONITOR_PROFILE=k6802_vdg make sdfs
 ```
 
+新しく追加された16KB固定構成用のプロファイル `sbcio_4000` および `k6802_4000` を使用する場合は、以下のように指定するだけで ROMモニター、stage1、SDFS/68本体を一括ビルドできます。
+
+```sh
+# SBC-IO 向け 16KB 固定構成
+MONITOR_PROFILE=sbcio_4000 make bin stage1 sdfs
+
+# K6802 向け 16KB 固定構成
+MONITOR_PROFILE=k6802_4000 make bin stage1 sdfs
+```
+
 VDGなしのSBC-IOでSDFS/68を使う場合は、標準 `sbcio` profileを直接変更せず、構成軸で `FEATURE_SD=1` を明示する。
 出力名を短く安定させるため、`BUILD_CONFIG_NAME` を付ける。
 
 ```sh
-MONITOR_PROFILE=sbcio FEATURE_SD=1 FEATURE_FAT=0 BUILD_CONFIG_NAME=sbcio-sdfs make bin
-MONITOR_PROFILE=sbcio FEATURE_SD=1 FEATURE_FAT=0 BUILD_CONFIG_NAME=sbcio-sdfs make stage1
-MONITOR_PROFILE=sbcio FEATURE_SD=1 FEATURE_FAT=0 BUILD_CONFIG_NAME=sbcio-sdfs make sdfs
+# 従来の8KBワーク構成 (ram64_c000_work)
+MONITOR_PROFILE=sbcio FEATURE_SD=1 FEATURE_FAT=0 BUILD_CONFIG_NAME=sbcio-sdfs make bin stage1 sdfs
+
+# 新しい16KB固定領域構成 (ram64_4000_work)
+MONITOR_PROFILE=sbcio MEMORY_CONFIG=ram64_4000_work FEATURE_SD=1 FEATURE_FAT=0 BUILD_CONFIG_NAME=sbcio-4000 make bin stage1 sdfs
 ```
 
 主な出力:
@@ -136,10 +158,12 @@ MONITOR_PROFILE=sbcio FEATURE_SD=1 FEATURE_FAT=0 BUILD_CONFIG_NAME=sbcio-sdfs ma
 | --- | --- |
 | `sbcio_vdg` | `build/stage1-sbcio-vdg.bin` |
 | `k6802_vdg` | `build/stage1-k6802-vdg.bin` |
+| `sbcio_4000` | `build/stage1-sbcio-4000.bin` |
+| `k6802_4000` | `build/stage1-k6802-4000.bin` |
 | `sbcio` + `FEATURE_SD=1 BUILD_CONFIG_NAME=sbcio-sdfs` | `build/stage1-sbcio-sdfs.bin` |
 
-stage1 v1の配置は、`MEMORY_CONFIG=ram64_c000_work` が `$C400-$CFFF`、`MEMORY_CONFIG=ram64_a000_work` が `$A400-$AFFF` である。
-SDFS/68本体の初期ロード領域はそれぞれ `$D000-$DEFF`、`$B000-$BEFF` とする。
+stage1 v1の配置は、`MEMORY_CONFIG=ram64_c000_work` が `$C400-$CFFF`、`MEMORY_CONFIG=ram64_a000_work` が `$A400-$AFFF`、`MEMORY_CONFIG=ram64_4000_work` が `$4400-$4FFF` である。
+SDFS/68本体の初期ロード領域はそれぞれ `$D000-$DEFF`、`$B000-$BEFF`、`$5000-$7EFF` とする。
 
 `sdfs` ターゲットは FAT root の `SDFS.BIN` として配置するSDFS/68本体を生成する。
 出力はsuffix付きの `build/SDFS-sbcio-vdg.BIN`、`build/SDFS-k6802-vdg.BIN`、`build/SDFS-sbcio-sdfs.BIN` などで、SDイメージ作成時に root の8.3名 `SDFS.BIN` として格納する。

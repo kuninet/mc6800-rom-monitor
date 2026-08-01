@@ -24,6 +24,8 @@ def _default_build_stem() -> str:
         "sbcio": "-sbcio",
         "sbcio_vdg": "-sbcio-vdg",
         "k6802_vdg": "-k6802-vdg",
+        "sbcio_4000": "-sbcio-4000",
+        "k6802_4000": "-k6802-4000",
     }
     suffix = suffix_by_profile.get(os.environ.get("MONITOR_PROFILE", "base"), "")
     return f"mc6800-monitor{suffix}"
@@ -263,13 +265,27 @@ def _load_symbol_addresses(*names: str) -> dict[str, int]:
     return result
 
 
+def _is_sbcio_4000_build() -> bool:
+    if os.environ.get("MONITOR_PROFILE") == "sbcio_4000":
+        return True
+    return "-sbcio-4000" in BUILD_ROM_PATH.stem
+
+
+def _is_k6802_4000_build() -> bool:
+    if os.environ.get("MONITOR_PROFILE") == "k6802_4000":
+        return True
+    return "-k6802-4000" in BUILD_ROM_PATH.stem
+
+
 def _is_sbcio_build() -> bool:
     if os.environ.get("BOARD_IO") in ("none", "sbcio"):
         return os.environ["BOARD_IO"] == "sbcio"
     return (
         "-sbcio" in BUILD_ROM_PATH.stem
         or "-k6802-vdg" in BUILD_ROM_PATH.stem
-        or os.environ.get("MONITOR_PROFILE") in ("sbcio", "sbcio_vdg", "k6802_vdg")
+        or _is_sbcio_4000_build()
+        or _is_k6802_4000_build()
+        or os.environ.get("MONITOR_PROFILE") in ("sbcio", "sbcio_vdg", "k6802_vdg", "sbcio_4000", "k6802_4000")
     )
 
 
@@ -289,16 +305,22 @@ def _is_k6802_vdg_build() -> bool:
     return "-k6802-vdg" in BUILD_ROM_PATH.stem or os.environ.get("MONITOR_PROFILE") == "k6802_vdg"
 
 
+def _is_ram64_4000_work_build() -> bool:
+    if os.environ.get("MEMORY_CONFIG") == "ram64_4000_work":
+        return True
+    return _is_sbcio_4000_build() or _is_k6802_4000_build() or "-ram64_4000_work-" in BUILD_ROM_PATH.stem
+
+
 def _is_sd_build() -> bool:
     if os.environ.get("FEATURE_SD") in ("0", "1"):
         return os.environ["FEATURE_SD"] == "1"
     profile = os.environ.get("MONITOR_PROFILE")
-    if profile in ("sbcio_vdg", "k6802_vdg"):
+    if profile in ("sbcio_vdg", "k6802_vdg", "sbcio_4000", "k6802_4000"):
         return True
     if profile in ("base", "sbcio"):
         return False
     stem = BUILD_ROM_PATH.stem
-    return "-sbcio-vdg" in stem or "-k6802-vdg" in stem or "-sd1-" in stem
+    return "-sbcio-vdg" in stem or "-k6802-vdg" in stem or "-sbcio-4000" in stem or "-k6802-4000" in stem or "-sd1-" in stem
 
 
 def _is_fat_build() -> bool:
@@ -524,7 +546,13 @@ def test_rom_profile_memory_layout() -> None:
     if _is_vdg_build():
         names.extend(["VDG_CTL", "VDG_VRAM_START", "VDG_VRAM_END"])
     symbols = _load_symbol_addresses(*names)
-    if _is_k6802_vdg_build():
+    if _is_ram64_4000_work_build():
+        expected_sector_buf = 0xA000 if (_is_k6802_4000_build() or (_is_vdg_build() and os.environ.get("VDG_VRAM_CONFIG", "a000") == "c000")) else 0xC000
+        expected_monitor_base = 0x4200
+        expected_user_ram_end = 0x3FFF
+        expected_work_start = 0x4000
+        expected_work_end = 0x7FFF
+    elif _is_k6802_vdg_build():
         expected_sector_buf = 0xA000
         expected_monitor_base = 0xA200
         expected_user_ram_end = 0x7FFF
@@ -621,7 +649,11 @@ def test_rom_map_command_matches_profile_symbols() -> None:
     symbols = _load_symbol_addresses(*names)
     stdout, stderr, rc = _run_emu_with_sd("MAP\r\r", build_fat32_image(with_mbr=True))
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
-    if _is_k6802_vdg_build():
+    if _is_k6802_4000_build():
+        profile = "K6802 4000"
+    elif _is_sbcio_4000_build():
+        profile = "SBCIO 4000"
+    elif _is_k6802_vdg_build():
         profile = "K6802 VDG"
     elif _is_vdg_build():
         profile = "SBCIO VDG"

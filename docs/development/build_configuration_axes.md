@@ -30,6 +30,7 @@
 | `base8k` | SBC6800互換の8KB RAM配置。ワークRAMは低RAM内に置く |
 | `ram64_c000_work` | 低位ユーザーRAM `$0000-$7FFF`、ワークRAM `$C000-$DFFF` |
 | `ram64_a000_work` | 低位ユーザーRAM `$0000-$7FFF`、ワークRAM `$A000-$BFFF` |
+| `ram64_4000_work` | 低位ユーザーRAM `$0000-$3FFF` (16KB TPA)、SDFS固定領域 `$4000-$7FFF` (16KB)。SDセクタバッファはバンク窓 `$C000` または `$A000` に残す |
 
 `BOARD_IO` は外部I/O基板やI/Oデコードの軸である。
 初期候補は `none` と `sbcio` とする。
@@ -68,6 +69,8 @@ VDGはSBC-IOとは独立した外部表示装備として扱い、VRAM範囲は 
 | `sbcio` | `ram64_c000_work` | `sbcio` | `0` | `0` | `0` | `1` | `0` | SBC-IO RAM拡張と2nd ACIAキーボード。SDなし |
 | `sbcio_vdg` | `ram64_c000_work` | `sbcio` | `1` | `0` | `1` | `1` | `0` | SBC-IO構成でVRAM `$A000-$BFFF`、ROM FATなし |
 | `k6802_vdg` | `ram64_a000_work` | `sbcio` | `1` | `0` | `1` | `1` | `0` | K6802-SBC向けにワークRAM `$A000-$BFFF`、VRAM `$C000-$DFFF`、ROM FATなし |
+| `sbcio_4000` | `ram64_4000_work` | `sbcio` | `1` | `0` | `0` | `1` | `0` | SBC-IO 16KB固定領域構成、VRAM `$A000-$BFFF` 想定 (SDバッファ `$C000` 配置) |
+| `k6802_4000` | `ram64_4000_work` | `sbcio` | `1` | `0` | `0` | `1` | `0` | K6802-SBC向け16KB固定構成、VRAM `$C000-$DFFF` 想定 (SDバッファ `$A000` 配置) |
 
 `FEATURE_KEYBOARD` は2nd ACIAキーボード入力PoCの構成軸であり、SBC-IOの2nd ACIA `$8094-$8095` を前提にする。
 既存profile名はユーザー向け入口として残し、`MONITOR_PROFILE=base` などのビルド互換を壊さない。
@@ -85,7 +88,7 @@ make bin MEMORY_CONFIG=ram64_a000_work BOARD_IO=sbcio FEATURE_SD=1 FEATURE_FAT=0
 
 | 変数 | 値 | 意味 |
 | --- | --- | --- |
-| `MEMORY_CONFIG` | `base8k` / `ram64_c000_work` / `ram64_a000_work` | メモリ配置 |
+| `MEMORY_CONFIG` | `base8k` / `ram64_c000_work` / `ram64_a000_work` / `ram64_4000_work` | メモリ配置 |
 | `BOARD_IO` | `none` / `sbcio` | 外部I/O装備 |
 | `FEATURE_SD` | `0` / `1` | raw SD sector readと固定LBA `BOOT` をROMへ入れるか |
 | `FEATURE_FAT` | `0` / `1` | ROM常駐のFAT32 `DIR` / `LF` を入れるか |

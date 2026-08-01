@@ -38,6 +38,16 @@ EXPECTED = {
         "SDFS_LOAD_BASE": 0xB000,
         "SDFS_LOAD_LIMIT": 0xBEFF,
     },
+    "sbcio_4000": {
+        "suffix": "-sbcio-4000",
+        "SDFS_LOAD_BASE": 0x5000,
+        "SDFS_LOAD_LIMIT": 0x7EFF,
+    },
+    "k6802_4000": {
+        "suffix": "-k6802-4000",
+        "SDFS_LOAD_BASE": 0x5000,
+        "SDFS_LOAD_LIMIT": 0x7EFF,
+    },
 }
 
 SBCIO_SD_AXIS = {
@@ -51,6 +61,61 @@ SBCIO_SD_AXIS = {
         "BUILD_CONFIG_NAME=sbcio-sdfs",
     ],
 }
+
+
+SBCIO_4000_SD_AXIS = {
+    "profile": "sbcio",
+    "suffix": "-sbcio-4000",
+    "SDFS_LOAD_BASE": 0x5000,
+    "SDFS_LOAD_LIMIT": 0x7EFF,
+    "make_args": [
+        "MEMORY_CONFIG=ram64_4000_work",
+        "FEATURE_SD=1",
+        "FEATURE_FAT=0",
+        "BUILD_CONFIG_NAME=sbcio-4000",
+    ],
+}
+
+
+def test_sdfs_accepts_sd_axis_4000() -> None:
+    config = SBCIO_4000_SD_AXIS
+    make_args = config["make_args"]
+    _run_make(config["profile"], "bin", make_args=make_args)
+    _run_make(config["profile"], "stage1", make_args=make_args)
+    _run_make(config["profile"], "sdfs", make_args=make_args)
+    suffix = config["suffix"]
+    rom_path = PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin"
+    stage1_path = PROJECT_ROOT / "build" / f"stage1{suffix}.bin"
+    sdfs_path = PROJECT_ROOT / "build" / f"SDFS{suffix}.BIN"
+    lst_path = PROJECT_ROOT / "build" / f"SDFS{suffix}.lst"
+    assert rom_path.exists(), f"missing axis ROM: {rom_path}"
+    assert stage1_path.exists(), f"missing axis stage1: {stage1_path}"
+    assert sdfs_path.exists(), f"missing axis SDFS: {sdfs_path}"
+    symbols = _load_symbols(
+        lst_path,
+        "SDFS_LOAD_BASE",
+        "SDFS_LOAD_LIMIT",
+    )
+    assert symbols["SDFS_LOAD_BASE"] == config["SDFS_LOAD_BASE"]
+    assert symbols["SDFS_LOAD_LIMIT"] == config["SDFS_LOAD_LIMIT"]
+
+    image = build_sdfs_image(
+        stage1_data=stage1_path.read_bytes(),
+        sdfs_data=sdfs_path.read_bytes(),
+        extra_files=[],
+    )
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=rom_path,
+        input_text="BOOT\rEXIT\r",
+        sd_image=image,
+        max_cycles=40_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, (
+        f"emulator failed for sbcio 4000 axis: rc={rc} stderr={stderr!r}"
+    )
+    assert "SDFS/68 V1.3 #157" in stdout, f"missing SDFS banner: {stdout!r}"
+    assert "SDFS> " in stdout, f"missing SDFS prompt: {stdout!r}"
+    print("[PASS] test_sdfs_accepts_sd_axis_4000")
 
 
 def test_sdfs_rejects_base_profile() -> None:
@@ -1196,6 +1261,7 @@ def main() -> None:
     tests = [
         test_sdfs_rejects_base_profile,
         test_sdfs_accepts_sd_axis_without_vdg,
+        test_sdfs_accepts_sd_axis_4000,
         test_sdfs_profiles_build_and_match_header,
         test_sdfs_api_wrappers_target_stage1_jump_table,
         test_stage1_boot_runs_built_sdfs_binary,

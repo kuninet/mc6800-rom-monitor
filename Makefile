@@ -45,6 +45,26 @@ PROFILE_FEATURE_VDG := 1
 PROFILE_FEATURE_KEYBOARD := 1
 PROFILE_FEATURE_I2C := 0
 PROFILE_VDG_VRAM_CONFIG := c000
+else ifeq ($(MONITOR_PROFILE),sbcio_4000)
+PROFILE_TARGET_SUFFIX := -sbcio-4000
+PROFILE_MEMORY_CONFIG := ram64_4000_work
+PROFILE_BOARD_IO := sbcio
+PROFILE_FEATURE_SD := 1
+PROFILE_FEATURE_FAT := 0
+PROFILE_FEATURE_VDG := 0
+PROFILE_FEATURE_KEYBOARD := 1
+PROFILE_FEATURE_I2C := 0
+PROFILE_VDG_VRAM_CONFIG := a000
+else ifeq ($(MONITOR_PROFILE),k6802_4000)
+PROFILE_TARGET_SUFFIX := -k6802-4000
+PROFILE_MEMORY_CONFIG := ram64_4000_work
+PROFILE_BOARD_IO := sbcio
+PROFILE_FEATURE_SD := 1
+PROFILE_FEATURE_FAT := 0
+PROFILE_FEATURE_VDG := 0
+PROFILE_FEATURE_KEYBOARD := 1
+PROFILE_FEATURE_I2C := 0
+PROFILE_VDG_VRAM_CONFIG := c000
 else
 $(error Unsupported MONITOR_PROFILE '$(MONITOR_PROFILE)')
 endif
@@ -84,7 +104,7 @@ FEATURE_KEYBOARD ?= $(PROFILE_FEATURE_KEYBOARD)
 FEATURE_I2C ?= $(PROFILE_FEATURE_I2C)
 VDG_VRAM_CONFIG ?= $(PROFILE_VDG_VRAM_CONFIG)
 
-VALID_MEMORY_CONFIGS := base8k ram64_c000_work ram64_a000_work
+VALID_MEMORY_CONFIGS := base8k ram64_c000_work ram64_a000_work ram64_4000_work
 VALID_BOARD_IO := none sbcio
 VALID_FEATURE_VALUES := 0 1
 VALID_VDG_VRAM_CONFIGS := a000 c000
@@ -270,7 +290,7 @@ stage1: check-stage1-config $(STAGE1_BIN)
 sdfs: check-stage1-config $(SDFS_BIN)
 
 check-stage1-config:
-	"$(PYTHON)" -c "import sys; sd='$(FEATURE_SD)'; board='$(BOARD_IO)'; memory='$(MEMORY_CONFIG)'; ok = sd == '1' and board == 'sbcio' and memory in ('ram64_c000_work', 'ram64_a000_work'); sys.exit(0 if ok else 1)" || (echo "stage1 target requires FEATURE_SD=1 BOARD_IO=sbcio and MEMORY_CONFIG=ram64_c000_work or ram64_a000_work" && exit 1)
+	"$(PYTHON)" -c "import sys; sd='$(FEATURE_SD)'; board='$(BOARD_IO)'; memory='$(MEMORY_CONFIG)'; ok = sd == '1' and board == 'sbcio' and memory in ('ram64_c000_work', 'ram64_a000_work', 'ram64_4000_work'); sys.exit(0 if ok else 1)" || (echo "stage1 target requires FEATURE_SD=1 BOARD_IO=sbcio and MEMORY_CONFIG=ram64_c000_work, ram64_a000_work or ram64_4000_work" && exit 1)
 
 $(STAGE1_OBJ): FORCE $(STAGE1_TOPSRC) include/hardware.inc $(CONFIG_INC) src/sdcard.asm src/fat32.asm | $(OUTDIR)
 	"$(ASL)" -q -L -olist $(STAGE1_LST) -o $(STAGE1_OBJ) -i $(ASL_INCLUDE_ARG) $(STAGE1_TOPSRC)
