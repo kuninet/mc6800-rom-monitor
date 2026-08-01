@@ -86,12 +86,13 @@ PR 作成前に、差分へ不要ファイルが入っていないことを確�
 ## テスト方針
 
 コード変更後と PR 作成前は、**必ず全テストを実行する**。一発で済む正規手順は `make test`。
+ドキュメントのみの変更では `make test` を省略してよい。その場合は PR 本文に「ドキュメントのみのためテスト省略」と明記する。
 
 ```sh
 make test
 ```
 
-`make test` は次をまとめて行う(CI `.github/workflows/windows-emu.yml` と同等)。
+`make test` は次をまとめて行う。CI `.github/workflows/windows-emu.yml` は Windows 上の smoke subset であり、`make test` 全体とは範囲が異なる。
 
 - 前提ROMを先にビルド: `make bin MONITOR_PROFILE=base` と `make bin MONITOR_PROFILE=sbcio`
 - エミュレータテスト(`REQUIRE_BUILD_ROM=1`、base と sbcio 両構成): `tests/test_smoke.py` / `tests/test_sd_fixture.py`
@@ -112,6 +113,7 @@ make test
 - 実機でしか確認できない内容は、手順と確認結果を `docs/testing/` または `docs/progress/` に残す。
 
 CI では `REQUIRE_BUILD_ROM=1` を使い、最新ソースから生成した `build/mc6800-monitor.bin` を検証する。fixture はローカル補助用であり、最新ソースの確認には使わない。
+CI もドキュメント、Markdown、Issue/PRテンプレートのみの変更では起動しない。
 
 ## レビュー運用
 

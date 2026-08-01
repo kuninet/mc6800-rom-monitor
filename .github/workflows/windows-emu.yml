@@ -5,7 +5,20 @@ on:
     branches:
       - main
       - "codex/**"
+      - "feature/**"
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
+      - "**/*.md"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/pull_request_template.md"
   pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
+      - "**/*.md"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/pull_request_template.md"
 
 jobs:
   smoke:
