@@ -110,6 +110,25 @@ v3の移行は、v2の破壊的変更として一括で入れない。
 この段階では、v2の `BOOT` と `SDFS> ` を残したままv3入口を並走させる。
 v3が安定してから、v2を互換系統として残すか、利用者向け本線を切り替えるか判断する。
 
+## v3 phase 1 の検証軸
+
+v3の最初の実装線では、v2のUI互換ではなく機能互換を検証軸にする。
+`SDFS> ` プロンプト、同一コマンド入力位置、同一エラーメッセージ、`BOOT -> stage1 -> SDFS.BIN` 起動経路の完全一致は求めない。
+
+phase 1 では、ROMモニタ側のコマンド入口からSDFS resident APIを呼び、次のv2相当機能を段階的に再現できるか確認する。
+これらを1つの実装Issueで一括達成する前提にはしない。
+
+- `DIR` 相当のdirectory表示。
+- `TYPE` 相当のテキスト表示。
+- `LOAD` / `L` 相当のロードのみ操作。
+- `RUN filename` 相当のS-Recordロード後実行。
+- `RUN addr` 相当の指定アドレス実行。
+- `.COM` 相当のトランジェント実行。
+- ROMモニタへ戻れる、またはROMモニタ側に操作入口が残る運用。
+
+この段階での目的は、v3のROM dispatch、resident API、メモリ配置の妥当性を既存v2機能の再現で測ることである。
+BASIC SAVE/LOAD、メモリ範囲SAVE、FAT write、system領域更新、bank RAM cacheは、phase 1 の機能互換確認後に個別の実装Issueへ分ける。
+
 ## 後続Issueへの前提
 
 ### #256 ROMモニタ側command dispatch
