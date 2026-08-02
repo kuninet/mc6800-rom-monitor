@@ -1390,12 +1390,12 @@ SDFS_READ_HEXBYTE_INPUT:
         lsla
         lsla
         lsla
-        tab
+        staa    HEX_NIBBLE
         jsr     SDFS_API_STREAM_GETC
         bcs     SDFS_READ_HEXBYTE_INPUT_FAIL
         jsr     SDFS_HEX_TO_NIBBLE
         bcs     SDFS_READ_HEXBYTE_INPUT_FAIL
-        aba
+        adda    HEX_NIBBLE
         pulb
         clc
         rts
@@ -1735,7 +1735,7 @@ SDFS_PUTC_DONE:
 
 TXT_BANNER:
         fcb     CHR_CR
-        fcc     "SDFS/68 V1.3 #157"
+        fcc     "SDFS/68 V1.3 #293"
         fcb     CHR_CR,0
 
 TXT_PROMPT:

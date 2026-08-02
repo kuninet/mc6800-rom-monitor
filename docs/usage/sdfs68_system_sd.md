@@ -147,8 +147,8 @@ SDFS/68 v1 はloaderの書き込み先アドレスを保護しない。`SDFS.BIN
 ## SDFS/68 v2 コマンド
 
 SDFS/68 v2以降では、DOS風の通常操作を本線にする。
-SDFS/68 V1.3ではサブディレクトリとroot起点の明示path指定を追加し、起動時は `SDFS/68 V1.3 #157` のように表示する。
-`#157` は元Issue番号をbuild番号相当として扱う。
+SDFS/68 V1.3ではサブディレクトリとroot起点の明示path指定を追加し、起動時は `SDFS/68 V1.3 #293` のように表示する。
+`#293` は直近の修正Issue番号をbuild番号相当として扱う。
 SDFS.BIN headerのversion byteはstage1が読むバイナリ形式versionであり、起動表示のバージョンとは別に扱う。
 
 | コマンド | 用途 |

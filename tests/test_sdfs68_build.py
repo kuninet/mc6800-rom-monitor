@@ -113,7 +113,7 @@ def test_sdfs_accepts_sd_axis_4000() -> None:
     assert rc == 0 and "[TIMEOUT]" not in stderr, (
         f"emulator failed for sbcio 4000 axis: rc={rc} stderr={stderr!r}"
     )
-    assert "SDFS/68 V1.3 #157" in stdout, f"missing SDFS banner: {stdout!r}"
+    assert "SDFS/68 V1.3 #293" in stdout, f"missing SDFS banner: {stdout!r}"
     assert "SDFS> " in stdout, f"missing SDFS prompt: {stdout!r}"
     print("[PASS] test_sdfs_accepts_sd_axis_4000")
 
@@ -161,7 +161,7 @@ def test_sdfs_accepts_sd_axis_without_vdg() -> None:
     assert rc == 0 and "[TIMEOUT]" not in stderr, (
         f"emulator failed for sbcio SD axis: rc={rc} stderr={stderr!r}"
     )
-    assert "SDFS/68 V1.3 #157" in stdout, f"missing SDFS banner: {stdout!r}"
+    assert "SDFS/68 V1.3 #293" in stdout, f"missing SDFS banner: {stdout!r}"
     assert "SDFS> " in stdout, f"missing SDFS prompt: {stdout!r}"
     print("[PASS] test_sdfs_accepts_sd_axis_without_vdg")
 
@@ -274,7 +274,7 @@ def test_stage1_boot_runs_built_sdfs_binary() -> None:
         assert rc == 0 and "[TIMEOUT]" not in stderr, (
             f"emulator failed for {profile}: rc={rc} stderr={stderr!r}"
         )
-        assert "SDFS/68 V1.3 #157" in stdout, f"missing SDFS banner for {profile}: {stdout!r}"
+        assert "SDFS/68 V1.3 #293" in stdout, f"missing SDFS banner for {profile}: {stdout!r}"
         assert "SDFS> " in stdout, f"missing SDFS prompt for {profile}: {stdout!r}"
     print("[PASS] test_stage1_boot_runs_built_sdfs_binary")
 
@@ -310,6 +310,34 @@ def test_sdfs_loads_srec_and_ihex_files() -> None:
         assert "0202 4E" in stdout, f"EOF-without-newline HEX did not load for {profile}: {stdout!r}"
         assert stdout.count("OK") >= 3, f"missing load success messages for {profile}: {stdout!r}"
     print("[PASS] test_sdfs_loads_srec_and_ihex_files")
+
+
+def test_sdfs_loads_multisector_srec_file() -> None:
+    profile = "k6802_vdg"
+    expected = EXPECTED[profile]
+    _run_make(profile, "bin")
+    _run_make(profile, "stage1")
+    _run_make(profile, "sdfs")
+    suffix = expected["suffix"]
+    stage1 = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+    sdfs = (PROJECT_ROOT / "build" / f"SDFS{suffix}.BIN").read_bytes()
+    payload = bytes((index & 0xFF) for index in range(256))
+    image = build_sdfs_image(
+        stage1_data=stage1,
+        sdfs_data=sdfs,
+        extra_files=[_file("T256.S", _srec_records_file(0x0200, payload))],
+    )
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
+        input_text="BOOT\rLOAD T256.S\rD0200\rD02F0\rX",
+        sd_image=image,
+        max_cycles=180_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert "OK" in stdout, f"multisector S-record load failed: {stdout!r}"
+    assert "0200 00" in stdout, f"first byte missing after multisector load: {stdout!r}"
+    assert "02F0 F0" in stdout, f"second-sector data missing after multisector load: {stdout!r}"
+    print("[PASS] test_sdfs_loads_multisector_srec_file")
 
 
 def test_sdfs_dir_lists_root_files_and_skips_non_files() -> None:
@@ -513,7 +541,7 @@ def test_sdfs_exit_returns_to_monitor_and_boots_again() -> None:
         max_cycles=180_000_000,
     )
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
-    assert stdout.count("SDFS/68 V1.3 #157") >= 2, f"EXIT did not allow BOOT again: {stdout!r}"
+    assert stdout.count("SDFS/68 V1.3 #293") >= 2, f"EXIT did not allow BOOT again: {stdout!r}"
     assert stdout.count("] ") >= 2, f"monitor prompt did not return after EXIT: {stdout!r}"
     print("[PASS] test_sdfs_exit_returns_to_monitor_and_boots_again")
 
@@ -1225,6 +1253,30 @@ def _srec_file(
     return text.encode("ascii")
 
 
+def _srec_records_file(
+    address: int,
+    data: bytes,
+    record_size: int = 16,
+    trailing_newline: bool = True,
+    entry_address: int = 0,
+) -> bytes:
+    records = []
+    for offset in range(0, len(data), record_size):
+        chunk = data[offset : offset + record_size]
+        record_address = address + offset
+        count = len(chunk) + 3
+        values = [count, (record_address >> 8) & 0xFF, record_address & 0xFF, *chunk]
+        checksum = (~sum(values)) & 0xFF
+        records.append("S1" + "".join(f"{value:02X}" for value in [*values, checksum]))
+    entry_values = [3, (entry_address >> 8) & 0xFF, entry_address & 0xFF]
+    entry_checksum = (~sum(entry_values)) & 0xFF
+    records.append("S9" + "".join(f"{value:02X}" for value in [*entry_values, entry_checksum]))
+    text = "\r\n".join(records)
+    if trailing_newline:
+        text += "\r\n"
+    return text.encode("ascii")
+
+
 def _ihex_file(address: int, data: bytes, trailing_newline: bool = True) -> bytes:
     values = [len(data), (address >> 8) & 0xFF, address & 0xFF, 0x00, *data]
     checksum = (-sum(values)) & 0xFF
@@ -1266,6 +1318,7 @@ def main() -> None:
         test_sdfs_api_wrappers_target_stage1_jump_table,
         test_stage1_boot_runs_built_sdfs_binary,
         test_sdfs_loads_srec_and_ihex_files,
+        test_sdfs_loads_multisector_srec_file,
         test_sdfs_dir_lists_root_files_and_skips_non_files,
         test_sdfs_vdg_dir_does_not_insert_blank_line_after_command,
         test_sdfs_dir_scans_root_chain,

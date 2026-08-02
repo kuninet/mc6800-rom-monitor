@@ -127,17 +127,9 @@ SDFS3_BAD_COMMAND:
         rts
 
 SDFS3_LOAD_PATH:
-        jmp     SDFS3_NOT_IMPLEMENTED
-
 SDFS3_READ_STREAM_OPEN:
-        jmp     SDFS3_NOT_IMPLEMENTED
-
 SDFS3_READ_STREAM_GETC:
-        jmp     SDFS3_NOT_IMPLEMENTED
-
 SDFS3_READ_STREAM_CLOSE:
-        jmp     SDFS3_NOT_IMPLEMENTED
-
 SDFS3_NOT_IMPLEMENTED:
         ldaa    #SDFS3_ERR_NOT_IMPL
 SDFS3_NOT_IMPLEMENTED_A:
@@ -1130,12 +1122,12 @@ SDFS3_READ_HEXBYTE_INPUT:
         lsla
         lsla
         lsla
-        tab
+        staa    HEX_NIBBLE
         jsr     FAT32_STREAM_GETC
         bcs     SDFS3_READ_HEXBYTE_INPUT_FAIL
         jsr     SDFS3_HEX_TO_NIBBLE
         bcs     SDFS3_READ_HEXBYTE_INPUT_FAIL
-        aba
+        adda    HEX_NIBBLE
         pulb
         clc
         rts
