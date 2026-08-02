@@ -46,10 +46,12 @@ ROM単体で使える低レベル操作、復旧口、マシン語デバッグ�
 ### SDFS/68起動入口
 
 `BOOT` はROM上のファイル操作コマンドではなく、system SD上のstage1を起動してSDFS/68へ制御を渡す入口である。
+`BOOT3` は v3 resident 用の入口で、fixed system area の `SDFS3SYS` をRAMへロードしてROM monitorへ戻る。
 
 | コマンド | 用途 |
 | --- | --- |
 | `BOOT` | 固定LBAからSDFS/68 stage1 loaderを読み込んで、第2段システムへ移行する。`FEATURE_SD=1` かつ stage1対応RAM構成のROMで有効 |
+| `BOOT3` | fixed LBA `64` の `SDFS3SYS` を検証し、payloadを `SDFS3_LOAD_BASE` へロードする。成功後は `CMD <tail>` でv3 residentを呼び出す |
 | `CMD <tail>` | RAM上のSDFS/68 v3 resident APIを検出し、slot 1 `SDFS3_CMD_DISPATCH` へ `tail` を渡す。`FEATURE_SD=1` かつ stage1対応RAM構成のROMで有効 |
 
 ### ROM常駐FAT互換コマンド
@@ -360,11 +362,11 @@ D M MAP RAMTEST G L B C R U H F
 ]
 ```
 
-`FEATURE_SD=1` かつ `FEATURE_FAT=0` のROMでは、固定LBA stage1起動用の `BOOT` を含めて表示する。
+`FEATURE_SD=1` かつ `FEATURE_FAT=0` のROMでは、固定LBA stage1起動用の `BOOT` と v3 resident用の `BOOT3` を含めて表示する。
 
 ```text
 ] H
-D M MAP RAMTEST G L BOOT CMD B C R U H F
+D M MAP RAMTEST G L BOOT BOOT3 CMD B C R U H F
 ]
 ```
 
@@ -372,15 +374,15 @@ D M MAP RAMTEST G L BOOT CMD B C R U H F
 
 ```text
 ] H
-D DIR M MAP RAMTEST G L LF BOOT CMD B C R U H F
+D DIR M MAP RAMTEST G L LF BOOT BOOT3 CMD B C R U H F
 ]
 ```
 
-`FEATURE_SD=1` かつ `FEATURE_FAT=0` のROMでは、ROM側FAT互換コマンドではなく `BOOT` を含める。VDG/キーボード診断はROMコマンドではなく、SD上の診断用S-Recordから実行する。
+`FEATURE_SD=1` かつ `FEATURE_FAT=0` のROMでは、ROM側FAT互換コマンドではなく `BOOT` / `BOOT3` を含める。VDG/キーボード診断はROMコマンドではなく、SD上の診断用S-Recordから実行する。
 
 ```text
 ] H
-D M MAP RAMTEST G L BOOT CMD B C R U H F
+D M MAP RAMTEST G L BOOT BOOT3 CMD B C R U H F
 ]
 ```
 

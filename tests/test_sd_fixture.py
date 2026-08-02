@@ -954,14 +954,14 @@ def test_rom_fat_feature_help_policy() -> None:
     stdout, stderr, rc = _run_emu_with_sd("H\r\r", build_fat32_image(with_mbr=True))
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
     if _is_fat_build():
-        expected = "D DIR M MAP RAMTEST G L LF BOOT CMD B C R U H F"
-        assert expected in stdout, f"FEATURE_FAT=1 help should include DIR/LF/BOOT: {stdout!r}"
+        expected = "D DIR M MAP RAMTEST G L LF BOOT BOOT3 CMD B C R U H F"
+        assert expected in stdout, f"FEATURE_FAT=1 help should include DIR/LF/BOOT/BOOT3: {stdout!r}"
     elif _is_vdg_build():
-        expected = "D M MAP RAMTEST G L BOOT CMD B C R U H F"
-        assert expected in stdout, f"FEATURE_FAT=0 VDG help should keep BOOT only: {stdout!r}"
+        expected = "D DS M MAP RAMTEST G L BOOT BOOT3 CMD B C R U UW H F"
+        assert expected in stdout, f"FEATURE_FAT=0 VDG help should keep BOOT/BOOT3 only: {stdout!r}"
     else:
-        expected = "D M MAP RAMTEST G L BOOT CMD B C R U H F"
-        assert expected in stdout, f"FEATURE_FAT=0 help should keep BOOT only: {stdout!r}"
+        expected = "D M MAP RAMTEST G L BOOT BOOT3 CMD B C R U H F"
+        assert expected in stdout, f"FEATURE_FAT=0 help should keep BOOT/BOOT3 only: {stdout!r}"
     print("[PASS] test_rom_fat_feature_help_policy")
 
 
