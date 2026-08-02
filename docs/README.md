@@ -38,6 +38,9 @@ ROM常駐FATを確認したい場合は、profileではなく直接構成軸で 
 - [design/architecture.md](design/architecture.md)
 - [design/sdfs68_com_abi.md](design/sdfs68_com_abi.md): SDFS/68 `.COM` トランジェントコマンドABI
 - [plans/implementation_plan.md](plans/implementation_plan.md)
+- [plans/issue-70_next_monitor_roadmap.md](plans/issue-70_next_monitor_roadmap.md): 次期モニタ拡張ロードマップ
+- [plans/i2c_bus_overlay_evaluation.md](plans/i2c_bus_overlay_evaluation.md): PIA I2C 配置検討メモ
+- [plans/issue-80_pia_port_a_i2c_rtc.md](plans/issue-80_pia_port_a_i2c_rtc.md): PIA Port A I2C RTC PoC 設計
 - [plans/issue-103_mk_sdfs_image.md](plans/issue-103_mk_sdfs_image.md): SDFS/68 システムSDイメージ生成ツールの実装計画
 - [plans/issue-101_rom_stage1_boot.md](plans/issue-101_rom_stage1_boot.md): ROM固定LBA stage1 BOOT
 - [plans/issue-102_sdfs68_minimal.md](plans/issue-102_sdfs68_minimal.md): SDFS/68最小本体とboot services接続
