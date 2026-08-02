@@ -1,0 +1,887 @@
+#!/usr/bin/env python3
+"""Stage1 binary layout tests."""
+
+from __future__ import annotations
+
+import re
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "tests"))
+
+from sd_fixtures import (  # noqa: E402
+    BIG_S_CONTENT,
+    MULTI_CLUSTER_1,
+    MULTI_CLUSTER_1_PREFIX,
+    MULTI_CLUSTER_2_PREFIX,
+    TEST_S_CONTENT,
+    build_fat32_image,
+    build_high_cluster_image,
+    layout_for_image,
+)
+from fat32_image import Fat32File, build_fat32_image_from_files  # noqa: E402
+
+EMU_PATH = PROJECT_ROOT / "emu" / "sbc6800_emu.py"
+
+
+EXPECTED = {
+    "sbcio_vdg": {
+        "suffix": "-sbcio-vdg",
+        "S1_BASE": 0xC400,
+        "S1_LIMIT": 0xCFFF,
+        "SDFS_LOAD_BASE": 0xD000,
+        "SDFS_LOAD_LIMIT": 0xDEFF,
+    },
+    "k6802_vdg": {
+        "suffix": "-k6802-vdg",
+        "S1_BASE": 0xA400,
+        "S1_LIMIT": 0xAFFF,
+        "SDFS_LOAD_BASE": 0xB000,
+        "SDFS_LOAD_LIMIT": 0xBEFF,
+    },
+    "sbcio_4000": {
+        "suffix": "-sbcio-4000",
+        "S1_BASE": 0x4400,
+        "S1_LIMIT": 0x4FFF,
+        "SDFS_LOAD_BASE": 0x5000,
+        "SDFS_LOAD_LIMIT": 0x7EFF,
+    },
+    "k6802_4000": {
+        "suffix": "-k6802-4000",
+        "S1_BASE": 0x4400,
+        "S1_LIMIT": 0x4FFF,
+        "SDFS_LOAD_BASE": 0x5000,
+        "SDFS_LOAD_LIMIT": 0x7EFF,
+    },
+}
+
+SBCIO_SD_AXIS = {
+    "profile": "sbcio",
+    "suffix": "-sbcio-sdfs",
+    "S1_BASE": 0xC400,
+    "S1_LIMIT": 0xCFFF,
+    "SDFS_LOAD_BASE": 0xD000,
+    "SDFS_LOAD_LIMIT": 0xDEFF,
+    "make_args": [
+        "FEATURE_SD=1",
+        "FEATURE_FAT=0",
+        "BUILD_CONFIG_NAME=sbcio-sdfs",
+    ],
+}
+
+
+SBCIO_4000_SD_AXIS = {
+    "profile": "sbcio",
+    "suffix": "-sbcio-4000",
+    "S1_BASE": 0x4400,
+    "S1_LIMIT": 0x4FFF,
+    "SDFS_LOAD_BASE": 0x5000,
+    "SDFS_LOAD_LIMIT": 0x7EFF,
+    "make_args": [
+        "MEMORY_CONFIG=ram64_4000_work",
+        "FEATURE_SD=1",
+        "FEATURE_FAT=0",
+        "BUILD_CONFIG_NAME=sbcio-4000",
+    ],
+}
+
+
+def test_stage1_accepts_sd_axis_4000() -> None:
+    config = SBCIO_4000_SD_AXIS
+    _run_make(config["profile"], make_args=config["make_args"])
+    suffix = config["suffix"]
+    bin_path = PROJECT_ROOT / "build" / f"stage1{suffix}.bin"
+    lst_path = PROJECT_ROOT / "build" / f"stage1{suffix}.lst"
+    data = bin_path.read_bytes()
+    symbols = _load_symbols(
+        lst_path,
+        "S1_BASE",
+        "S1_LIMIT",
+        "SDFS_LOAD_BASE",
+        "SDFS_LOAD_LIMIT",
+        "S1_BOOT_SDFS",
+    )
+    assert symbols["S1_BASE"] == config["S1_BASE"]
+    assert symbols["S1_LIMIT"] == config["S1_LIMIT"]
+    assert symbols["SDFS_LOAD_BASE"] == config["SDFS_LOAD_BASE"]
+    assert symbols["SDFS_LOAD_LIMIT"] == config["SDFS_LOAD_LIMIT"]
+    assert len(data) <= symbols["S1_LIMIT"] - symbols["S1_BASE"] + 1
+    _assert_stage1_header(data, symbols["S1_BOOT_SDFS"])
+    print("[PASS] test_stage1_accepts_sd_axis_4000")
+
+
+def test_stage1_rejects_base_profile() -> None:
+    result = _run_make("base", expect_success=False)
+    assert result.returncode != 0
+    assert "FEATURE_SD=1" in result.stdout or "FEATURE_SD=1" in result.stderr
+    print("[PASS] test_stage1_rejects_base_profile")
+
+
+def test_stage1_accepts_sd_axis_without_vdg() -> None:
+    config = SBCIO_SD_AXIS
+    _run_make(config["profile"], make_args=config["make_args"])
+    suffix = config["suffix"]
+    bin_path = PROJECT_ROOT / "build" / f"stage1{suffix}.bin"
+    lst_path = PROJECT_ROOT / "build" / f"stage1{suffix}.lst"
+    data = bin_path.read_bytes()
+    symbols = _load_symbols(
+        lst_path,
+        "S1_BASE",
+        "S1_LIMIT",
+        "SDFS_LOAD_BASE",
+        "SDFS_LOAD_LIMIT",
+        "S1_BOOT_SDFS",
+    )
+    assert symbols["S1_BASE"] == config["S1_BASE"]
+    assert symbols["S1_LIMIT"] == config["S1_LIMIT"]
+    assert symbols["SDFS_LOAD_BASE"] == config["SDFS_LOAD_BASE"]
+    assert symbols["SDFS_LOAD_LIMIT"] == config["SDFS_LOAD_LIMIT"]
+    assert len(data) <= symbols["S1_LIMIT"] - symbols["S1_BASE"] + 1
+    _assert_stage1_header(data, symbols["S1_BOOT_SDFS"])
+    print("[PASS] test_stage1_accepts_sd_axis_without_vdg")
+
+
+def test_stage1_profiles_build_and_match_layout() -> None:
+    for profile, expected in EXPECTED.items():
+        _run_make(profile)
+        suffix = expected["suffix"]
+        bin_path = PROJECT_ROOT / "build" / f"stage1{suffix}.bin"
+        lst_path = PROJECT_ROOT / "build" / f"stage1{suffix}.lst"
+        data = bin_path.read_bytes()
+        symbols = _load_symbols(
+            lst_path,
+            "S1_BASE",
+            "S1_LIMIT",
+            "SDFS_LOAD_BASE",
+            "SDFS_LOAD_LIMIT",
+            "S1_INIT",
+            "S1_READ_SECTOR",
+            "S1_MOUNT",
+            "S1_FIND_83",
+            "S1_LOAD_FILE_83",
+            "S1_GET_ERROR",
+            "S1_STREAM_OPEN",
+            "S1_STREAM_GETC",
+            "S1_STREAM_BYTES_REMAIN",
+            "S1_CLUSTER_TO_SD_LBA",
+            "S1_NEXT_CLUSTER",
+            "S1_COPY_NEXT_TO_CUR",
+            "S1_BOOT_SDFS",
+            "S1_END",
+        )
+        assert symbols["S1_BASE"] == expected["S1_BASE"], f"{profile} S1_BASE mismatch"
+        assert symbols["S1_LIMIT"] == expected["S1_LIMIT"], f"{profile} S1_LIMIT mismatch"
+        assert symbols["SDFS_LOAD_BASE"] == expected["SDFS_LOAD_BASE"], (
+            f"{profile} SDFS_LOAD_BASE mismatch"
+        )
+        assert symbols["SDFS_LOAD_LIMIT"] == expected["SDFS_LOAD_LIMIT"], (
+            f"{profile} SDFS_LOAD_LIMIT mismatch"
+        )
+        assert len(data) <= symbols["S1_LIMIT"] - symbols["S1_BASE"] + 1
+        _assert_stage1_header(data, symbols["S1_BOOT_SDFS"])
+        _assert_jump(data, 16, symbols["S1_INIT"])
+        _assert_jump(data, 19, symbols["S1_READ_SECTOR"])
+        _assert_jump(data, 22, symbols["S1_MOUNT"])
+        _assert_jump(data, 25, symbols["S1_FIND_83"])
+        _assert_jump(data, 28, symbols["S1_LOAD_FILE_83"])
+        _assert_jump(data, 31, symbols["S1_GET_ERROR"])
+        _assert_jump(data, 34, symbols["S1_STREAM_OPEN"])
+        _assert_jump(data, 37, symbols["S1_STREAM_GETC"])
+        _assert_jump(data, 40, symbols["S1_STREAM_BYTES_REMAIN"])
+        _assert_jump(data, 43, symbols["S1_CLUSTER_TO_SD_LBA"])
+        _assert_jump(data, 46, symbols["S1_NEXT_CLUSTER"])
+        _assert_jump(data, 49, symbols["S1_COPY_NEXT_TO_CUR"])
+    print("[PASS] test_stage1_profiles_build_and_match_layout")
+
+
+def test_stage1_read_sector_service_reads_known_fixture_sector() -> None:
+    profile = "sbcio_vdg"
+    _run_make(profile)
+    _run_make(profile, target="bin")
+    expected = EXPECTED[profile]
+    suffix = expected["suffix"]
+    stage1_data = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+    symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"stage1{suffix}.lst",
+        "S1_BASE",
+        "SDFS_LOAD_BASE",
+        "SD_LBA0",
+        "SD_LBA1",
+        "SD_LBA2",
+        "SD_LBA3",
+    )
+    layout = layout_for_image(with_mbr=True)
+    lba = layout.cluster_lba(MULTI_CLUSTER_1)
+    dest = symbols["SDFS_LOAD_BASE"]
+    harness_addr = 0x0100
+    harness = [
+        0xBD, ((symbols["S1_BASE"] + 16) >> 8) & 0xFF, (symbols["S1_BASE"] + 16) & 0xFF,
+        0x25, 0x1D,
+        0x86, (lba >> 24) & 0xFF, 0xB7, (symbols["SD_LBA0"] >> 8) & 0xFF, symbols["SD_LBA0"] & 0xFF,
+        0x86, (lba >> 16) & 0xFF, 0xB7, (symbols["SD_LBA1"] >> 8) & 0xFF, symbols["SD_LBA1"] & 0xFF,
+        0x86, (lba >> 8) & 0xFF, 0xB7, (symbols["SD_LBA2"] >> 8) & 0xFF, symbols["SD_LBA2"] & 0xFF,
+        0x86, lba & 0xFF, 0xB7, (symbols["SD_LBA3"] >> 8) & 0xFF, symbols["SD_LBA3"] & 0xFF,
+        0xCE, (dest >> 8) & 0xFF, dest & 0xFF,
+        0xBD, ((symbols["S1_BASE"] + 19) >> 8) & 0xFF, (symbols["S1_BASE"] + 19) & 0xFF,
+        0x25, 0x01,
+        0x3F,
+        0x3F,
+    ]
+    input_text = (
+        f"M{symbols['S1_BASE']:04X}\r"
+        f"{_hex_bytes(list(stage1_data))}\r.\r"
+        f"M{harness_addr:04X}\r"
+        f"{_hex_bytes(harness)}\r.\r"
+        f"G{harness_addr:04X}\r"
+        f"D{dest:04X}-{dest + 0x0F:04X}\r"
+        "\r"
+    )
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
+        input_text=input_text,
+        sd_image=build_fat32_image(with_mbr=True),
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    line = _dump_line(stdout, dest)
+    expected_prefix = " ".join(f"{value:02X}" for value in MULTI_CLUSTER_1_PREFIX[:16])
+    assert expected_prefix in line, f"stage1 read mismatch: {line!r}\nstdout={stdout!r}"
+    print("[PASS] test_stage1_read_sector_service_reads_known_fixture_sector")
+
+
+def test_stage1_mount_service_accepts_fat32_fixtures() -> None:
+    for with_mbr in (True, False):
+        value = _run_stage1_mount_harness(build_fat32_image(with_mbr=with_mbr))
+        assert value == 0x42, f"S1_MOUNT failed for with_mbr={with_mbr}: {value:02X}"
+    print("[PASS] test_stage1_mount_service_accepts_fat32_fixtures")
+
+
+def test_stage1_mount_service_rejects_invalid_fat32() -> None:
+    value = _run_stage1_mount_harness(bytes(512 * 64))
+    assert value == 0xE1, f"S1_MOUNT unexpectedly accepted invalid image: {value:02X}"
+    print("[PASS] test_stage1_mount_service_rejects_invalid_fat32")
+
+
+def test_stage1_find_83_service_finds_root_entries() -> None:
+    value = _run_stage1_find_harness(
+        build_fat32_image(with_mbr=True),
+        b"TEST    S  ",
+    )
+    assert value == 0x42, f"S1_FIND_83 failed to find TEST.S: {value:02X}"
+
+    value = _run_stage1_find_harness(
+        build_fat32_image(with_mbr=True, root_chain=True),
+        b"LATE    BIN",
+    )
+    assert value == 0x42, f"S1_FIND_83 failed to find chained root entry: {value:02X}"
+    print("[PASS] test_stage1_find_83_service_finds_root_entries")
+
+
+def test_stage1_find_83_service_rejects_missing_name() -> None:
+    value = _run_stage1_find_harness(
+        build_fat32_image(with_mbr=True),
+        b"NOPE    BIN",
+    )
+    assert value == 0xE1, f"S1_FIND_83 unexpectedly found missing file: {value:02X}"
+    print("[PASS] test_stage1_find_83_service_rejects_missing_name")
+
+
+def test_stage1_load_file_83_service_loads_one_sector_file() -> None:
+    result, data = _run_stage1_load_harness(
+        build_fat32_image(with_mbr=True),
+        b"TEST    S  ",
+        len(TEST_S_CONTENT),
+    )
+    assert result == 0x42, f"S1_LOAD_FILE_83 failed to load TEST.S: {result:02X}"
+    assert bytes(data[:len(TEST_S_CONTENT)]) == TEST_S_CONTENT
+    print("[PASS] test_stage1_load_file_83_service_loads_one_sector_file")
+
+
+def test_stage1_load_file_83_service_loads_multisector_files() -> None:
+    result, data = _run_stage1_load_harness(
+        build_fat32_image(with_mbr=True),
+        b"MULTI   BIN",
+        512 + len(MULTI_CLUSTER_2_PREFIX),
+    )
+    assert result == 0x42, f"S1_LOAD_FILE_83 failed to load MULTI.BIN: {result:02X}"
+    assert bytes(data[:len(MULTI_CLUSTER_1_PREFIX)]) == MULTI_CLUSTER_1_PREFIX
+    assert bytes(data[512:512 + len(MULTI_CLUSTER_2_PREFIX)]) == MULTI_CLUSTER_2_PREFIX
+
+    result, data = _run_stage1_load_harness(
+        build_fat32_image(with_mbr=True),
+        b"BIGSREC S  ",
+        len(BIG_S_CONTENT),
+    )
+    assert result == 0x42, f"S1_LOAD_FILE_83 failed to load BIGSREC.S: {result:02X}"
+    assert bytes(data[:len(BIG_S_CONTENT)]) == BIG_S_CONTENT
+    print("[PASS] test_stage1_load_file_83_service_loads_multisector_files")
+
+
+def test_stage1_next_cluster_handles_cluster_ge_64() -> None:
+    """FAT32_NEXT_CLUSTER (#243 fix) must handle clusters where the byte
+    offset within the FAT sector exceeds 255 (i.e., cluster * 4 > 255,
+    meaning cluster >= 64). This exercises the 16-bit offset path.
+    """
+    profile = "sbcio_vdg"
+    _run_make(profile)
+    _run_make(profile, target="bin")
+    expected = EXPECTED[profile]
+    suffix = expected["suffix"]
+    stage1_data = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+    symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"stage1{suffix}.lst",
+        "S1_BASE",
+        "SDFS_LOAD_BASE",
+        "FAT_CUR_CLUS0",
+        "FAT_CUR_CLUS3",
+        "FAT_NEXT_CLUS3",
+    )
+    result_addr = symbols["SDFS_LOAD_BASE"]
+    harness_addr = 0x0100
+    # Slots (V2 stage1):
+    #   S1_INIT              = S1_BASE + 16
+    #   S1_MOUNT             = S1_BASE + 22
+    #   S1_NEXT_CLUSTER      = S1_BASE + 46
+    harness = [
+        # jsr S1_INIT
+        0xBD, ((symbols["S1_BASE"] + 16) >> 8) & 0xFF, (symbols["S1_BASE"] + 16) & 0xFF,
+        # bcs err (relative +$1B forward to error branch)
+        0x25, 0x22,
+        # jsr S1_MOUNT
+        0xBD, ((symbols["S1_BASE"] + 22) >> 8) & 0xFF, (symbols["S1_BASE"] + 22) & 0xFF,
+        0x25, 0x1D,
+        # clr FAT_CUR_CLUS0
+        0x7F, (symbols["FAT_CUR_CLUS0"] >> 8) & 0xFF, symbols["FAT_CUR_CLUS0"] & 0xFF,
+        # clr FAT_CUR_CLUS0+1
+        0x7F, ((symbols["FAT_CUR_CLUS0"] + 1) >> 8) & 0xFF, (symbols["FAT_CUR_CLUS0"] + 1) & 0xFF,
+        # clr FAT_CUR_CLUS0+2
+        0x7F, ((symbols["FAT_CUR_CLUS0"] + 2) >> 8) & 0xFF, (symbols["FAT_CUR_CLUS0"] + 2) & 0xFF,
+        # ldaa #100
+        0x86, 0x64,
+        # staa FAT_CUR_CLUS3
+        0xB7, (symbols["FAT_CUR_CLUS3"] >> 8) & 0xFF, symbols["FAT_CUR_CLUS3"] & 0xFF,
+        # jsr S1_NEXT_CLUSTER
+        0xBD, ((symbols["S1_BASE"] + 46) >> 8) & 0xFF, (symbols["S1_BASE"] + 46) & 0xFF,
+        0x25, 0x08,
+        # ldaa FAT_NEXT_CLUS3 (should be 101 after fix)
+        0xB6, (symbols["FAT_NEXT_CLUS3"] >> 8) & 0xFF, symbols["FAT_NEXT_CLUS3"] & 0xFF,
+        # staa result_addr
+        0xB7, (result_addr >> 8) & 0xFF, result_addr & 0xFF,
+        0x3F,
+        # error path: store $E1 and halt
+        0x86, 0xE1,
+        0xB7, (result_addr >> 8) & 0xFF, result_addr & 0xFF,
+        0x3F,
+    ]
+    sd_image = build_high_cluster_image(with_mbr=True)
+    input_text = (
+        f"M{symbols['S1_BASE']:04X}\r"
+        f"{_hex_bytes(list(stage1_data))}\r.\r"
+        f"M{harness_addr:04X}\r"
+        f"{_hex_bytes(harness)}\r.\r"
+        f"G{harness_addr:04X}\r"
+        f"D{result_addr:04X}-{result_addr:04X}\r"
+        "\r"
+    )
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
+        input_text=input_text,
+        sd_image=sd_image,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    line = _dump_line(stdout, result_addr)
+    match = re.search(rf"{result_addr:04X}\s+([0-9A-Fa-f]{{2}})", line)
+    if not match:
+        raise AssertionError(f"missing next-cluster result byte: {line!r}\nstdout={stdout!r}")
+    value = int(match.group(1), 16)
+    assert value == 101, (
+        f"S1_NEXT_CLUSTER for cluster 100 returned {value:02X}, expected 65 (=101) "
+        f"— cluster >= 64 fix (#243) regressed. stdout={stdout!r}"
+    )
+    print("[PASS] test_stage1_next_cluster_handles_cluster_ge_64")
+
+
+def test_stage1_load_file_83_service_rejects_unsupported_files() -> None:
+    result, _data = _run_stage1_load_harness(
+        _build_named_file_image(b"HUGE    BIN", bytes(0x0F01)),
+        b"HUGE    BIN",
+        16,
+    )
+    assert result == 0x07, f"S1_LOAD_FILE_83 returned wrong oversized error: {result:02X}"
+
+    result, _data = _run_stage1_load_harness(
+        build_fat32_image(with_mbr=True),
+        b"NOPE    BIN",
+        16,
+    )
+    assert result == 0x05, f"S1_LOAD_FILE_83 returned wrong missing-file error: {result:02X}"
+    print("[PASS] test_stage1_load_file_83_service_rejects_unsupported_files")
+
+
+def test_stage1_boot_sdfs_jumps_to_valid_entry() -> None:
+    result = _run_stage1_boot_harness(lambda dest, result_addr: _make_sdfs_bin(dest, result_addr))
+    assert result == 0x42, f"S1_BOOT_SDFS did not jump to SDFS entry: {result:02X}"
+    print("[PASS] test_stage1_boot_sdfs_jumps_to_valid_entry")
+
+
+def test_stage1_boot_sdfs_loads_multisector_entry() -> None:
+    result = _run_stage1_boot_harness(
+        lambda dest, result_addr: _make_sdfs_bin(dest, result_addr, entry_offset=0x220)
+    )
+    assert result == 0x42, f"S1_BOOT_SDFS did not jump to multisector SDFS entry: {result:02X}"
+    print("[PASS] test_stage1_boot_sdfs_loads_multisector_entry")
+
+
+def test_stage1_boot_sdfs_rejects_invalid_headers() -> None:
+    cases = [
+        ("bad signature", lambda data: data.__setitem__(0, ord("X"))),
+        ("bad version", lambda data: data.__setitem__(6, 2)),
+        ("bad header size", lambda data: data.__setitem__(7, 15)),
+        ("bad entry", lambda data: data.__setitem__(slice(8, 10), b"\x00\x00")),
+        ("entry outside size", lambda data: data.__setitem__(slice(8, 10), b"\xD1\x00")),
+        ("bad size", lambda data: data.__setitem__(slice(10, 12), b"\x0F\x01")),
+    ]
+    for label, mutate in cases:
+        result = _run_stage1_boot_harness(
+            lambda dest, result_addr, mutate=mutate: _make_sdfs_bin(dest, result_addr, mutate=mutate)
+        )
+        assert result == 0xE1, f"S1_BOOT_SDFS accepted {label}: {result:02X}"
+    print("[PASS] test_stage1_boot_sdfs_rejects_invalid_headers")
+
+
+def _assert_stage1_header(data: bytes, boot_entry: int) -> None:
+    assert data[0:7] == b"S1API68"
+    assert data[7] == 1, "API version mismatch"
+    assert data[8] == 12, "API count mismatch"
+    assert data[9] == 0, "flags mismatch"
+    actual_boot_entry = (data[10] << 8) | data[11]
+    assert actual_boot_entry == boot_entry, "boot entry mismatch"
+    actual_image_size = (data[12] << 8) | data[13]
+    assert actual_image_size == len(data), "stage1 image size mismatch"
+    assert data[14:16] == bytes(2), "reserved bytes must be zero"
+
+
+def _assert_jump(data: bytes, offset: int, target: int) -> None:
+    assert data[offset] == 0x7E, f"missing JMP opcode at +{offset}"
+    actual = (data[offset + 1] << 8) | data[offset + 2]
+    assert actual == target, f"JMP target mismatch at +{offset}: {actual:04X} != {target:04X}"
+
+
+def _run_make(
+    profile: str,
+    target: str = "stage1",
+    expect_success: bool = True,
+    make_args: list[str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    result = subprocess.run(
+        ["make", target, f"MONITOR_PROFILE={profile}", *(make_args or [])],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=15,
+    )
+    if expect_success and result.returncode != 0:
+        raise AssertionError(
+            f"make stage1 failed for {profile}: stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+    return result
+
+
+def _run_stage1_mount_harness(sd_image: bytes) -> int:
+    profile = "sbcio_vdg"
+    _run_make(profile)
+    _run_make(profile, target="bin")
+    expected = EXPECTED[profile]
+    suffix = expected["suffix"]
+    stage1_data = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+    symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"stage1{suffix}.lst",
+        "S1_BASE",
+        "SDFS_LOAD_BASE",
+    )
+    dest = symbols["SDFS_LOAD_BASE"]
+    harness_addr = 0x0100
+    harness = [
+        0xBD, ((symbols["S1_BASE"] + 16) >> 8) & 0xFF, (symbols["S1_BASE"] + 16) & 0xFF,
+        0x25, 0x0B,
+        0xBD, ((symbols["S1_BASE"] + 22) >> 8) & 0xFF, (symbols["S1_BASE"] + 22) & 0xFF,
+        0x25, 0x06,
+        0x86, 0x42,
+        0xB7, (dest >> 8) & 0xFF, dest & 0xFF,
+        0x3F,
+        0x86, 0xE1,
+        0xB7, (dest >> 8) & 0xFF, dest & 0xFF,
+        0x3F,
+    ]
+    input_text = (
+        f"M{symbols['S1_BASE']:04X}\r"
+        f"{_hex_bytes(list(stage1_data))}\r.\r"
+        f"M{harness_addr:04X}\r"
+        f"{_hex_bytes(harness)}\r.\r"
+        f"G{harness_addr:04X}\r"
+        f"D{dest:04X}-{dest:04X}\r"
+        "\r"
+    )
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
+        input_text=input_text,
+        sd_image=sd_image,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    line = _dump_line(stdout, dest)
+    match = re.search(rf"{dest:04X}\s+([0-9A-Fa-f]{{2}})", line)
+    if not match:
+        raise AssertionError(f"missing mount result byte: {line!r}\nstdout={stdout!r}")
+    return int(match.group(1), 16)
+
+
+def _run_stage1_find_harness(sd_image: bytes, fat_name: bytes) -> int:
+    if len(fat_name) != 11:
+        raise AssertionError("FAT name must be exactly 11 bytes")
+
+    profile = "sbcio_vdg"
+    _run_make(profile)
+    _run_make(profile, target="bin")
+    expected = EXPECTED[profile]
+    suffix = expected["suffix"]
+    stage1_data = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+    symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"stage1{suffix}.lst",
+        "S1_BASE",
+        "SDFS_LOAD_BASE",
+    )
+    dest = symbols["SDFS_LOAD_BASE"]
+    harness_addr = 0x0100
+    name_addr = harness_addr + 30
+    harness = [
+        0xBD, ((symbols["S1_BASE"] + 16) >> 8) & 0xFF, (symbols["S1_BASE"] + 16) & 0xFF,
+        0x25, 0x13,
+        0xBD, ((symbols["S1_BASE"] + 22) >> 8) & 0xFF, (symbols["S1_BASE"] + 22) & 0xFF,
+        0x25, 0x0E,
+        0xCE, (name_addr >> 8) & 0xFF, name_addr & 0xFF,
+        0xBD, ((symbols["S1_BASE"] + 25) >> 8) & 0xFF, (symbols["S1_BASE"] + 25) & 0xFF,
+        0x25, 0x06,
+        0x86, 0x42,
+        0xB7, (dest >> 8) & 0xFF, dest & 0xFF,
+        0x3F,
+        0x86, 0xE1,
+        0xB7, (dest >> 8) & 0xFF, dest & 0xFF,
+        0x3F,
+        *fat_name,
+    ]
+    input_text = (
+        f"M{symbols['S1_BASE']:04X}\r"
+        f"{_hex_bytes(list(stage1_data))}\r.\r"
+        f"M{harness_addr:04X}\r"
+        f"{_hex_bytes(harness)}\r.\r"
+        f"G{harness_addr:04X}\r"
+        f"D{dest:04X}-{dest:04X}\r"
+        "\r"
+    )
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
+        input_text=input_text,
+        sd_image=sd_image,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    line = _dump_line(stdout, dest)
+    match = re.search(rf"{dest:04X}\s+([0-9A-Fa-f]{{2}})", line)
+    if not match:
+        raise AssertionError(f"missing find result byte: {line!r}\nstdout={stdout!r}")
+    return int(match.group(1), 16)
+
+
+def _run_stage1_load_harness(
+    sd_image: bytes,
+    fat_name: bytes,
+    dump_size: int,
+) -> tuple[int, list[int]]:
+    if len(fat_name) != 11:
+        raise AssertionError("FAT name must be exactly 11 bytes")
+    if dump_size <= 0:
+        raise AssertionError("dump_size must be positive")
+
+    profile = "sbcio_vdg"
+    _run_make(profile)
+    _run_make(profile, target="bin")
+    expected = EXPECTED[profile]
+    suffix = expected["suffix"]
+    stage1_data = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+    symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"stage1{suffix}.lst",
+        "S1_BASE",
+        "SDFS_LOAD_BASE",
+        "SDFS_LOAD_LIMIT",
+    )
+    dest = symbols["SDFS_LOAD_BASE"]
+    result_addr = symbols["SDFS_LOAD_LIMIT"] + 1
+    harness_addr = 0x0100
+    name_addr = harness_addr + 31
+    harness = [
+        0xBD, ((symbols["S1_BASE"] + 16) >> 8) & 0xFF, (symbols["S1_BASE"] + 16) & 0xFF,
+        0x25, 0x13,
+        0xBD, ((symbols["S1_BASE"] + 22) >> 8) & 0xFF, (symbols["S1_BASE"] + 22) & 0xFF,
+        0x25, 0x0E,
+        0xCE, (name_addr >> 8) & 0xFF, name_addr & 0xFF,
+        0xBD, ((symbols["S1_BASE"] + 28) >> 8) & 0xFF, (symbols["S1_BASE"] + 28) & 0xFF,
+        0x25, 0x06,
+        0x86, 0x42,
+        0xB7, (result_addr >> 8) & 0xFF, result_addr & 0xFF,
+        0x3F,
+        0xBD, ((symbols["S1_BASE"] + 31) >> 8) & 0xFF, (symbols["S1_BASE"] + 31) & 0xFF,
+        0xB7, (result_addr >> 8) & 0xFF, result_addr & 0xFF,
+        0x3F,
+        *fat_name,
+    ]
+    input_text = (
+        f"M{symbols['S1_BASE']:04X}\r"
+        f"{_hex_bytes(list(stage1_data))}\r.\r"
+        f"M{harness_addr:04X}\r"
+        f"{_hex_bytes(harness)}\r.\r"
+        f"G{harness_addr:04X}\r"
+        f"D{result_addr:04X}-{result_addr:04X}\r"
+        f"D{dest:04X}-{dest + dump_size - 1:04X}\r"
+        "\r"
+    )
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
+        input_text=input_text,
+        sd_image=sd_image,
+        max_cycles=100_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    result_line = _dump_line(stdout, result_addr)
+    match = re.search(rf"{result_addr:04X}\s+([0-9A-Fa-f]{{2}})", result_line)
+    if not match:
+        raise AssertionError(f"missing load result byte: {result_line!r}\nstdout={stdout!r}")
+    return int(match.group(1), 16), _parse_dump_bytes(stdout, dest)
+
+
+def _run_stage1_boot_harness(sdfs_factory) -> int:
+    profile = "sbcio_vdg"
+    _run_make(profile)
+    _run_make(profile, target="bin")
+    expected = EXPECTED[profile]
+    suffix = expected["suffix"]
+    stage1_data = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+    symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"stage1{suffix}.lst",
+        "S1_BASE",
+        "SDFS_LOAD_BASE",
+    )
+    dest = symbols["SDFS_LOAD_BASE"]
+    result_addr = dest + 0x0200
+    boot_entry = (stage1_data[10] << 8) | stage1_data[11]
+    sd_image = _build_sdfs_image(sdfs_factory(dest, result_addr))
+    harness_addr = 0x0100
+    harness = [
+        0xBD, (boot_entry >> 8) & 0xFF, boot_entry & 0xFF,
+        0x25, 0x06,
+        0x86, 0x99,
+        0xB7, (result_addr >> 8) & 0xFF, result_addr & 0xFF,
+        0x3F,
+        0x86, 0xE1,
+        0xB7, (result_addr >> 8) & 0xFF, result_addr & 0xFF,
+        0x3F,
+    ]
+    input_text = (
+        f"M{symbols['S1_BASE']:04X}\r"
+        f"{_hex_bytes(list(stage1_data))}\r.\r"
+        f"M{harness_addr:04X}\r"
+        f"{_hex_bytes(harness)}\r.\r"
+        f"G{harness_addr:04X}\r"
+        f"D{result_addr:04X}-{result_addr:04X}\r"
+        "\r"
+    )
+    stdout, stderr, rc = _run_emu_with_sd(
+        rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
+        input_text=input_text,
+        sd_image=sd_image,
+        max_cycles=100_000_000,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    line = _dump_line(stdout, result_addr)
+    match = re.search(rf"{result_addr:04X}\s+([0-9A-Fa-f]{{2}})", line)
+    if not match:
+        raise AssertionError(f"missing boot result byte: {line!r}\nstdout={stdout!r}")
+    return int(match.group(1), 16)
+
+
+def _make_sdfs_bin(dest: int, result_addr: int, entry_offset: int = 16, mutate=None) -> bytes:
+    entry = dest + entry_offset
+    entry_code = [
+        0x86, 0x42,
+        0xB7, (result_addr >> 8) & 0xFF, result_addr & 0xFF,
+        0x3F,
+    ]
+    size = entry_offset + len(entry_code)
+    data = bytearray(size)
+    data[0:6] = b"SDFS68"
+    data[6] = 1
+    data[7] = 16
+    data[8:10] = entry.to_bytes(2, "big")
+    data[10:12] = size.to_bytes(2, "big")
+    data[entry_offset:] = bytes(entry_code)
+    if mutate is not None:
+        mutate(data)
+    return bytes(data)
+
+
+def _build_named_file_image(fat_name: bytes, data: bytes) -> bytes:
+    image, _layout = build_fat32_image_from_files(
+        [Fat32File(fat_name, data)],
+        with_mbr=True,
+        total_volume_sectors=96,
+    )
+    return image
+
+
+def _build_sdfs_image(sdfs_data: bytes) -> bytes:
+    image, _layout = build_fat32_image_from_files(
+        [Fat32File(b"SDFS    BIN", sdfs_data)],
+        with_mbr=True,
+        total_volume_sectors=64,
+    )
+    return image
+
+
+def _run_emu_with_sd(
+    *,
+    rom_path: Path,
+    input_text: str,
+    sd_image: bytes,
+    max_cycles: int = 60_000_000,
+) -> tuple[str, str, int]:
+    with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as input_file:
+        input_file.write(input_text.encode("ascii"))
+        input_path = Path(input_file.name)
+    with tempfile.NamedTemporaryFile(suffix=".img", delete=False) as sd_file:
+        sd_file.write(sd_image)
+        sd_path = Path(sd_file.name)
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(EMU_PATH),
+                str(rom_path),
+                "--input",
+                str(input_path),
+                "--max-cycles",
+                str(max_cycles),
+                "--sd",
+                str(sd_path),
+            ],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=20,
+        )
+        return result.stdout, result.stderr, result.returncode
+    except subprocess.TimeoutExpired as exc:
+        return exc.stdout or "", (exc.stderr or "") + "[TIMEOUT]", -1
+    finally:
+        input_path.unlink(missing_ok=True)
+        sd_path.unlink(missing_ok=True)
+
+
+def _hex_bytes(values: list[int]) -> str:
+    return "\r".join(f"{value:02X}" for value in values)
+
+
+def _dump_line(stdout: str, address: int) -> str:
+    marker = f"{address:04X}"
+    for line in stdout.splitlines():
+        if line.lstrip().startswith(marker):
+            return line
+    raise AssertionError(f"missing dump line {marker}: {stdout!r}")
+
+
+def _parse_dump_bytes(stdout: str, address: int) -> list[int]:
+    values: list[int] = []
+    current = address
+    while True:
+        try:
+            line = _dump_line(stdout, current)
+        except AssertionError:
+            break
+        fields = line.split()
+        line_values: list[int] = []
+        for field in fields[1:17]:
+            try:
+                line_values.append(int(field, 16))
+            except ValueError:
+                break
+        if not line_values:
+            break
+        values.extend(line_values)
+        current += len(line_values)
+    return values
+
+
+def _load_symbols(path: Path, *names: str) -> dict[str, int]:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    result: dict[str, int] = {}
+    for name in names:
+        patterns = [
+            re.compile(rf":\s*=\$([0-9A-Fa-f]{{1,4}})\s+{re.escape(name)}\s+equ\b"),
+            re.compile(rf"/([0-9A-Fa-f]{{1,4}})\s+:\s+.*\b{re.escape(name)}:\s*$"),
+            re.compile(rf"\b{re.escape(name)}\s+:\s+([0-9A-Fa-f]{{1,4}})\b"),
+        ]
+        for pattern in patterns:
+            match = pattern.search(text)
+            if match:
+                result[name] = int(match.group(1), 16)
+                break
+        if name not in result:
+            raise AssertionError(f"missing symbol in listing: {name}")
+    return result
+
+
+def main() -> None:
+    print("=" * 50)
+    print("stage1 build tests")
+    print("=" * 50)
+    tests = [
+        test_stage1_rejects_base_profile,
+        test_stage1_accepts_sd_axis_without_vdg,
+        test_stage1_accepts_sd_axis_4000,
+        test_stage1_profiles_build_and_match_layout,
+        test_stage1_read_sector_service_reads_known_fixture_sector,
+        test_stage1_mount_service_accepts_fat32_fixtures,
+        test_stage1_mount_service_rejects_invalid_fat32,
+        test_stage1_find_83_service_finds_root_entries,
+        test_stage1_find_83_service_rejects_missing_name,
+        test_stage1_load_file_83_service_loads_one_sector_file,
+        test_stage1_load_file_83_service_loads_multisector_files,
+        test_stage1_next_cluster_handles_cluster_ge_64,
+        test_stage1_load_file_83_service_rejects_unsupported_files,
+        test_stage1_boot_sdfs_jumps_to_valid_entry,
+        test_stage1_boot_sdfs_loads_multisector_entry,
+        test_stage1_boot_sdfs_rejects_invalid_headers,
+    ]
+    passed = 0
+    failed = 0
+    for test in tests:
+        try:
+            test()
+            passed += 1
+        except AssertionError as exc:
+            print(f"[FAIL] {test.__name__}: {exc}")
+            failed += 1
+        except Exception as exc:
+            print(f"[ERROR] {test.__name__}: {exc}")
+            failed += 1
+    print()
+    print(f"Result: {passed} passed, {failed} failed")
+    sys.exit(0 if failed == 0 else 1)
+
+
+if __name__ == "__main__":
+    main()

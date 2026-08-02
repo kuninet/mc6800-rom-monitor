@@ -19,6 +19,8 @@ SBC-IO の MC6821 PIA を介してビットバンギングで I2C バスを増�
 
 本メモは技術検証と推奨判断を残すものであり、I2C ドライバ本体や個別デバイスドライバの実装は別 Issue で扱う。
 
+Issue #80 は当初「PIA Port A I2C RTC PoC」として RTC まで含む広めの検討だったが、本メモで RTC/EEPROM/OLED と補助ライン活用まで整理したため、以後は #85 を I2C 配置検討の親 Issue とする。#80 は #85 配下の **Port A I2C bit-bang 基盤 PoC** に絞り、RTC デバイス依存処理、AUTOEXEC 連携、FAT timestamp 連携は後続 Issue へ分ける。
+
 ## 採用判断
 
 - **Port A 専用案を本命とする**。Issue #70 ロードマップ #6 の既定線と整合する。
@@ -26,6 +28,7 @@ SBC-IO の MC6821 PIA を介してビットバンギングで I2C バスを増�
 - I2C 速度は初期 PoC で約 10kHz を狙う。MC6800 1MHz の bit-bang で 100kHz 標準モード相当に届かせるかは PoC 後に判断する。
 - SCL は当面出力固定とし、クロックストレッチ対応は後段に分離する。
 - 5V PIA と 3.3V I2C デバイスの境界には双方向レベルシフタ (例 BSS138) を入れる。プルアップは 4.7kΩ 程度を共通化する。
+- 8KB ROM は既に逼迫しているため、I2C/RTC/EEPROM/OLED を ROM 常駐機能として厚く実装しない。初期 PoC はシリアル `L` または SD の `LF` で RAM へロードする小ハーネスを基本にし、将来は `SDFS.BIN` など第2段側の機能として育てる。
 
 ## 現状の Port B / Port A 使用状況
 
@@ -134,7 +137,7 @@ PIA はデータポート 8bit に加えて、ポートごとに 2 本ずつ補�
 | 候補 | 内容 | 優先 |
 | --- | --- | --- |
 | A | SBC-IO Rev02 拡張ヘッダの PA[7:0] / PB[6:7] / CA1 / CA2 / CB1 / CB2 引き出し確認 (実機 schematic レビュー) | 高 (両案の前提) |
-| B | I2C bit-bang ドライバ PoC (Port A、SCL 固定、~10kHz、START/STOP/書込/読出/ACK/NACK) | 高 |
+| B | I2C bit-bang ドライバ PoC (Port A、SCL 固定、~10kHz、START/STOP/書込/読出/ACK/NACK。ROM統合ではなくRAMロードハーネスで検証) | 高 |
 | C | DS3231 RTC ドライバ + AUTOEXEC からの時刻表示 | 中 |
 | C2 | DS3231 `INT/SQW` を CA1 (または CB1) に接続して RTC アラーム / 1Hz tick を IRQ 化 | 中 (C の後段) |
 | D | 24C32 EEPROM ドライバ (CONFIG.SYS 代替の起動パラメータ保存先候補) | 中 |
@@ -159,7 +162,7 @@ PIA はデータポート 8bit に加えて、ポートごとに 2 本ずつ補�
 
 このメモではドキュメント化のみを行う。以下は別 Issue で扱う。
 
-- `src/i2c.asm` の実装。
+- `src/i2c.asm` の ROM 常駐実装。
 - `include/hardware.inc` への I2C 関連定数追加。
 - `src/sdcard.asm` の改修 (Port B 共有案を採る場合のシャドウ拡張など)。
 - エミュレータへの I2C スレーブモデル追加。

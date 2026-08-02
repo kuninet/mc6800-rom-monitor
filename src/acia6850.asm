@@ -5,6 +5,15 @@ ACIA_INIT:
         staa    ACIA_CTRL
         rts
 
+ if MONITOR_FEATURE_KEYBOARD
+ACIA2_INIT:
+        ldaa    #ACIA_CTRL_RESET
+        staa    ACIA2_CTRL
+        ldaa    #ACIA_CTRL_INIT
+        staa    ACIA2_CTRL
+        rts
+ endif
+
 ACIA_WAIT_TX:
         ldaa    ACIA_CTRL
         bita    #ACIA_STAT_TDRE
@@ -19,23 +28,67 @@ ACIA_WAIT_RX:
 
 ACIA_PUTC:
         psha
+ if MONITOR_FEATURE_VDG
+        tst     ACIA_TX_WAIT
+        bne     ACIA_PUTC_WAIT
+        ldaa    ACIA_CTRL
+        bita    #ACIA_STAT_TDRE
+        beq     ACIA_PUTC_SKIP
+        bra     ACIA_PUTC_SEND
+ACIA_PUTC_WAIT:
         bsr     ACIA_WAIT_TX
+ else
+        bsr     ACIA_WAIT_TX
+ endif
+ACIA_PUTC_SEND:
         pula
         staa    ACIA_DATA
         rts
+ if MONITOR_FEATURE_VDG
+ACIA_PUTC_SKIP:
+        pula
+        rts
+ endif
 
 ACIA_GETC:
         bsr     ACIA_WAIT_RX
         ldaa    ACIA_DATA
         rts
 
+CONSOLE_GETC:
+ if MONITOR_FEATURE_KEYBOARD
+CONSOLE_GETC_LOOP:
+        ldaa    ACIA2_CTRL
+        bita    #ACIA_STAT_RDRF
+        bne     CONSOLE_GETC_KEYBOARD
+        ldaa    ACIA_CTRL
+        bita    #ACIA_STAT_RDRF
+        beq     CONSOLE_GETC_LOOP
+        ldaa    ACIA_DATA
+        rts
+CONSOLE_GETC_KEYBOARD:
+        ldaa    ACIA2_DATA
+        rts
+ else
+        jsr     ACIA_GETC
+        rts
+ endif
+
 MIKBUG_OUTEEE_IMPL:
+ if MONITOR_FEATURE_VDG
+        psha
+        jsr     VDG_PUTC
+        pula
+ endif
         jsr     ACIA_PUTC
         rts
 
 MON_OUTEEE:
         psha
         jsr     ACIA_PUTC
+ if MONITOR_FEATURE_VDG
+        jsr     VDG_PUTC
+ endif
         pula
         cmpa    #CHR_CR
         bne     MON_OUTEEE_DONE
@@ -48,7 +101,7 @@ MON_OUTEEE_DONE:
 
 MIKBUG_INEEE_IMPL:
 MIKBUG_INEEE_LOOP:
-        jsr     ACIA_GETC
+        jsr     CONSOLE_GETC
         cmpa    #CHR_LF
         beq     MIKBUG_INEEE_LOOP
         jsr     MIKBUG_OUTEEE_IMPL

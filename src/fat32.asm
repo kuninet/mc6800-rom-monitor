@@ -333,6 +333,7 @@ FAT_FAIL_A:
         sec
         rts
 
+ if FAT32_INCLUDE_FIND_API
 FAT32_FIND_83:
         jsr     FAT_COPY_FIND_NAME
         jsr     FAT_COPY_ROOT_TO_CUR
@@ -391,6 +392,7 @@ FAT_FIND_NOT_FOUND:
         ldaa    #FAT_ERR_NOT_FOUND
         jmp     FAT_FAIL_A
 
+ if FAT32_INCLUDE_FILE_API
 FAT32_READ_FILE:
         stx     FAT_READ_PTR
         jsr     FAT_COPY_FILE_TO_CUR
@@ -489,6 +491,7 @@ FAT_STREAM_LOAD_OK:
         stx     FAT_ENTRY_PTR
         clc
         rts
+ endif
 
 FAT_COPY_FIND_NAME:
         ldaa    0,x
@@ -526,6 +529,7 @@ FAT_COPY_ROOT_TO_CUR:
         staa    FAT_CUR_CLUS3
         rts
 
+ if FAT32_INCLUDE_FILE_API
 FAT_COPY_FILE_TO_CUR:
         ldaa    FAT_FILE_CLUS0
         staa    FAT_CUR_CLUS0
@@ -536,6 +540,7 @@ FAT_COPY_FILE_TO_CUR:
         ldaa    FAT_FILE_CLUS3
         staa    FAT_CUR_CLUS3
         rts
+ endif
 
 FAT_COPY_NEXT_TO_CUR:
         ldaa    FAT_NEXT_CLUS0
@@ -548,6 +553,7 @@ FAT_COPY_NEXT_TO_CUR:
         staa    FAT_CUR_CLUS3
         rts
 
+ if FAT32_INCLUDE_FILE_API
 FAT_COPY_FILE_SIZE_TO_REM:
         ldaa    FAT_FILE_SIZE0
         staa    FAT_BYTES_REM0
@@ -558,6 +564,7 @@ FAT_COPY_FILE_SIZE_TO_REM:
         ldaa    FAT_FILE_SIZE3
         staa    FAT_BYTES_REM3
         rts
+ endif
 
 FAT_COMPARE_ENTRY_NAME:
         ldx     FAT_ENTRY_PTR
@@ -631,6 +638,12 @@ FAT_STORE_FILE_ENTRY:
         rts
 
 FAT_CLUSTER_TO_SD_LBA:
+        ldaa    FAT_CUR_CLUS0
+        oraa    FAT_CUR_CLUS1
+        beq     FAT_CLUS_TO_LBA_16
+        ldaa    #FAT_ERR_CHAIN
+        jmp     FAT_FAIL_A
+FAT_CLUS_TO_LBA_16:
         ldaa    FAT_DATA_LBA0
         staa    SD_LBA0
         ldaa    FAT_DATA_LBA1
@@ -641,20 +654,26 @@ FAT_CLUSTER_TO_SD_LBA:
         staa    SD_LBA3
         ldaa    FAT_CUR_CLUS3
         suba    #$02
+        staa    FAT_DIR_COUNT
+        ldaa    FAT_CUR_CLUS2
+        sbca    #0
         staa    FAT_TMP
 FAT_CLUSTER_ADD_LOOP:
-        ldaa    FAT_TMP
+        ldx     FAT_TMP
         beq     FAT_CLUSTER_ADD_DONE
         ldab    FAT_SEC_PER_CLUS
 FAT_CLUSTER_ADD_SECTOR_LOOP:
         jsr     FAT_INC_SD_LBA
         decb
         bne     FAT_CLUSTER_ADD_SECTOR_LOOP
-        dec     FAT_TMP
+        ldx     FAT_TMP
+        dex
+        stx     FAT_TMP
         bra     FAT_CLUSTER_ADD_LOOP
 FAT_CLUSTER_ADD_DONE:
         rts
 
+ if FAT32_INCLUDE_FILE_API
 FAT_SECTOR_TO_SD_LBA:
         jsr     FAT_CLUSTER_TO_SD_LBA
         ldab    FAT_SECTOR_IN_CLUS
@@ -665,6 +684,7 @@ FAT_SECTOR_TO_SD_LBA_LOOP:
         bne     FAT_SECTOR_TO_SD_LBA_LOOP
 FAT_SECTOR_TO_SD_LBA_DONE:
         rts
+ endif
 
 FAT_INC_SD_LBA:
         inc     SD_LBA3
@@ -678,14 +698,32 @@ FAT_INC_SD_LBA_DONE:
         rts
 
 FAT32_NEXT_CLUSTER:
-        ldaa    FAT_FAT_LBA0
-        staa    SD_LBA0
-        ldaa    FAT_FAT_LBA1
-        staa    SD_LBA1
-        ldaa    FAT_FAT_LBA2
-        staa    SD_LBA2
+        ldaa    FAT_CUR_CLUS0
+        oraa    FAT_CUR_CLUS1
+        beq     FAT_NEXT_CLUS_OK
+        ldaa    #FAT_ERR_CHAIN
+        jmp     FAT_FAIL_A
+FAT_NEXT_CLUS_OK:
+        ldaa    FAT_CUR_CLUS3
+        rola
+        ldaa    FAT_CUR_CLUS2
+        rola
+        staa    FAT_DIR_COUNT
+        ldaa    #0
+        adca    #0
+        staa    FAT_TMP
         ldaa    FAT_FAT_LBA3
+        adda    FAT_DIR_COUNT
         staa    SD_LBA3
+        ldaa    FAT_FAT_LBA2
+        adca    FAT_TMP
+        staa    SD_LBA2
+        ldaa    FAT_FAT_LBA1
+        adca    #0
+        staa    SD_LBA1
+        ldaa    FAT_FAT_LBA0
+        adca    #0
+        staa    SD_LBA0
         ldx     #SD_SECTOR_BUF
         jsr     SD_READ_SECTOR
         bcc     FAT_NEXT_OFFSET_PREP
@@ -693,14 +731,15 @@ FAT32_NEXT_CLUSTER:
         jmp     FAT_FAIL_A
 
 FAT_NEXT_OFFSET_PREP:
-        ldaa    FAT_CUR_CLUS3
-        asla
-        asla
-        tab
         ldx     #SD_SECTOR_BUF
+        ldab    FAT_CUR_CLUS3
+        andb    #$7F
 FAT_NEXT_OFFSET_LOOP:
         tstb
         beq     FAT_NEXT_READ
+        inx
+        inx
+        inx
         inx
         decb
         bra     FAT_NEXT_OFFSET_LOOP
@@ -732,6 +771,7 @@ FAT_NEXT_NOT_EOC:
         clc
         rts
 
+ if FAT32_INCLUDE_FILE_API
 FAT_ADVANCE_FILE_SECTOR:
         inc     FAT_SECTOR_IN_CLUS
         ldaa    FAT_SECTOR_IN_CLUS
@@ -841,3 +881,5 @@ FAT_DEC_REM_B2:
 FAT_DEC_REM_LO:
         dec     FAT_BYTES_REM3
         rts
+ endif
+ endif

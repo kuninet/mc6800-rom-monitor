@@ -1,0 +1,360 @@
+# Issue #216 バンクメモリボードとSDFS常駐場所変更検討
+
+## 対象
+
+- 親Issue: #216
+- この計画文書の追加Issue: #217
+- SDFS/68固定領域16KB化Issue: #233
+- 対象領域: SDFS/68、stage1、SBC-IO系RAM拡張、K68-VDG系VRAM、将来のバンクメモリボード
+
+## 背景
+
+現行のSDFS/68は、ROMモニタの `BOOT` から fixed boot area のstage1を読み、stage1がFAT rootの `SDFS.BIN` をロードして起動する。
+この構成では、ROMを救命具と低レベル入口に留め、FAT操作やDOS風コマンドをRAM上の第2段システムへ逃がせる。
+
+一方で、現行のSBC-IO RAM拡張構成では、`$C000-$DFFF` の8KBワーク領域に次を同居させている。
+
+| 領域 | 用途 |
+| --- | --- |
+| `$C000-$C1FF` | SD sector buffer |
+| `$C200` 以降 | monitor/SDFS/FAT work |
+| `$C400-$CFFF` | stage1 loader |
+| `$D000-$DEFF` | `SDFS.BIN` ロード領域 |
+| `$DF00-$DFFF` | stack想定 |
+
+SDFS/68 V1.3時点で、8KBワーク領域はすでに余裕が小さい。
+今後 `SAVE`、複数バッファ、FAT write、テキスト表示、ワイルドカード、トランジェントコマンド拡張、常駐APIを追加する場合、SDFS常駐場所を8KB固定で考えるのは危険である。
+
+同時に、K68-VDG系のVRAMは `$A000-$BFFF` または `$C000-$DFFF` の8KBを占有する。
+SDFS常駐領域、VRAM、ユーザーRAM、バンクメモリ窓を同時に成立させるには、基板側の単純さとソフト側のメモリ管理を分けて検討する必要がある。
+
+## 現行サイズ確認
+
+2026-06-13時点の最新ソースで `make stage1 sdfs MONITOR_PROFILE=sbcio_vdg` を実行した結果は次の通り。
+
+| 項目 | 値 |
+| --- | --- |
+| `stage1-sbcio-vdg.bin` | 2514 bytes |
+| `SDFS-sbcio-vdg.BIN` | 3614 bytes |
+| `S1_BASE` | `$C400` |
+| `S1_LIMIT` | `$CFFF` |
+| `S1_END` | `$CDD2` |
+| `SDFS_LOAD_BASE` | `$D000` |
+| `SDFS_LOAD_LIMIT` | `$DEFF` |
+| `SDFS_END` | `$DE1E` |
+
+`SDFS_LOAD_LIMIT=$DEFF` に対して `SDFS_END=$DE1E` なので、SDFS本体の残りは226 bytes程度である。
+`$C000-$DFFF` 全体では、SD sector buffer、work、stage1、SDFS、stackを含めて8KBに収めており、設計上の余裕は小さい。
+
+ROM側も `make bin` で `mc6800-monitor.bin: 8075/8192 bytes` であり、ROMへFATや大きなDOS機能を戻す余裕はない。
+そのため、ROMは薄く保ち、SDFS/68または別常駐層へ機能を逃がす方針を維持する。
+
+## 検討方針
+
+ハードウェアは8KB単位デコードを基本にする。
+GAL/CPLDを使えば細かい制御は容易だが、長期入手性と自作しやすさを考えると、74HC138などで扱いやすい粒度に寄せる。
+
+細かいI/Oデコードや可変窓を増やすより、次を優先する。
+
+- `$0000` 近辺のゼロページと低位RAMを安定させる。
+- SDFS/68自身が乗っている領域を実行中にバンク切替しない。
+- VRAMは原則として固定配置にする。
+- バンクメモリは、SDFSやアプリのデータバッファとして使う。
+- ユーザープログラムが使える上限をSDFS/68側で明示する。
+
+## 候補A: 現行延長の8KB SDFSワーク
+
+```text
+$0000-$7FFF  ユーザーRAM
+$8000-$9FFF  I/O窓
+$A000-$BFFF  VRAMまたはワークRAM
+$C000-$DFFF  SDFS/stage1/work
+$E000-$FFFF  ROM
+```
+
+現行の `ram64_c000_work` / `ram64_a000_work` に近い。
+既存実装との距離が近く、検証しやすい。
+
+欠点は、SDFS/68の成長余地がほぼないことである。
+V1.3時点でSDFSロード領域の残りが226 bytes程度しかなく、今後のDOS機能追加には向かない。
+
+この候補は、互換構成または現行SBC-IOの継続確認用として残す。
+新規バンクメモリボードの本命にはしない。
+
+## 候補B: `$6000-$7FFF` SDFS固定 + `$C000-$DFFF` バンク窓
+
+```text
+$0000-$5FFF  ユーザーRAM 24KB
+$6000-$7FFF  SDFS/68 resident 8KB
+$8000-$9FFF  I/O窓
+$A000-$BFFF  VRAM固定
+$C000-$DFFF  8KBバンクRAM窓
+$E000-$FFFF  ROM
+```
+
+低位RAMのうち8KBをSDFS/68常駐用に固定する案。
+`$C000-$DFFF` はSDFSが使うファイルバッファ、FATキャッシュ、ディレクトリキャッシュ、アプリ拡張RAMに使う。
+
+良い点:
+
+- VRAMとバンク窓を分離できる。
+- SDFSが自分の実行領域をバンク切替しない。
+- `$C000-$DFFF` を純粋なデータバッファとして扱える。
+- 8KBブロック単位のデコードで実現しやすい。
+
+懸念:
+
+- SDFS常駐部8KBは現行サイズから見て長期的に厳しい。
+- ユーザーRAM上限が `$5FFF` になり、既存の `$0000-$7FFF` 前提プログラムと衝突しやすい。
+- stage1とSDFSの配置を大きく変更する必要がある。
+
+この候補は、最小変更で「SDFS固定」と「バンクバッファ」を分ける試験案として扱う。
+本格DOS化するなら、次の候補Cを優先する。
+
+## 候補C: `$4000-$7FFF` SDFS固定 + `$C000-$DFFF` バンク窓
+
+```text
+$0000-$3FFF  ユーザーTPA 16KB
+$4000-$7FFF  SDFS/68 resident 16KB
+$8000-$9FFF  I/O窓
+$A000-$BFFF  VRAM固定
+$C000-$DFFF  8KBバンクRAM窓
+$E000-$FFFF  ROM
+```
+
+SDFS/68常駐部に16KBを与える案。
+ユーザーRAMは16KBへ減るが、DOS常駐部、stage1相当のboot services、FAT処理、コマンド処理、将来のwrite対応を置きやすい。
+
+良い点:
+
+- SDFS/68の成長余地が大きい。
+- `$C000-$DFFF` バンク窓をデータ専用にしやすい。
+- VRAMを `$A000-$BFFF` に固定できる。
+- CP/M風に「SDFSがユーザー使用メモリ上限を返す」設計と相性がよい。
+
+懸念:
+
+- 低位の連続ユーザーRAMが16KBに減る。
+- BASICや既存アプリのメモリ期待値を確認する必要がある。
+- SDFS/68が常駐DOSとして強くなるため、ROMモニタとの責務境界を再確認する必要がある。
+
+この候補を、バンクメモリボード前提の本命案とする。
+ユーザーRAMを広く見せたい場合は、バンクRAMをアプリ用拡張領域として割り当てる。
+
+## 候補D: `$A000` / `$C000` 両方をバンク化
+
+```text
+$0000-$7FFF  ユーザーRAM
+$8000-$9FFF  I/O窓
+$A000-$BFFF  BANK A またはVRAM
+$C000-$DFFF  BANK C
+$E000-$FFFF  ROM
+```
+
+柔軟性は高いが、VRAMやSDFSが切替対象に乗ると危険である。
+VRAMが表示中に切り替わる、SDFS実行中に自身を消す、といった事故を防ぐには、ロックビットや運用規約が必要になる。
+
+この候補は、基板初版では採用しない。
+将来版で検討する場合も、片側はVRAM固定、もう片側だけバンク窓にする運用を優先する。
+
+## 採用するRAM/バンクメモリカード仕様
+
+2026-06-13時点の検討では、SBC-IOやK6802-SBC側のSRAMを外し、新RAM/バンクメモリカード側で低位RAMとバンク窓を担当する方針を採用候補にする。
+SBC-IOはI/O、PIA、2nd ACIA、SD接続の役割に寄せ、K68-VDGはVRAMを担当する。
+
+```text
+新RAM/バンクメモリカード
+
+32KB SRAM
+  $0000-$7FFF 固定RAM
+
+128KB SRAM
+  8KB bank window x 16 banks
+  窓位置は $A000-$BFFF または $C000-$DFFF をジャンパ選択
+
+K68-VDG VRAM
+  bank window ではない側の8KBを使う
+```
+
+メモリマップは次の2構成を想定する。
+
+```text
+A案: VRAM=$A000、bank window=$C000
+
+$0000-$3FFF  ユーザーTPA
+$4000-$7FFF  SDFS/68固定領域
+$8000-$9FFF  I/O窓
+$A000-$BFFF  K68-VDG VRAM
+$C000-$DFFF  8KB bank window
+$E000-$FFFF  ROM
+```
+
+```text
+C案: bank window=$A000、VRAM=$C000
+
+$0000-$3FFF  ユーザーTPA
+$4000-$7FFF  SDFS/68固定領域
+$8000-$9FFF  I/O窓
+$A000-$BFFF  8KB bank window
+$C000-$DFFF  K68-VDG VRAM
+$E000-$FFFF  ROM
+```
+
+128KB SRAMを8KB単位で割るため、物理的には16 banksになる。
+ただし、SDFS/68が初期から16 banksすべてを管理する必要はない。
+初期SDFS仕様では、先頭4 banks程度だけをOS管理対象にする。
+
+```text
+bank 0  SDFS scratch / sector buffer拡張
+bank 1  FAT cache
+bank 2  directory cache
+bank 3  file data buffer / SAVE staging
+bank 4-7  将来予約
+bank 8-15 ユーザーRAM disk / overlay / 未定義
+```
+
+ハードウェア上は4bit bank registerを持たせる。
+ソフトウェア上は、初期段階では `bank 0-3` だけを定義済みとして扱い、残りはRAMTEST/BANKTESTで見える将来予約に留める。
+
+部品構成の初期案は次の通り。
+
+```text
+62256等 32KB SRAM x1     $0000-$7FFF 固定RAM
+628128等 128KB SRAM x1   8KB x16 bank RAM
+74HC138 x1               8KB単位デコード
+74HC273等 x1             bank register 4bit + control bit候補
+74HC00/32等              /CS, /OE, /WE 調整
+DIP SW/Jumper            bank window $A000/$C000 選択
+```
+
+アドレス接続の考え方は次の通り。
+
+```text
+32KB固定SRAM:
+  CPU A0-A14 -> SRAM A0-A14
+  /CS = A15=0
+
+128KB bank SRAM:
+  CPU A0-A12 -> SRAM A0-A12
+  bank register bit0-3 -> SRAM A13-A16
+  /CS = 選択された8KB窓
+```
+
+この構成により、低位RAMは単純な32KB固定RAMとして扱える。
+128KB SRAM側は8KB窓だけに見せるため、SDFS/68自身やVRAMがbank切替で消える事故を避けやすい。
+SDFS側は `BANK_WINDOW_BASE` を `$A000` / `$C000` でビルド時選択できるようにする。
+
+## CP/M風メモリ管理案
+
+SDFS/68は、ユーザープログラムへ「使ってよいメモリ上限」を返すAPIを持つ。
+CP/MのTPAに相当する考え方を入れ、SDFS常駐部、VRAM、バンク窓、スタックをユーザー領域から明示的に除外する。
+
+初期API候補:
+
+| API | 目的 |
+| --- | --- |
+| `SDFS_GET_MEMTOP` | ユーザーが使ってよい最終アドレスを返す |
+| `SDFS_SET_MEMTOP` | SDFSまたはアプリが一時的にユーザー領域上限を下げる |
+| `SDFS_GET_BANK` | 現在のバンク番号を返す |
+| `SDFS_SET_BANK` | バンク窓のページを切り替える |
+| `SDFS_BANK_READ` | バンクを指定して安全に読み出す補助入口 |
+| `SDFS_BANK_WRITE` | バンクを指定して安全に書き込む補助入口 |
+
+`.COM` トランジェントコマンドやS-Record loaderは、この上限を見てロード先を制限する。
+現行SDFS/68はロード先保護をしないため、SDFS本体、stage1、VRAM、stackを壊せる。
+常駐場所変更と同時に、ロード先保護の導入を検討する。
+
+現行の `.COM` は `$0100-USER_RAM_END` を最大ロード範囲として扱う。
+SDFS常駐場所変更で `USER_RAM_END` を `$5FFF` または `$3FFF` へ下げる場合、`.COM` 最大サイズも縮む。
+TPA境界を導入するIssueでは、`.COM` ABI文書とテストの更新を同時に扱う。
+
+また、stage1の `S1_LOAD_FILE_83` はロード先が `SDFS_LOAD_BASE` 固定である。
+常駐中のSDFS/68からそのまま呼ぶと自己上書きになるため、常駐SDFSが使うファイル読み込みはstream APIまたはバンクバッファ向けAPIへ分ける。
+常駐場所変更時は、stage1 boot専用APIとSDFS実行中APIの責務を明確にする。
+
+## 推奨するIssue分割
+
+親Issue #216 は、検討と方針整理の棚にする。
+子IssueはGitHubのsub-issueとして #216 に正式に紐づける。
+実装PRから親Issueを直接closeせず、子IssueのPRは自身のIssueを `Closes` し、親Issue #216 は `Refs` とsub-issueツリーで束ねる。
+
+| 子Issue案 | 内容 | 完了条件 |
+| --- | --- | --- |
+| SDFS/68現行メモリ使用量の棚卸し | stage1、SDFS、work、stack、VRAMの実使用と余白をlistingから整理する | サイズ表と制約がdocsに残る |
+| バンクメモリボード初版メモリマップ設計 | `$A000` VRAM固定、`$C000` 8KBバンク窓、SDFS常駐候補を設計する | 8KB単位のメモリマップ案と信号方針がdocs/designに残る |
+| `MEMORY_CONFIG` にSDFS固定領域16KB案を追加 | `$4000-$7FFF` SDFS固定領域、`$A000`または`$C000` bank window想定の構成軸を追加する | Make構成軸とMAP表示案が整理される。#233で扱う |
+| SDFS/68ロード先とstage1配置の変更PoC | SDFSを `$4000-$7FFF` または `$6000-$7FFF` に移す試験を行う | `make stage1 sdfs` と該当テストが通る |
+| SDFSメモリ上限API設計 | `SDFS_GET_MEMTOP` などの常駐APIと `.COM` / loader制限を設計する | ABI文書にAPI案と互換性が残る |
+| バンクレジスタABI設計 | バンク番号、保存復帰、割り込み/復帰時の扱いを決める | SDFS側から安全にバンク窓を使う規約がdocsに残る |
+| ロード先保護実装 | S-Record、Intel HEX、`.COM` のロード先をSDFS常駐部/VRAM/stackから保護する | 異常系テストで保護範囲へのロードを拒否する |
+| `.COM` ABI更新 | `USER_RAM_END` 低下時の最大サイズ、引数領域、復帰条件を再定義する | ABI文書とSDFS build testが更新される |
+| 実機・基板化前PoC | エミュレータまたは試作回路で `$C000` バンク窓を読み書きする | RAMTESTまたは専用診断でバンク切替が確認できる |
+
+## 関連調査(子Issue #219)
+
+子Issue #219 で、SDFS常駐部のサイズ削減余地として、ROMモニタとSDFSモジュールに二重実装されたS-Record/Intel-HEXローダ(構成正確に48ルーチン)を確認した。ROM側ローダの公開API化でSDFS常駐部から数百バイト回収できる見込みがあり、本検討の常駐サイズ評価に反映する。詳細と指摘表は [issue-219_loader_dedup_asm_analysis.md](issue-219_loader_dedup_asm_analysis.md) を参照。
+
+## 採用候補
+
+現時点の本命は候補Cとする。
+
+```text
+$0000-$3FFF  ユーザーTPA
+$4000-$7FFF  SDFS/68 resident
+$8000-$9FFF  I/O窓
+$A000-$BFFF  VRAM固定
+$C000-$DFFF  8KBバンクRAM窓
+$E000-$FFFF  ROM
+```
+
+理由:
+
+- 現行8KBワーク領域はSDFS/68の成長に対して狭い。
+- SDFS常駐部を16KBにすると、DOS化、write対応、API化の余地ができる。
+- バンクRAMをSDFS自身ではなくデータバッファとして使える。
+- VRAMを固定でき、表示中のバンク切替事故を避けやすい。
+- 8KBブロック単位の単純デコードで説明できる。
+
+候補Bは、ユーザーRAMを24KB残す妥協案として残す。
+ただし、8KB SDFS常駐は長期的に再び詰まる可能性が高いため、基板初版の標準案にはしない。
+
+## SDFS/68固定領域16KB化の位置づけ
+
+`$4000-$7FFF` を使う場合も、16KBすべてをSDFS本体に使えるわけではない。
+この領域には、SD sector buffer、work、stage1/boot services、SDFS resident、stack/API領域を同居させる。
+
+```text
+$4000-$41FF  SD sector buffer
+$4200-$43FF  SDFS/FAT work, line buffer, path buffer
+$4400-$4FFF  stage1 / boot services
+$5000-$77FF  SDFS resident
+$7800-$7FFF  stack / 予備 / API table
+```
+
+このため、正確には「SDFS/68固定領域を16KB級へ広げる」方針であり、「SDFS本体が16KB使える」わけではない。
+SDFS本体の実用上限は、おおむね10KB前後を目安にする。
+この変更は #216 のハード構成検討とは別に、#233 で扱う。
+
+## 将来のクリーンアーキテクチャ構想
+
+SBC6800前提、MIKBUG互換、`$8000`台I/O窓、`$E000-$FFFF` ROMという現行互換から離れ、I/Oを最上位付近へ寄せた新しい全体アーキテクチャも将来候補として考えられる。
+ただし、これは現行SBC6800/SBC-IO/K68-VDG/SDFS/68系の延長ではなく、別システムに近い。
+
+この親Issue #216 では、既存資産とSDFS/68の延長上で動くRAM/バンクメモリカードを扱う。
+クリーンアーキテクチャは、必要になった時点で別の親Issueとして切り出す。
+
+## 検証方針
+
+- `make bin` でROMサイズを確認する。
+- `make stage1 sdfs MONITOR_PROFILE=sbcio_vdg` で現行構成のstage1/SDFSサイズを継続確認する。
+- 新しい `MEMORY_CONFIG` を追加する場合は、`make bin stage1 sdfs` と `tests/test_stage1_build.py` / `tests/test_sdfs68_build.py` を更新する。
+- `MAP` 表示で、ユーザーRAM、SDFS resident、VRAM、bank window、ROMの範囲が分かるようにする。
+- 実機確認前に、エミュレータまたは診断S-Recordでバンク番号ごとに異なるパターンを書き込み、切替復帰を確認する。
+
+## 対象外
+
+- 初版でGAL/CPLD前提の細粒度MMUを作ること。
+- `$A000` / `$C000` 両方を自由にバンク化すること。
+- FAT writeやSAVEをこの親Issueだけで実装すること。
+- ROMへFAT本体やDOS機能を戻すこと。
+- 既存SBC6800互換の8KB RAM最小構成を壊すこと。

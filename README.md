@@ -6,6 +6,34 @@ MC6800 向けの小型 ROM モニタプロジェクトです。
 
 MIKBUG 全体の完全互換は狙いませんが、電大版 BASIC が利用する文字入出力エントリーポイント互換は重視します。
 
+## レイヤー構成
+
+このプロジェクトでは、ROM モニタと SDFS/68 を別レイヤーとして扱います。
+ROM モニタは電源投入直後に必ず使える低レベル操作、復旧口、マシン語デバッガであり、SDFS/68 は system SD から起動する第2段DOSです。
+
+```mermaid
+flowchart TD
+    ROM["ROM Monitor<br/>メモリ操作 / 実行 / デバッグ"]
+    BOOT["ROM BOOT<br/>SDFS/68起動入口"]
+    STAGE1["stage1<br/>fixed boot area"]
+    SDFS["SDFS.BIN<br/>第2段DOS"]
+    USER["User Program<br/>RAM上の利用者プログラム"]
+
+    ROM --> BOOT
+    BOOT --> STAGE1
+    STAGE1 --> SDFS
+    SDFS --> USER
+    SDFS -->|"EXIT"| ROM
+```
+
+ROM 単体では、メモリダンプ、メモリ変更、指定アドレス実行、ブレークポイント、簡易逆アセンブルなどを扱います。
+通常のSDファイル操作やDOS風の `DIR`、`TYPE`、`RUN`、`LOAD`、`EXIT` は SDFS/68 側へ寄せます。
+そのため、SDFS/68 を使う通常運用には stage1 と `SDFS.BIN` を含む system SD が必要です。
+
+標準profileでは、ROM常駐FATの `DIR` / `LF` は本線から外しています。
+`base` と `sbcio` はSDなしのROMモニタ、`sbcio_vdg` と `k6802_vdg` はraw SD `BOOT` でSDFS/68へ渡すROMモニタとして扱います。
+過去互換や検証でROM常駐FATが必要な場合だけ、構成軸を直接指定して `FEATURE_SD=1 FEATURE_FAT=1` のROMをビルドします。
+
 ## 現在の前提
 
 - CPU: MC6800
@@ -26,6 +54,7 @@ MIKBUG 全体の完全互換は狙いませんが、電大版 BASIC が利用す
 
 - [docs/README.md](/Users/kuninet/git/MC6800_monitor/docs/README.md): docs 全体の目次
 - [docs/usage/monitor_commands.md](/Users/kuninet/git/MC6800_monitor/docs/usage/monitor_commands.md): ROM モニタのコマンドリファレンス
+- [docs/usage/sdfs68_system_sd.md](/Users/kuninet/git/MC6800_monitor/docs/usage/sdfs68_system_sd.md): SDFS/68 と system SD の方針
 - [docs/requirements/monitor_requirements.md](/Users/kuninet/git/MC6800_monitor/docs/requirements/monitor_requirements.md): 要件定義
 - [docs/design/memory_map.md](/Users/kuninet/git/MC6800_monitor/docs/design/memory_map.md): 初版メモリマップ案
 - [docs/design/architecture.md](/Users/kuninet/git/MC6800_monitor/docs/design/architecture.md): モニタ全体のアーキテクチャ
@@ -76,12 +105,14 @@ MIKBUG 全体の完全互換は狙いませんが、電大版 BASIC が利用す
 
 ## ビルド
 
-現在のフェーズ1では GNU make から次の生成物を作れるようにしています。
+GNU make から次の生成物を作れるようにしています。
 
 - `make srec`: Motorola S-record を生成
 - `make ihex`: Intel HEX を生成
 - `make bin`: ROM イメージのバイナリを生成
 - `make`: S-record と Intel HEX をまとめて生成
+
+profile別、ROM種別別、構成軸の直接指定を含む詳しいビルド手順は [docs/usage/build_commands.md](docs/usage/build_commands.md) を参照してください。
 
 SBC6800 前提の現在値:
 

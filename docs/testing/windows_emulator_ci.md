@@ -9,9 +9,10 @@ Windows 上で次の 2 点を安定して確認する。
 
 この手順書は、ローカル確認と GitHub Actions の両方をまとめたもの。
 
-## GitHub Actions で 2 本の結果が出る理由
+## GitHub Actions の起動条件
 
-PR の checks に次の 2 本が見えるのは、workflow が `push` と `pull_request` の両方で動くため。
+workflow は `push` と `pull_request` の両方で動く。
+コード、テスト、ビルド設定、workflow 自体を変更したPRでは、checks に次の 2 本が見える。
 
 - `Windows Emulator Smoke / smoke (push)`
 - `Windows Emulator Smoke / smoke (pull_request)`
@@ -24,6 +25,7 @@ PR の checks に次の 2 本が見えるのは、workflow が `push` と `pull_
   - PR として `main` に対して評価したときの確認
 
 同じ workflow でも、トリガーが別なので 2 本表示される。
+ただし、docs、Markdown、Issue/PRテンプレートのみの変更では workflow は起動しない。
 
 ## CI の流れ
 
@@ -31,8 +33,8 @@ PR の checks に次の 2 本が見えるのは、workflow が `push` と `pull_
 
 1. Python をセットアップ
 2. `third_party/asl/asw-1.42-Beta.zip` を展開
-3. `asl.exe` と `p2bin.exe` で `build/mc6800-monitor.bin` を生成
-4. `REQUIRE_BUILD_ROM=1` を付けて `python tests/test_smoke.py` を実行
+3. `asl.exe` と `p2bin.exe` で base / sbcio の ROM を生成
+4. `REQUIRE_BUILD_ROM=1` を付けて base / sbcio の `tests/test_smoke.py` と `tests/test_sd_fixture.py` を実行
 
 このため、CI では fixture ではなく、毎回最新ソースから生成した ROM を使う。
 
@@ -121,4 +123,5 @@ python emu\sbc6800_emu.py build\mc6800-monitor.bin --input tests\fixtures\sample
 
 - CI の本命は `build/mc6800-monitor.bin` を使う経路
 - fixture フォールバックはローカル補助用
-- workflow が `push` と `pull_request` の両方を監視しているため、checks は 2 本見える
+- workflow が `push` と `pull_request` の両方を監視しているため、コード変更時のchecksは通常 2 本見える
+- docs、Markdown、Issue/PRテンプレートのみの変更では CI は起動しない

@@ -14,17 +14,23 @@
 
 ## コマンド一覧
 
+この一覧はROMモニタのプロンプト `] ` で使うコマンドである。
+SDFS/68 起動後の `SDFS> ` で使う `DIR`、`TYPE`、`RUN`、`LOAD`、`EXIT` は別レイヤーのコマンドであり、このROMコマンド一覧には含めない。
+
+### ROM本線コマンド
+
+ROM単体で使える低レベル操作、復旧口、マシン語デバッグ用のコマンドである。
+
 | コマンド | 用途 |
 | --- | --- |
 | `D` | 継続アドレスから 64 バイト分をダンプする |
 | `Dssss` | `ssss` から 64 バイト分をダンプする |
 | `Dssss-eeee` | `ssss` から `eeee` までをダンプする |
-| `DIR` | SDカード上のroot directoryにある8.3通常ファイルを表示する |
 | `Mssss` | `ssss` からメモリを変更する |
 | `MAP` | 現在のビルドが想定する主要メモリ配置を表示する |
+| `RAMTEST ssss-eeee` | 許可された明示範囲のRAMを破壊テストする |
 | `Gssss` | `ssss` へジャンプして実行する |
 | `L` | S-Record または Intel HEX をロードする |
-| `LF filename` | SDカード上の8.3名ファイルを検索して開く |
 | `H` | コマンド一覧を表示する |
 | `Fssss-eeee vv` | `ssss` から `eeee` までを `vv` で埋める |
 | `B` | 現在のブレークポイント状態を表示する |
@@ -33,6 +39,40 @@
 | `Cssss` | `ssss` のブレークポイントを解除する |
 | `R` | SWI ブレーク停止後に再開する |
 | `Ussss` | `ssss` から簡易逆アセンブル表示する |
+| `UW` | VDG有効ROMで、UART送信待ち状態を表示する |
+| `UW ON` | VDG有効ROMで、UART送信時にTDREを待つ |
+| `UW OFF` | VDG有効ROMで、UART送信不可なら捨ててVDG出力を優先する |
+
+### SDFS/68起動入口
+
+`BOOT` はROM上のファイル操作コマンドではなく、system SD上のstage1を起動してSDFS/68へ制御を渡す入口である。
+`BOOT3` は v3 resident 用の入口で、fixed system area の `SDFS3SYS` をRAMへロードしてROM monitorへ戻る。
+
+| コマンド | 用途 |
+| --- | --- |
+| `BOOT` | 固定LBAからSDFS/68 stage1 loaderを読み込んで、第2段システムへ移行する。`FEATURE_SD=1` かつ stage1対応RAM構成のROMで有効 |
+| `BOOT3` | fixed LBA `64` の `SDFS3SYS` を検証し、payloadを `SDFS3_LOAD_BASE` へロードする。成功後は `CMD <tail>` でv3 residentを呼び出す |
+| `CMD <tail>` | RAM上のSDFS/68 v3 resident APIを検出し、slot 1 `SDFS3_CMD_DISPATCH` へ `tail` を渡す。`FEATURE_SD=1` かつ stage1対応RAM構成のROMで有効 |
+
+### ROM常駐FAT互換コマンド
+
+`DIR` / `LF` は `FEATURE_FAT=1` を直接指定したROMだけに残す互換機能である。
+標準profileではROMに入れず、SD上ファイルの通常操作はSDFS/68側で行う。
+
+| コマンド | 用途 |
+| --- | --- |
+| `DIR` | SDカード上のroot directoryにある8.3通常ファイルを表示する。`FEATURE_FAT=1` のROMだけで有効 |
+| `LF filename` | SDカード上の8.3名ファイルを検索して開く。`FEATURE_FAT=1` のROMだけで有効 |
+
+### コマンドの所属
+
+| 所属 | コマンド | 位置づけ |
+| --- | --- | --- |
+| ROM本線 | `D`、`M`、`G`、`L`、`B`、`C`、`R`、`U`、`UW` など | ROM単体で使う低レベル操作とデバッグ |
+| ROM常駐FAT互換 | `DIR`、`LF filename` | `FEATURE_SD=1 FEATURE_FAT=1` を直接指定したときだけ使う互換入口 |
+| SDFS/68起動入口 | `BOOT` | system SD上のstage1と `SDFS.BIN` へ渡す入口 |
+| SDFS/68 | `DIR`、`TYPE`、`RUN`、`LOAD`、`EXIT` | `SDFS> ` で使う第2段DOSのコマンド |
+| stage1内部 | boot services | ユーザーが直接入力しないSDFS/68起動用サービス |
 
 ## メモリダンプ
 
@@ -110,7 +150,6 @@ MAP BASE
 RAM 0000-1FFF
 USER 0000-1FFF
 WORK 1C00-1FFF
-SD 1C00
 MON 1E00
 MIK 1F00
 STK 1F42
@@ -118,7 +157,134 @@ ROM E000-FFFF
 ]
 ```
 
-SBC-IO拡張ROMでは `MAP SBCIO` と表示され、`WORK C000-DFFF`、`SD C000`、`MON C200` などの拡張RAM前提の配置になる。
+`base` profileは `FEATURE_SD=0`、`FEATURE_VDG=0`、`FEATURE_KEYBOARD=0` のため、SD、VDG、KEYの行を表示しない。
+
+SBC-IO拡張ROMでは `MAP SBCIO` と表示され、`WORK C000-DFFF`、`MON C200`、`MIK C300`、`STK DFFF` などの拡張RAM前提の配置になる。標準の `sbcio` profileはSDなし、ROM常駐FATなしであり、`DIR` / `LF` / `BOOT` は有効にならない。
+`FEATURE_KEYBOARD=1` のROMでは、2nd ACIAキーボード入力候補として `KEY 8094-8095` も表示する。
+
+K68-VDG表示PoC用の `sbcio_vdg` profileでは、SBC-IO拡張ROMの配置に加えて K68-VDG 用の VRAM と設定レジスタを表示する。ROM容量をVDG/キーボード/BOOTへ寄せるため、ROM常駐FATの `DIR` / `LF` は無効で、SDからの第2段起動は `BOOT` を使う。
+
+```text
+] MAP
+MAP SBCIO VDG
+RAM 0000-7FFF
+USER 0000-7FFF
+WORK C000-DFFF
+SD C000
+MON C200
+MIK C300
+STK DFFF
+VRAM A000-BFFF
+VDG 8110
+KEY 8094-8095
+ROM E000-FFFF
+]
+```
+
+K6802-SBCでK68-VDGのVRAMを `$C000-$DFFF` に置く `k6802_vdg` profileでは、SD/FATとモニタのワーク領域を `$A000-$BFFF` に移す。
+
+```text
+] MAP
+MAP K6802 VDG
+RAM 0000-7FFF
+USER 0000-7FFF
+WORK A000-BFFF
+SD A000
+MON A200
+MIK A300
+STK BFFF
+VRAM C000-DFFF
+VDG 8110
+KEY 8094-8095
+ROM E000-FFFF
+]
+```
+
+新SDFS/68固定領域（16KB級拡張）の `ram64_4000_work` 構成では、TPA（ユーザーRAM）が `$3FFF` 上限へ下がり、作業領域が `$4000-$7FFF` に移るため、次のような表示になります（VDG無効・SD有効の例）。
+
+```text
+] MAP
+MAP SBCIO
+RAM 0000-7FFF
+USER 0000-3FFF
+WORK 4000-7FFF
+SD C000
+MON 4200
+MIK 4300
+STK 7FFF
+KEY 8094-8095
+ROM E000-FFFF
+]
+```
+
+SDセクタバッファの番地は、S1/SDFS固定領域 `$4000-$7FFF` の中ではなく、ジャンパ選択されたバンク窓（上の例では `$C000`）へ正しく残されます。
+
+## K68-VDG表示
+
+`FEATURE_VDG=1` のROMでは、起動メッセージ、プロンプト、通常の文字出力をUARTとK68-VDG画面の両方へ出す。
+K68-VDG の設定レジスタは `$8110`、VRAMは `sbcio_vdg` で `$A000-$BFFF`、`k6802_vdg` で `$C000-$DFFF` を使う。
+
+VDG有効ROMでは、32桁画面向けの短幅ダンプ `DS` も使える。
+`DS`、`DS0100`、`DS0100-011F` の形式で、1行はアドレスと8 byte分のHEXだけを表示し、ASCII欄は出さない。
+表示は `0100 00 01 02 03 04 05 06 07` のように32桁以内へ収める。
+
+VDG有効ROMでは、1st ACIA UART出力を補助コンソールとして扱う。
+デフォルトの `UW OFF` では、1st ACIA の `TDRE` が立っていない文字は捨てて、VDG画面とキーボード操作を止めない。
+Mac側でUSBシリアルログを確実に取りたい場合は `UW ON` を実行すると、従来どおり `TDRE` を待って送信する。
+ただし `UW ON` は、USBシリアル未接続、制御線の状態異常、またはACIA送信不可の状態では停止し得る。
+
+ROM容量を節約するため、画面クリアと固定文字列表示だけの `VDGTEST` コマンドはROMから外した。
+必要な場合は `diagnostics/VDGA000.S` または `diagnostics/VDGC000.S` をSDへ置き、SDFS/68から `RUN` する。
+
+```text
+SDFS> RUN VDGA000.S
+```
+
+## 2nd ACIAキーボード入力
+
+SBC-IOの2nd ACIA `$8094-$8095` は、KKBD-USBなどのUARTキーボードI/F接続先として扱う。
+ROM容量を節約するため、受信確認だけの `KEYTEST` コマンドはROMから外した。
+必要な場合は `diagnostics/KEYTEST.S` をSDへ置き、SDFS/68から `RUN` する。
+
+```text
+SDFS> RUN KEYTEST.S
+KEY 41 A
+```
+
+通常のモニタ入力、MIKBUG互換 `INEEE`、BASIC入力は、まだ2nd ACIAへ切り替えない。これは後続Issueで扱う。
+
+## RAM確認
+
+`RAMTEST ssss-eeee` は、許可された範囲内のRAMを確認する破壊系コマンドである。
+実行中は対象範囲へ `$55` / `$AA` を書き込み、読出し確認後に元値へ戻す。
+
+```text
+] RAMTEST C000-DFFF
+RAMTEST C000-DFFF
+OK
+]
+```
+
+安全のため、指定範囲全体がビルドプロファイルで有効化された単一の許可領域に完全包含される場合だけ実行する。
+`RAMTEST` 自身はゼロページ `$00F0-$00F5` を一時ワークに使い、実行中のスタックもゼロページ直下へ移すため、`$0000-$00FF` は検査対象外にする。
+ゼロページの作業領域と一時スタック領域は指定範囲外でも書き換わるため、`RAMTEST` 前後で `$0000-$00FF` の内容保持は保証しない。
+`base` profileでは `0100-1BFF` 内の範囲だけを許可する。
+`sbcio` / `sbcio_vdg` profileでは `0100-7FFF`、`C000-DFFF` 内の範囲を許可する。
+`k6802_vdg` profileでは `0100-7FFF`、`A000-BFFF` 内の範囲を許可する。
+たとえば `sbcio` では `RAMTEST 2000-3FFF` や `RAMTEST C200-C2FF` は実行できる。
+無引数、片側欠落、5桁以上、余分な文字、開始 > 終了、`0000-00FF` や `7FFF-C000` のように許可領域外を含む範囲は `?` を返す。
+`sbcio_vdg` の `$A000-$BFFF` や `k6802_vdg` の `$C000-$DFFF` はK68-VDG VRAMなので触らない。
+
+失敗時は `NG xxxx` の形式で失敗アドレスを表示する。
+
+```text
+] RAMTEST C000-DFFF
+RAMTEST C000-DFFF
+NG C234
+]
+```
+
+電源断やリセットが途中で発生した場合の内容保持は保証しない。
 
 ## 実行
 
@@ -151,7 +317,7 @@ OK
 ロード処理はレコードを受信しながら解析する。
 ロード中の進捗表示は速度を優先して行わず、正常終了時は `OK`、異常時は `?S1` から `?S5`、または `?I1` から `?I5` を表示する。
 
-`LF filename` はSDカード上のroot directoryから8.3 short filenameのファイルを検索し、S-RecordまたはIntel HEXとしてロードする。
+`LF filename` は `FEATURE_FAT=1` のROMで、SDカード上のroot directoryから8.3 short filenameのファイルを検索し、S-RecordまたはIntel HEXとしてロードする。
 既存の `L` とは別の入口だが、レコード解析とRAM書き込みは同じローダ処理を使う。
 
 ```text
@@ -162,11 +328,18 @@ OK
 
 ファイル名の前後の空白は無視する。subdirectory、LFN、wildcardは対象外である。
 LOAD後の自動実行は行わない。必要に応じて `Gssss` で開始アドレスへジャンプする。
+`FEATURE_FAT=0` のROMでは `LF` のコマンド本体をROMに入れず、未対応コマンドとして `?` を返す。
+標準profileでは、SD上ファイルの通常ロードはROMでは行わない。
+`BOOT` でSDFS/68を起動してから、SDFS/68側の `L filename` または `LOAD filename` を使う。
+
+SDFS/68はROMモニタとは別の第2段システムとして扱う。SDFS/68側の `DIR`、`TYPE`、`RUN`、`LOAD`、`EXIT` は [SDFS/68 システムSDカード方針](sdfs68_system_sd.md) に記載する。
 
 ## SD directory
 
-`DIR` はSDカード上のroot directoryにある8.3通常ファイルを表示する。
+`DIR` は `FEATURE_FAT=1` のROMで、SDカード上のroot directoryにある8.3通常ファイルを表示する。
 LFN、削除entry、volume label、subdirectoryは表示しない。
+ROM側の `DIR` とSDFS/68側の `DIR` は名前が同じでも別機能である。
+ROM側 `DIR` は `FEATURE_SD=1 FEATURE_FAT=1` を直接指定したときだけ使う互換機能、SDFS/68側 `DIR` は `SDFS> ` で使う通常運用コマンドとして扱う。
 
 ```text
 ] DIR
@@ -177,6 +350,7 @@ MULTI.BIN A 00000400
 ```
 
 サイズは8桁16進で表示する。`DIR` は `D` dumpとは別コマンドであり、従来の `D0100` や `D0100-011F` はそのまま使える。
+`FEATURE_FAT=0` のROMでは `DIR` のコマンド本体をROMに入れず、`D` dump以外の未対応入力として `?` を返す。
 
 ## ヘルプ
 
@@ -184,7 +358,31 @@ MULTI.BIN A 00000400
 
 ```text
 ] H
-D DIR M MAP G L LF B C R U H F
+D M MAP RAMTEST G L B C R U H F
+]
+```
+
+`FEATURE_SD=1` かつ `FEATURE_FAT=0` のROMでは、固定LBA stage1起動用の `BOOT` と v3 resident用の `BOOT3` を含めて表示する。
+
+```text
+] H
+D M MAP RAMTEST G L BOOT BOOT3 CMD B C R U H F
+]
+```
+
+`FEATURE_FAT=1` のROMでは、ROM常駐FAT互換機能として `DIR` と `LF` を含めて表示する。
+
+```text
+] H
+D DIR M MAP RAMTEST G L LF BOOT BOOT3 CMD B C R U H F
+]
+```
+
+`FEATURE_SD=1` かつ `FEATURE_FAT=0` のROMでは、ROM側FAT互換コマンドではなく `BOOT` / `BOOT3` を含める。VDG/キーボード診断はROMコマンドではなく、SD上の診断用S-Recordから実行する。
+
+```text
+] H
+D M MAP RAMTEST G L BOOT BOOT3 CMD B C R U H F
 ]
 ```
 

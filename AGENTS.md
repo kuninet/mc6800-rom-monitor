@@ -16,6 +16,47 @@
 - 対応IssueがそのPRで完了する場合、PR本文の対応Issue欄には `Closes #番号` を記載する。
 - 参照だけで完了しないIssueには `Refs #番号` を使う。
 
+## 親子Issue(sub-issue)
+
+- 親子関係のあるIssueは、本文の `Refs` 表記だけで済ませず、GitHub の sub-issue として必ず正式に紐づける。
+- `gh` CLI には sub-issue サブコマンドが無いため、GraphQL API で紐づける。
+  ```sh
+  P=$(gh issue view <親番号> --json id -q .id)
+  C=$(gh issue view <子番号> --json id -q .id)
+  gh api graphql -H "GraphQL-Features: sub_issues" \
+    -f query='mutation($p:ID!,$c:ID!){addSubIssue(input:{issueId:$p,subIssueId:$c}){subIssue{number}}}' \
+    -F p="$P" -F c="$C"
+  ```
+- close済みのIssueも sub-issue として追加できる。
+
+## 分割PRの紐づけ(パターンA)
+
+GitHub Project の「Linked pull requests」列でPRを取りこぼさず追跡するための標準運用。
+
+- 1つの作業を複数PRに分ける場合は、**PRステップごとに sub-issue を作り、各PRは `Closes #<そのstep-issue>`** を使う。これで全PRが該当Issueの「Linked pull requests」列に並び、取りこぼさない。
+- 単一PRで完了する作業は、そのPRが対象Issueを `Closes` する。
+- 親/アンブレラIssue(例 #216)は **close しない**。`Refs` と sub-issue ツリーで束ねる(`Closes` しない)。
+- 注意: 「Linked pull requests」列はリンク(`Closes`/`Fixes`/`Resolves` または手動リンク)でのみ埋まり、`Refs` では出ない。そしてリンクはデフォルトブランチへのマージでIssueを自動closeする。「リンクするが閉じない」手段は無いため、閉じたくないIssueには上記のstep-issue分割で対応する。
+
+## 生成AIの痕跡を残さない
+
+- GitHub Issue、Pull Request、コミットメッセージに、生成AI由来であることを示す痕跡を一切残さない。
+- コミットに `Co-Authored-By` の生成AI署名を付けない。PR本文に「Generated with ...」等のフッタを付けない。
+- 道具名(解析ツール等)を手段として記載するのは痕跡ではないので可。
+
+## テスト実行
+
+- コード変更後と PR 作成前は、**必ず全テストを実行する**。正規手順は `make test`(ビルド前提込みで全テストを実行)。
+- ドキュメントのみの変更では `make test` を省略してよい。その場合は PR 本文に「ドキュメントのみのためテスト省略」と明記する。
+- 手順の詳細は `docs/development/workflow.md` の「テスト方針」を参照。
+- テストは pytest ではなくスクリプト直実行。エミュテストは先に base profile をビルドしないと環境失敗する(`make test` が自動で満たす)。
+
+## 改行コードを変更しない
+
+- ファイルの既存の改行コードを変更しない(正規化しない)。`src/main.asm` は CRLF、その他は LF。
+- 編集ツールは保存時に CRLF→LF 正規化することがあるため、CRLF ファイルはバイト保持の方法で編集する。
+- コミット前に `git diff --numstat` と `git diff --ignore-all-space --numstat` が一致することを確認する(乖離=改行コードが壊れた合図)。
+
 このリポジトリで Codex が作業する際のローカル運用ルールを定義する。
 
 ## 言語

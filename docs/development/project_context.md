@@ -18,10 +18,20 @@
 2. [workflow.md](workflow.md): Issue/PR、テスト、レビューの開発運用。
 3. [docs/requirements/monitor_requirements.md](../requirements/monitor_requirements.md): ROM モニタ全体の要件。
 4. [docs/usage/monitor_commands.md](../usage/monitor_commands.md): 現在のコマンド仕様。
-5. [docs/design/memory_map.md](../design/memory_map.md): メモリマップ。
-6. [docs/design/architecture.md](../design/architecture.md): 全体構成。
-7. [docs/testing/windows_emulator_ci.md](../testing/windows_emulator_ci.md): エミュレータと CI の確認手順。
-8. [docs/requirements/2026-04-25_sdcard_spi_fat_requirements.md](../requirements/2026-04-25_sdcard_spi_fat_requirements.md): SD/FAT 拡張の検討結果。
+5. [docs/usage/build_commands.md](../usage/build_commands.md): profile別、ROM種別別、構成軸別のビルド手順。
+6. [docs/design/memory_map.md](../design/memory_map.md): メモリマップ。
+7. [build_configuration_axes.md](build_configuration_axes.md): ビルド構成軸とprofileプリセットの設計方針。
+8. [docs/design/architecture.md](../design/architecture.md): 全体構成。
+9. [docs/testing/windows_emulator_ci.md](../testing/windows_emulator_ci.md): エミュレータと CI の確認手順。
+10. [docs/requirements/2026-04-25_sdcard_spi_fat_requirements.md](../requirements/2026-04-25_sdcard_spi_fat_requirements.md): SD/FAT 拡張の検討結果。
+
+## ビルド構成の扱い
+
+今後の機能追加では、`MONITOR_PROFILE` だけで設計を閉じない。
+`MONITOR_PROFILE` は互換用・ユーザー向けの完成品プリセットとして扱い、実際の設計判断は [build_configuration_axes.md](build_configuration_axes.md) の `MEMORY_CONFIG`、`BOARD_IO`、`FEATURE_*` の組み合わせで整理する。
+
+SD、VDG、2nd ACIAキーボード、I2Cなどの機能追加Issueでは、計画時にメモリ配置、外部I/F装備、機能フラグ、依存関係、条件アセンブル対象を確認する。
+profile名だけを根拠に、SD/FAT、VDG、I2C、キーボード機能の有無やメモリ範囲を決めない。
 
 ## テストとCI
 
@@ -34,6 +44,7 @@ python tests/test_smoke.py
 ```
 
 `REQUIRE_BUILD_ROM=1` を付けると、fixture ではなく最新ソースから生成した `build/mc6800-monitor.bin` を要求する。PR 前の確認ではこの経路を使う。
+ドキュメントのみの変更ではローカルの `make test` を省略してよい。GitHub Actions も docs / Markdown / Issue・PRテンプレートのみの変更では起動しない。
 
 新しい振る舞いを実装する場合は、既存 smoke test が通るだけでは不十分である。追加した機能に対応するテストを追加し、入力と期待結果を固定する。
 
@@ -71,6 +82,23 @@ PoC で確認された主な注意点は次の通り。
 - [#54](https://github.com/kuninet/mc6800-rom-monitor/issues/54): 実機PoCとSBC-IO PIAアドレス確定。
 
 SD/FAT本体に入る前に、この開発運用文書を main へ入れる。その後、#47 から順に小さい PR で進める。
+
+## 副CPUディスク装置の将来構想
+
+将来構想 Issue [#166](https://github.com/kuninet/mc6800-rom-monitor/issues/166) では、MC6802 または 6502 を使った外部副CPUディスク装置を検討する。
+これは V1.3 の実装対象ではなく、現行の SBC-IO + SD / SDFS/68 本線とは別の棚として扱う。
+
+現時点の設計判断は次の通り。
+
+- 副CPUは SBC68 系バスへ同居させず、独立バスで動く賢いディスク装置として扱う。
+- 主MC6800との接続は、専用PIAまたは latch/register window による 8bit parallel + handshake を第一候補にする。
+- PIA制御線は READ/WRITE バス信号そのものではなく、REQ/STB/ACK/READY/DRQ/IRQ などのハンドシェイク信号として使う。
+- ROMモニタは同期I/Oで完結できる薄い装置呼び出しに留め、FAT、SD sector、cluster chain、directory walkを直接扱わない。
+- SDFS/68 はRAM上のDOS層として、必要に応じて割り込み駆動を利用できる設計にする。ただしROM boot / 復旧経路はポーリング同期I/Oでも成立させる。
+- FAT32、SDカード、将来の媒体差分は副ディスク装置側へ隠蔽し、主側ABIにはファイルサービスだけを見せる。
+- FATを向こう側へ持つことで、将来はFAT以外の独自FS、固定LBA、別媒体にも差し替えられる。
+
+GitHub sub-issue として、PIA同期通信、主側ファイルサービスABI、副CPU側FAT/媒体抽象、ROM最小入口、SDFS接続層、fixture検証、実機PoCを #166 配下に分割している。
 
 ## Blogとの関係
 

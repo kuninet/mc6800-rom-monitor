@@ -35,7 +35,9 @@ Issue は、実装・レビュー・テストが独立して判断できる単�
 - 低層 I/O、ファイル形式、コマンド統合、実機確認は分ける。
 - バグ修正は機能追加から分ける。たとえば `CMD_RESUME` 修正は SD/FAT 実装とは別 Issue にする。
 - 受け入れ条件は「動くこと」ではなく、入力、期待出力、確認方法が分かる形にする。
-- 親 Issue を使う場合でも、サブ Issue の PR から親 Issue を自動 close しない。本文では `Refs #番号` を使う。
+- 親 Issue を使う場合は、本文の `Refs #番号` だけで済ませず、GitHub の sub-issue として正式に紐づける。
+- GitHub CLI に sub-issue 専用サブコマンドがない場合は、GraphQL の `addSubIssue` mutation を使って親子関係を作る。
+- サブ Issue の PR から親 Issue を自動 close しない。サブ Issue のPRは自身のIssueを `Closes #番号`、親 Issue は `Refs #番号` と sub-issue ツリーで束ねる。
 - PoC や調査ブランチを main に直接統合しない。取り込む場合は、必要な変更を小さい Issue/PR に分け直す。
 
 ## Issue 単位の計画文書
@@ -46,6 +48,20 @@ Issue は、実装・レビュー・テストが独立して判断できる単�
 - `docs/plans/` には Issue 本文の丸写しではなく、実装前に確認した事実、採用した判断、対象外、検証方針を残す。
 - PoC の評価、既存実装の確認、修正しない判断など、後続作業で誤解されやすい内容は計画文書に明記する。
 - 小さな自明修正では計画文書を省略してよいが、SD/FAT関連やデバッグ機能のように後続Issueへ影響する作業では原則として残す。
+
+## 機能追加時のビルド構成確認
+
+SD、VDG、2nd ACIAキーボード、I2Cなど、メモリ配置や外部I/F装備に依存する機能を追加または変更する場合は、計画時に [build_configuration_axes.md](build_configuration_axes.md) を参照する。
+`MONITOR_PROFILE` は完成品プリセットとして扱い、profile名だけで設計を閉じない。
+
+Issue計画には、必要に応じて次を明記する。
+
+- `MEMORY_CONFIG` と、RAM、ワークRAM、スタック、SD/FATワーク、VRAMの配置。
+- `BOARD_IO` と、必要なI/Oアドレスや外部基板。
+- `FEATURE_SD`、`FEATURE_VDG`、`FEATURE_KEYBOARD`、`FEATURE_I2C` などの有効/無効。
+- 機能間の依存関係。特にSBC-IOが必要な機能と、SBC-IOとは独立した機能を分ける。
+- 非対応profileで実行時に `?` を返すだけでよいか、条件アセンブルでROMから除外するか。
+- `MAP`、`H`、smoke test、SD fixture test、実機確認手順への影響。
 
 ## PR の作り方
 
@@ -69,13 +85,25 @@ PR 作成前に、差分へ不要ファイルが入っていないことを確�
 
 ## テスト方針
 
-PR 作成前に、原則として次を実行する。
+コード変更後と PR 作成前は、**必ず全テストを実行する**。一発で済む正規手順は `make test`。
+ドキュメントのみの変更では `make test` を省略してよい。その場合は PR 本文に「ドキュメントのみのためテスト省略」と明記する。
 
-```powershell
-make bin
-$env:REQUIRE_BUILD_ROM='1'
-python tests/test_smoke.py
+```sh
+make test
 ```
+
+`make test` は次をまとめて行う。CI `.github/workflows/windows-emu.yml` は Windows 上の smoke subset であり、`make test` 全体とは範囲が異なる。
+
+- 前提ROMを先にビルド: `make bin MONITOR_PROFILE=base` と `make bin MONITOR_PROFILE=sbcio`
+- エミュレータテスト(`REQUIRE_BUILD_ROM=1`、base と sbcio 両構成): `tests/test_smoke.py` / `tests/test_sd_fixture.py`
+- ビルド系テスト: `tests/test_sdfs68_build.py` / `tests/test_stage1_build.py` / `tests/test_mk_sdfs_image.py`
+
+注意点:
+
+- テストは pytest ではなく**スクリプト直実行**(各 `tests/test_*.py` を `python3` で実行)。
+- エミュテストは最新ビルドのROM/listを使うため、**先に base profile をビルドしないと**「build output missing」で**環境失敗**する(回帰ではない)。`make test` はこれを自動で満たす。
+- 個別実行例: `REQUIRE_BUILD_ROM=1 python3 tests/test_smoke.py`(事前に `make bin` 必須)。
+- Windows は `make` を使わず CI と同じ PowerShell 手順(`$env:REQUIRE_BUILD_ROM='1'` など)でもよい。
 
 実装で既存 smoke test にない振る舞いを追加・変更した場合は、対応するテストを追加する。
 
@@ -85,6 +113,7 @@ python tests/test_smoke.py
 - 実機でしか確認できない内容は、手順と確認結果を `docs/testing/` または `docs/progress/` に残す。
 
 CI では `REQUIRE_BUILD_ROM=1` を使い、最新ソースから生成した `build/mc6800-monitor.bin` を検証する。fixture はローカル補助用であり、最新ソースの確認には使わない。
+CI もドキュメント、Markdown、Issue/PRテンプレートのみの変更では起動しない。
 
 ## レビュー運用
 

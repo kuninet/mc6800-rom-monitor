@@ -43,6 +43,12 @@ OUTEEE:
 MONITOR_ENTRY:
         lds     #STACK_TOP
         jsr     ACIA_INIT
+ if MONITOR_FEATURE_KEYBOARD
+        ldaa    #MONITOR_FEATURE_KEYBOARD
+        beq     MONITOR_ENTRY_NO_KEYBOARD
+        jsr     ACIA2_INIT
+MONITOR_ENTRY_NO_KEYBOARD:
+ endif
         jmp     MAIN_LOOP
 
 RESET:
@@ -52,6 +58,16 @@ RESET:
         clr     BP_ACTIVE
         clr     BRK_ACTIVE
         jsr     ACIA_INIT
+ if MONITOR_FEATURE_KEYBOARD
+        ldaa    #MONITOR_FEATURE_KEYBOARD
+        beq     RESET_NO_KEYBOARD
+        jsr     ACIA2_INIT
+RESET_NO_KEYBOARD:
+ endif
+ if MONITOR_FEATURE_VDG
+        clr     ACIA_TX_WAIT
+        jsr     VDG_INIT
+ endif
         ldx     #TXT_WELCOME
         jsr     PDATA1
         ldaa    #CHR_CR
@@ -66,10 +82,18 @@ MAIN_LOOP:
         ldaa    LINE_BUF
         cmpa    #'D'
         bne     CHK_CMD_MOD
+ if MONITOR_FEATURE_VDG
+        jsr     IS_CMD_DS
+        bcs     MAIN_DISPATCH_NOT_DS
+        jmp     CMD_DUMP_SHORT
+MAIN_DISPATCH_NOT_DS:
+ endif
+ if MONITOR_FEATURE_FAT
         jsr     IS_CMD_DIR
         bcs     MAIN_DISPATCH_DUMP
         jmp     CMD_DIR
 MAIN_DISPATCH_DUMP:
+ endif
         jmp     CMD_DUMP
 CHK_CMD_MOD:
         cmpa    #'M'
@@ -90,18 +114,48 @@ CHK_CMD_LOAD:
 CHK_CMD_BREAK:
         cmpa    #'B'
         bne     CHK_CMD_RESUME
+ if MONITOR_FEATURE_SD
+ if S1_SUPPORTED
+        jsr     IS_CMD_BOOT
+        bcc     MAIN_DISPATCH_BOOT
+        jsr     IS_CMD_BOOT3
+        bcs     MAIN_DISPATCH_BREAK
+        jmp     CMD_BOOT3
+MAIN_DISPATCH_BOOT:
+        jmp     CMD_BOOT
+MAIN_DISPATCH_BREAK:
+ endif
+ endif
         jmp     CMD_BREAK_SET
 CHK_CMD_RESUME:
         cmpa    #'R'
         bne     CHK_CMD_CLEAR
+        jsr     IS_CMD_RAMTEST
+        bcs     MAIN_DISPATCH_RESUME
+        jmp     CMD_RAMTEST
+MAIN_DISPATCH_RESUME:
         jmp     CMD_RESUME
 CHK_CMD_CLEAR:
         cmpa    #'C'
         bne     CHK_CMD_UNASM
+ if MONITOR_FEATURE_SD
+ if S1_SUPPORTED
+        jsr     IS_CMD_CMD
+        bcs     MAIN_DISPATCH_CLEAR
+        jmp     CMD_SDFS3
+MAIN_DISPATCH_CLEAR:
+ endif
+ endif
         jmp     CMD_BREAK_CLEAR
 CHK_CMD_UNASM:
         cmpa    #'U'
         bne     CHK_CMD_HELP
+ if MONITOR_FEATURE_VDG
+        jsr     IS_CMD_UW
+        bcs     MAIN_DISPATCH_UNASM
+        jmp     CMD_UART_WAIT
+MAIN_DISPATCH_UNASM:
+ endif
         jmp     CMD_UNASM
 CHK_CMD_HELP:
         cmpa    #'H'
@@ -109,13 +163,16 @@ CHK_CMD_HELP:
         jmp     CMD_HELP
 CHK_CMD_FILL:
         cmpa    #'F'
-        bne     MAIN_LOOP_ERROR
+        bne     CHK_CMD_AFTER_FILL
         jmp     CMD_FILL
+CHK_CMD_AFTER_FILL:
+        jmp     MAIN_LOOP_ERROR
 
 MAIN_LOOP_ERROR:
         jsr     SHOW_ERROR
-        bra     MAIN_LOOP
+        jmp     MAIN_LOOP
 
+ if MONITOR_FEATURE_FAT
 IS_CMD_DIR:
         ldab    LINE_LEN
         cmpb    #3
@@ -131,6 +188,35 @@ IS_CMD_DIR:
 IS_CMD_DIR_FAIL:
         sec
         rts
+ endif
+
+ if MONITOR_FEATURE_VDG
+IS_CMD_DS:
+        ldab    LINE_LEN
+        cmpb    #2
+        blo     IS_CMD_DS_FAIL
+        ldaa    LINE_BUF+1
+        cmpa    #'S'
+        bne     IS_CMD_DS_FAIL
+        clc
+        rts
+IS_CMD_DS_FAIL:
+        sec
+        rts
+
+IS_CMD_UW:
+        ldab    LINE_LEN
+        cmpb    #2
+        blo     IS_CMD_UW_FAIL
+        ldaa    LINE_BUF+1
+        cmpa    #'W'
+        bne     IS_CMD_UW_FAIL
+        clc
+        rts
+IS_CMD_UW_FAIL:
+        sec
+        rts
+ endif
 
 IS_CMD_MAP:
         ldab    LINE_LEN
@@ -148,6 +234,106 @@ IS_CMD_MAP_FAIL:
         sec
         rts
 
+IS_CMD_RAMTEST:
+        ldab    LINE_LEN
+        cmpb    #17
+        bne     IS_CMD_RAMTEST_FAIL
+        ldx     #LINE_BUF
+        ldaa    0,x
+        cmpa    #'R'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    1,x
+        cmpa    #'A'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    2,x
+        cmpa    #'M'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    3,x
+        cmpa    #'T'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    4,x
+        cmpa    #'E'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    5,x
+        cmpa    #'S'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    6,x
+        cmpa    #'T'
+        bne     IS_CMD_RAMTEST_FAIL
+        ldaa    7,x
+        cmpa    #CHR_SPACE
+        bne     IS_CMD_RAMTEST_FAIL
+        clc
+        rts
+IS_CMD_RAMTEST_FAIL:
+        sec
+        rts
+
+ if MONITOR_FEATURE_SD
+ if S1_SUPPORTED
+IS_CMD_BOOT:
+        ldab    LINE_LEN
+        cmpb    #4
+        bne     IS_CMD_BOOT_FAIL
+        ldaa    LINE_BUF+1
+        cmpa    #'O'
+        bne     IS_CMD_BOOT_FAIL
+        ldaa    LINE_BUF+2
+        cmpa    #'O'
+        bne     IS_CMD_BOOT_FAIL
+        ldaa    LINE_BUF+3
+        cmpa    #'T'
+        bne     IS_CMD_BOOT_FAIL
+        clc
+        rts
+IS_CMD_BOOT_FAIL:
+        sec
+        rts
+
+IS_CMD_BOOT3:
+        ldab    LINE_LEN
+        cmpb    #5
+        bne     IS_CMD_BOOT3_FAIL
+        ldaa    LINE_BUF+1
+        cmpa    #'O'
+        bne     IS_CMD_BOOT3_FAIL
+        ldaa    LINE_BUF+2
+        cmpa    #'O'
+        bne     IS_CMD_BOOT3_FAIL
+        ldaa    LINE_BUF+3
+        cmpa    #'T'
+        bne     IS_CMD_BOOT3_FAIL
+        ldaa    LINE_BUF+4
+        cmpa    #'3'
+        bne     IS_CMD_BOOT3_FAIL
+        clc
+        rts
+IS_CMD_BOOT3_FAIL:
+        sec
+        rts
+
+IS_CMD_CMD:
+        ldab    LINE_LEN
+        cmpb    #4
+        blo     IS_CMD_CMD_FAIL
+        ldaa    LINE_BUF+1
+        cmpa    #'M'
+        bne     IS_CMD_CMD_FAIL
+        ldaa    LINE_BUF+2
+        cmpa    #'D'
+        bne     IS_CMD_CMD_FAIL
+        ldaa    LINE_BUF+3
+        cmpa    #CHR_SPACE
+        bne     IS_CMD_CMD_FAIL
+IS_CMD_CMD_OK:
+        clc
+        rts
+IS_CMD_CMD_FAIL:
+        sec
+        rts
+ endif
+ endif
+
 CMD_DUMP:
         ldab    LINE_LEN
         cmpb    #1
@@ -160,13 +346,35 @@ CMD_DUMP_NOARG:
         stx     DUMP_END
         jsr     SET_DUMP_END_64
 CMD_DUMP_SHOW:
+        ldab    #16
+        stab    ARG2_LEN
         jsr     DUMP_RANGE
         jmp     MAIN_LOOP
+
+ if MONITOR_FEATURE_VDG
+CMD_DUMP_SHORT:
+        ldab    LINE_LEN
+        cmpb    #2
+        beq     CMD_DUMP_SHORT_NOARG
+        jsr     PARSE_DUMP_SHORT_ARGS
+        bcc     CMD_DUMP_SHORT_SHOW
+        jmp     MAIN_LOOP_ERROR
+CMD_DUMP_SHORT_NOARG:
+        ldx     DUMP_ADDR
+        stx     DUMP_END
+        jsr     SET_DUMP_END_64
+CMD_DUMP_SHORT_SHOW:
+        ldab    #8
+        stab    ARG2_LEN
+        jsr     DUMP_RANGE
+        jmp     MAIN_LOOP
+ endif
 
 DUMP_RANGE:
         ldx     DUMP_ADDR
         jsr     CMP_X_DUMP_END
-        bhi     DUMP_RANGE_DONE
+        bls     DUMP_RANGE_LINE
+        rts
 DUMP_RANGE_LINE:
         ldx     DUMP_ADDR
         stx     LINE_PTR
@@ -176,7 +384,7 @@ DUMP_COUNT_LOOP:
         jsr     CMP_X_DUMP_END
         bhi     DUMP_COUNT_DONE
         ldab    DUMP_COUNT
-        cmpb    #16
+        cmpb    ARG2_LEN
         bhs     DUMP_COUNT_DONE
         inc     DUMP_COUNT
         ldx     DUMP_ADDR
@@ -203,6 +411,9 @@ CMD_DUMP_HEX_LOOP:
         bra     CMD_DUMP_HEX_LOOP
 CMD_DUMP_HEX_DONE:
 
+        ldab    ARG2_LEN
+        cmpb    #16
+        bne     CMD_DUMP_ASCII_DONE
         jsr     PRINT_SPACE
 
         ldx     LINE_PTR
@@ -219,7 +430,7 @@ CMD_DUMP_ASCII_LOOP:
 CMD_DUMP_ASCII_DOT:
         ldaa    #'.'
 CMD_DUMP_ASCII_PUTC:
-        jsr     ACIA_PUTC
+        jsr     MON_OUTEEE
         inx
         decb
         bra     CMD_DUMP_ASCII_LOOP
@@ -231,7 +442,8 @@ CMD_DUMP_ASCII_DONE:
         beq     DUMP_RANGE_DONE
         ldx     DUMP_ADDR
         jsr     CMP_X_DUMP_END
-        bls     DUMP_RANGE_LINE
+        bhi     DUMP_RANGE_DONE
+        jmp     DUMP_RANGE_LINE
 DUMP_RANGE_DONE:
         rts
 
@@ -241,6 +453,7 @@ PARSE_DUMP_ARGS:
         ldab    LINE_LEN
         decb
         stab    ARG_LEN
+PARSE_DUMP_ARGS_READY:
         clr     ARG2_LEN
 PARSE_DUMP_SCAN:
         tstb
@@ -314,6 +527,17 @@ PARSE_DUMP_RANGE:
 PARSE_DUMP_FAIL:
         sec
         rts
+
+ if MONITOR_FEATURE_VDG
+PARSE_DUMP_SHORT_ARGS:
+        ldx     #LINE_BUF+2
+        stx     ARG_PTR
+        ldab    LINE_LEN
+        decb
+        decb
+        stab    ARG_LEN
+        jmp     PARSE_DUMP_ARGS_READY
+ endif
 
 PARSE_FILL_ARGS:
         stx     ARG_PTR
@@ -412,6 +636,7 @@ PARSE_FILL_FAIL:
         sec
         rts
 
+ if MONITOR_FEATURE_FAT
 PARSE_FILENAME_83:
         stx     ARG_PTR
         stab    ARG_LEN
@@ -634,6 +859,7 @@ CMD_DIR_EXT_SCAN:
 CMD_DIR_EXT_YES:
         clc
         rts
+ endif
 
 CMP_X_DUMP_END:
         stx     HEX_VALUE_HI
@@ -663,7 +889,7 @@ CMD_MOD_LOOP:
         ldx     MOD_ADDR
         jsr     PRINT_HEX16
         ldaa    #':'
-        jsr     ACIA_PUTC
+        jsr     MON_OUTEEE
         jsr     PRINT_SPACE
 
         ldx     MOD_ADDR
@@ -671,7 +897,7 @@ CMD_MOD_LOOP:
         jsr     PRINT_HEX8
         jsr     PRINT_SPACE
         ldaa    #'-'
-        jsr     ACIA_PUTC
+        jsr     MON_OUTEEE
         jsr     PRINT_SPACE
 
         jsr     READ_LINE
@@ -824,6 +1050,61 @@ RESTORE_BREAKPOINT:
         clr     BP_ACTIVE
         rts
 
+ if MONITOR_FEATURE_VDG
+CMD_UART_WAIT:
+        ldab    LINE_LEN
+        cmpb    #2
+        beq     CMD_UART_WAIT_SHOW
+        cmpb    #5
+        beq     CMD_UART_WAIT_ON
+        cmpb    #6
+        beq     CMD_UART_WAIT_OFF
+        jmp     MAIN_LOOP_ERROR
+CMD_UART_WAIT_ON:
+        ldaa    LINE_BUF+2
+        cmpa    #CHR_SPACE
+        bne     CMD_UART_WAIT_ERR
+        ldaa    LINE_BUF+3
+        cmpa    #'O'
+        bne     CMD_UART_WAIT_ERR
+        ldaa    LINE_BUF+4
+        cmpa    #'N'
+        bne     CMD_UART_WAIT_ERR
+        ldaa    #1
+        staa    ACIA_TX_WAIT
+        bra     CMD_UART_WAIT_SHOW
+CMD_UART_WAIT_OFF:
+        ldaa    LINE_BUF+2
+        cmpa    #CHR_SPACE
+        bne     CMD_UART_WAIT_ERR
+        ldaa    LINE_BUF+3
+        cmpa    #'O'
+        bne     CMD_UART_WAIT_ERR
+        ldaa    LINE_BUF+4
+        cmpa    #'F'
+        bne     CMD_UART_WAIT_ERR
+        ldaa    LINE_BUF+5
+        cmpa    #'F'
+        bne     CMD_UART_WAIT_ERR
+        clr     ACIA_TX_WAIT
+        bra     CMD_UART_WAIT_SHOW
+CMD_UART_WAIT_ERR:
+        jmp     MAIN_LOOP_ERROR
+CMD_UART_WAIT_SHOW:
+        ldx     #TXT_UW
+        jsr     PDATA1
+        tst     ACIA_TX_WAIT
+        beq     CMD_UART_WAIT_SHOW_OFF
+        ldx     #TXT_ON
+        bra     CMD_UART_WAIT_SHOW_DONE
+CMD_UART_WAIT_SHOW_OFF:
+        ldx     #TXT_OFF
+CMD_UART_WAIT_SHOW_DONE:
+        jsr     PDATA1
+        jsr     PRINT_CRLF
+        jmp     MAIN_LOOP
+ endif
+
 CMD_UNASM:
         ldab    LINE_LEN
         cmpb    #1
@@ -860,39 +1141,120 @@ CMD_HELP_ERR:
         jmp     MAIN_LOOP_ERROR
 
 CMD_MAP:
-        ldaa    #MONITOR_PROFILE_SBCIO
-        beq     CMD_MAP_BASE
+ if MONITOR_PROFILE_K6802_VDG
+        ldx     #TXT_MAP_K6802_VDG
+ else
+ if MONITOR_PROFILE_K6802_4000
+        ldx     #TXT_MAP_K6802_4000
+ else
+ if MONITOR_PROFILE_SBCIO_4000
+        ldx     #TXT_MAP_SBCIO_4000
+ else
+ if MONITOR_PROFILE_SBCIO
+ if MONITOR_FEATURE_VDG
+        ldx     #TXT_MAP_SBCIO_VDG
+ else
         ldx     #TXT_MAP_SBCIO
-        jsr     MAP_PRINT_LINE
-        ldx     #TXT_MAP_SBCIO_RAM
-        jsr     MAP_PRINT_LINE
-        ldx     #TXT_MAP_SBCIO_USER
-        jsr     MAP_PRINT_LINE
-        ldx     #TXT_MAP_SBCIO_WORK
-        jsr     MAP_PRINT_LINE
-        ldx     #TXT_MAP_SBCIO_SD
-        jsr     MAP_PRINT_LINE
-        ldx     #TXT_MAP_SBCIO_MON
-        jsr     MAP_PRINT_LINE
-        bra     CMD_MAP_COMMON
-CMD_MAP_BASE:
+ endif
+ else
         ldx     #TXT_MAP_BASE
+ endif
+ endif
+ endif
+ endif
         jsr     MAP_PRINT_LINE
+
+ if BUILD_MEMORY_CONFIG_BASE8K
         ldx     #TXT_MAP_BASE_RAM
         jsr     MAP_PRINT_LINE
         ldx     #TXT_MAP_BASE_USER
         jsr     MAP_PRINT_LINE
         ldx     #TXT_MAP_BASE_WORK
         jsr     MAP_PRINT_LINE
+ if MONITOR_FEATURE_SD
         ldx     #TXT_MAP_BASE_SD
         jsr     MAP_PRINT_LINE
+ endif
         ldx     #TXT_MAP_BASE_MON
         jsr     MAP_PRINT_LINE
-CMD_MAP_COMMON:
-        ldx     #TXT_MAP_MIK
+        ldx     #TXT_MAP_BASE_MIK
         jsr     MAP_PRINT_LINE
-        ldx     #TXT_MAP_STK
+        ldx     #TXT_MAP_BASE_STK
         jsr     MAP_PRINT_LINE
+ endif
+
+ if BUILD_MEMORY_CONFIG_RAM64_C000_WORK
+        ldx     #TXT_MAP_SBCIO_RAM
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_SBCIO_USER
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_SBCIO_WORK
+        jsr     MAP_PRINT_LINE
+ if MONITOR_FEATURE_SD
+        ldx     #TXT_MAP_SBCIO_SD
+        jsr     MAP_PRINT_LINE
+ endif
+        ldx     #TXT_MAP_SBCIO_MON
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_SBCIO_MIK
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_SBCIO_STK
+        jsr     MAP_PRINT_LINE
+ endif
+
+ if BUILD_MEMORY_CONFIG_RAM64_A000_WORK
+        ldx     #TXT_MAP_SBCIO_RAM
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_SBCIO_USER
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_K6802_WORK
+        jsr     MAP_PRINT_LINE
+ if MONITOR_FEATURE_SD
+        ldx     #TXT_MAP_K6802_SD
+        jsr     MAP_PRINT_LINE
+ endif
+        ldx     #TXT_MAP_K6802_MON
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_K6802_MIK
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_K6802_STK
+        jsr     MAP_PRINT_LINE
+ endif
+
+ if BUILD_MEMORY_CONFIG_RAM64_4000_WORK
+        ldx     #TXT_MAP_RAM64_4000_RAM
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_RAM64_4000_USER
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_RAM64_4000_WORK
+        jsr     MAP_PRINT_LINE
+ if MONITOR_FEATURE_SD
+         ldx     #TXT_MAP_RAM64_4000_SD
+         jsr     MAP_PRINT_LINE
+ endif
+        ldx     #TXT_MAP_RAM64_4000_MON
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_RAM64_4000_MIK
+        jsr     MAP_PRINT_LINE
+        ldx     #TXT_MAP_RAM64_4000_STK
+        jsr     MAP_PRINT_LINE
+ endif
+
+ if MONITOR_FEATURE_VDG
+ if BUILD_VDG_VRAM_C000
+        ldx     #TXT_MAP_K6802_VRAM
+        jsr     MAP_PRINT_LINE
+ else
+        ldx     #TXT_MAP_VDG_VRAM
+        jsr     MAP_PRINT_LINE
+ endif
+        ldx     #TXT_MAP_VDG_CTL
+        jsr     MAP_PRINT_LINE
+ endif
+ if MONITOR_FEATURE_KEYBOARD
+        ldx     #TXT_MAP_KEYBOARD
+        jsr     MAP_PRINT_LINE
+ endif
         ldx     #TXT_MAP_ROM
         jsr     MAP_PRINT_LINE
         jmp     MAIN_LOOP
@@ -900,6 +1262,162 @@ CMD_MAP_COMMON:
 MAP_PRINT_LINE:
         jsr     PDATA1
         jsr     PRINT_CRLF
+        rts
+
+CMD_RAMTEST:
+        jsr     PARSE_RAMTEST_ARGS
+        bcs     CMD_RAMTEST_ERR
+        jsr     RAMTEST_VALIDATE_RANGE
+        bcs     CMD_RAMTEST_ERR
+        ldx     #TXT_RAMTEST_PREFIX
+        jsr     PDATA1
+        ldx     DUMP_ADDR
+        jsr     PRINT_HEX16
+        ldaa    #'-'
+        jsr     MON_OUTEEE
+        ldx     DUMP_END
+        jsr     PRINT_HEX16
+        jsr     PRINT_CRLF
+        ldx     DUMP_END
+        stx     RAMTEST_END_SAFE
+        tsx
+        dex
+        stx     RAMTEST_SP_SAFE
+        lds     #RAMTEST_STACK_TOP
+        jsr     RAMTEST_RANGE
+        lds     RAMTEST_SP_SAFE
+CMD_RAMTEST_RESULT:
+        bcs     CMD_RAMTEST_FAIL
+        ldx     #TXT_OK
+        jsr     MAP_PRINT_LINE
+        jmp     MAIN_LOOP
+CMD_RAMTEST_FAIL:
+        stx     HEX_VALUE_HI
+        ldx     #TXT_RAMTEST_NG
+        jsr     PDATA1
+        ldx     HEX_VALUE_HI
+        jsr     PRINT_HEX16
+        jsr     PRINT_CRLF
+        jmp     MAIN_LOOP
+CMD_RAMTEST_ERR:
+        jmp     MAIN_LOOP_ERROR
+
+PARSE_RAMTEST_ARGS:
+        ldaa    LINE_BUF+12
+        cmpa    #'-'
+        bne     PARSE_RAMTEST_FAIL
+        ldx     #LINE_BUF+8
+        ldab    #4
+        jsr     PARSE_HEX
+        bcs     PARSE_RAMTEST_FAIL
+        ldx     HEX_VALUE_HI
+        stx     DUMP_ADDR
+        ldx     #LINE_BUF+13
+        ldab    #4
+        jsr     PARSE_HEX
+        bcs     PARSE_RAMTEST_FAIL
+        ldx     HEX_VALUE_HI
+        stx     DUMP_END
+        ldx     DUMP_ADDR
+        jsr     CMP_X_DUMP_END
+        bhi     PARSE_RAMTEST_FAIL
+        clc
+        rts
+PARSE_RAMTEST_FAIL:
+        sec
+        rts
+
+RAMTEST_VALIDATE_RANGE:
+        ldaa    #RAMTEST1_ENABLED
+        beq     RAMTEST_VALIDATE_REGION2
+        ldx     #RAMTEST1_START
+        stx     RAMTEST_END_SAFE
+        ldx     DUMP_ADDR
+        jsr     CMP_X_RAMTEST_SAFE
+        blo     RAMTEST_VALIDATE_REGION2
+        ldx     #RAMTEST1_END
+        stx     RAMTEST_END_SAFE
+        ldx     DUMP_END
+        jsr     CMP_X_RAMTEST_SAFE
+        bls     RAMTEST_VALIDATE_OK
+RAMTEST_VALIDATE_REGION2:
+        ldaa    #RAMTEST2_ENABLED
+        beq     RAMTEST_VALIDATE_REGION3
+        ldx     #RAMTEST2_START
+        stx     RAMTEST_END_SAFE
+        ldx     DUMP_ADDR
+        jsr     CMP_X_RAMTEST_SAFE
+        blo     RAMTEST_VALIDATE_REGION3
+        ldx     #RAMTEST2_END
+        stx     RAMTEST_END_SAFE
+        ldx     DUMP_END
+        jsr     CMP_X_RAMTEST_SAFE
+        bls     RAMTEST_VALIDATE_OK
+RAMTEST_VALIDATE_REGION3:
+        ldaa    #RAMTEST3_ENABLED
+        beq     RAMTEST_VALIDATE_FAIL
+        ldx     #RAMTEST3_START
+        stx     RAMTEST_END_SAFE
+        ldx     DUMP_ADDR
+        jsr     CMP_X_RAMTEST_SAFE
+        blo     RAMTEST_VALIDATE_FAIL
+        ldx     #RAMTEST3_END
+        stx     RAMTEST_END_SAFE
+        ldx     DUMP_END
+        jsr     CMP_X_RAMTEST_SAFE
+        bls     RAMTEST_VALIDATE_OK
+RAMTEST_VALIDATE_FAIL:
+        sec
+        rts
+RAMTEST_VALIDATE_OK:
+        clc
+        rts
+
+RAMTEST_RANGE:
+        ldx     DUMP_ADDR
+RAMTEST_RANGE_LOOP:
+        jsr     RAMTEST_ONE_BYTE
+        bcs     RAMTEST_RANGE_FAIL
+        cpx     RAMTEST_END_SAFE
+        beq     RAMTEST_RANGE_OK
+        inx
+        bra     RAMTEST_RANGE_LOOP
+
+RAMTEST_ONE_BYTE:
+        ldaa    0,x
+        psha
+        ldaa    #$55
+        staa    0,x
+        cmpa    0,x
+        bne     RAMTEST_FAIL
+        ldaa    #$AA
+        staa    0,x
+        cmpa    0,x
+        bne     RAMTEST_FAIL
+        pula
+        staa    0,x
+        clc
+        rts
+RAMTEST_FAIL:
+        pula
+        staa    0,x
+        sec
+        rts
+RAMTEST_RANGE_OK:
+        clc
+        rts
+RAMTEST_RANGE_FAIL:
+        sec
+        rts
+
+CMP_X_RAMTEST_SAFE:
+        stx     RAMTEST_CMP_SAFE
+        ldaa    RAMTEST_CMP_SAFE
+        cmpa    RAMTEST_END_SAFE
+        bne     CMP_X_RAMTEST_SAFE_DONE
+        ldaa    RAMTEST_CMP_SAFE+1
+        cmpa    RAMTEST_END_SAFE+1
+CMP_X_RAMTEST_SAFE_DONE:
         rts
 
 CMD_FILL:
@@ -923,6 +1441,159 @@ CMD_FILL_DONE:
         jmp     MAIN_LOOP
 CMD_FILL_ERR:
         jmp     MAIN_LOOP_ERROR
+
+ if MONITOR_FEATURE_VDG
+VDG_INIT:
+        ldaa    #VDG_MODE
+        staa    VDG_CTL
+        jsr     VDG_CLEAR
+        ldx     #VDG_VRAM_START
+        stx     VDG_CURSOR
+        ldaa    #$60
+        staa    VDG_CURSOR_CHAR
+        clr     VDG_LAST_CR
+        jsr     VDG_DRAW_CURSOR
+        rts
+
+VDG_CLEAR:
+        ldx     #VDG_VRAM_START
+VDG_CLEAR_LOOP:
+        ldaa    #$60
+        staa    0,x
+        cpx     #VDG_TEXT_END
+        beq     VDG_CLEAR_DONE
+        inx
+        bra     VDG_CLEAR_LOOP
+VDG_CLEAR_DONE:
+        rts
+
+VDG_PUTC:
+        cmpa    #CHR_LF
+        beq     VDG_PUTC_ENTER
+        cmpa    #CHR_CR
+        beq     VDG_PUTC_ENTER
+        cmpa    #CHR_BS
+        beq     VDG_PUTC_ENTER
+        cmpa    #CHR_SPACE
+        bhs     VDG_PUTC_ENTER
+        rts
+VDG_PUTC_ENTER:
+        psha
+        pshb
+        stx     VDG_SAVE_X
+        tab
+        jsr     VDG_UNDRAW_CURSOR
+        tba
+        cmpa    #CHR_LF
+        beq     VDG_PUTC_LF
+        cmpa    #CHR_CR
+        beq     VDG_PUTC_CR
+        cmpa    #CHR_BS
+        beq     VDG_PUTC_BS
+        cmpa    #CHR_DEL
+        beq     VDG_PUTC_BS
+        clr     VDG_LAST_CR
+        jsr     VDG_ASCII_TO_CHAR
+        ldx     VDG_CURSOR
+        staa    0,x
+        inx
+        stx     VDG_CURSOR
+        jsr     VDG_CHECK_CURSOR
+        bra     VDG_PUTC_DONE
+VDG_PUTC_LF:
+        tst     VDG_LAST_CR
+        beq     VDG_PUTC_LF_NEWLINE
+        clr     VDG_LAST_CR
+        bra     VDG_PUTC_DONE
+VDG_PUTC_LF_NEWLINE:
+        jsr     VDG_NEWLINE
+        bra     VDG_PUTC_DONE
+VDG_PUTC_CR:
+        tst     VDG_LAST_CR
+        bne     VDG_PUTC_DONE
+        jsr     VDG_NEWLINE
+        ldaa    #1
+        staa    VDG_LAST_CR
+        bra     VDG_PUTC_DONE
+VDG_PUTC_BS:
+        clr     VDG_LAST_CR
+        ldx     VDG_CURSOR
+        cpx     #VDG_VRAM_START
+        beq     VDG_PUTC_DONE
+        dex
+        stx     VDG_CURSOR
+        ldaa    #$60
+        staa    0,x
+VDG_PUTC_DONE:
+        jsr     VDG_DRAW_CURSOR
+        ldx     VDG_SAVE_X
+        pulb
+        pula
+        rts
+
+VDG_NEWLINE:
+        ldx     VDG_CURSOR
+VDG_NEWLINE_LOOP:
+        inx
+        stx     VDG_CURSOR
+        ldaa    VDG_CURSOR+1
+        anda    #$1F
+        bne     VDG_NEWLINE_LOOP
+        jsr     VDG_CHECK_CURSOR
+        rts
+
+VDG_CHECK_CURSOR:
+        ldx     VDG_CURSOR
+        cpx     #VDG_TEXT_END+1
+        bne     VDG_CHECK_CURSOR_DONE
+        jsr     VDG_SCROLL
+VDG_CHECK_CURSOR_DONE:
+        rts
+
+VDG_SCROLL:
+        ldx     #VDG_VRAM_START
+VDG_SCROLL_COPY:
+        ldaa    $20,x
+        staa    0,x
+        cpx     #VDG_TEXT_END-$20
+        beq     VDG_SCROLL_CLEAR
+        inx
+        bra     VDG_SCROLL_COPY
+VDG_SCROLL_CLEAR:
+        ldx     #VDG_TEXT_END-$1F
+VDG_SCROLL_CLEAR_LOOP:
+        ldaa    #$60
+        staa    0,x
+        cpx     #VDG_TEXT_END
+        beq     VDG_SCROLL_DONE
+        inx
+        bra     VDG_SCROLL_CLEAR_LOOP
+VDG_SCROLL_DONE:
+        ldx     #VDG_TEXT_END-$1F
+        stx     VDG_CURSOR
+        rts
+
+VDG_UNDRAW_CURSOR:
+        ldx     VDG_CURSOR
+        ldaa    VDG_CURSOR_CHAR
+        staa    0,x
+        rts
+
+VDG_DRAW_CURSOR:
+        ldx     VDG_CURSOR
+        ldaa    0,x
+        staa    VDG_CURSOR_CHAR
+        ldaa    #$20
+        staa    0,x
+        rts
+
+VDG_ASCII_TO_CHAR:
+        cmpa    #$40
+        bhs     VDG_ASCII_TO_CHAR_DONE
+        adda    #$40
+VDG_ASCII_TO_CHAR_DONE:
+        rts
+ endif
 
 CMD_LOAD:
         ldab    LINE_LEN
@@ -962,13 +1633,16 @@ CMD_LOAD_BADARG:
         jmp     MAIN_LOOP_ERROR
 
 CMD_LOAD_EXTENDED:
+ if MONITOR_FEATURE_FAT
         ldaa    LINE_BUF+1
         cmpa    #'F'
         beq     CMD_LF
         cmpa    #'f'
         beq     CMD_LF
+ endif
         jmp     CMD_LOAD_BADARG
 
+ if MONITOR_FEATURE_FAT
 CMD_LF:
         ldab    LINE_LEN
         subb    #2
@@ -989,7 +1663,509 @@ CMD_LF:
         bra     CMD_LOAD_LOOP
 CMD_LF_ERROR:
         jmp     MAIN_LOOP_ERROR
+ endif
 
+ if MONITOR_FEATURE_SD
+ if S1_SUPPORTED
+S1_BOOT_SECTORS equ (S1_LIMIT-S1_BASE+1)/$0200
+S1_BOOT_MAX_HI  equ (S1_LIMIT-S1_BASE+1)/$0100
+S1_BOOT_MAX_LO  equ 0
+
+CMD_BOOT:
+        jsr     SD_INIT
+        bcs     CMD_BOOT_ERROR
+        jsr     BOOT_SET_LBA16
+        ldx     #S1_BASE
+        stx     FAT_READ_PTR
+        ldaa    #S1_BOOT_SECTORS
+        staa    FAT_TMP
+CMD_BOOT_READ_LOOP:
+        ldx     FAT_READ_PTR
+        jsr     SD_READ_SECTOR
+        bcs     CMD_BOOT_ERROR
+        dec     FAT_TMP
+        beq     CMD_BOOT_CHECK
+        ldaa    FAT_READ_PTR
+        adda    #$02
+        staa    FAT_READ_PTR
+        jsr     BOOT_INC_SD_LBA
+        bra     CMD_BOOT_READ_LOOP
+CMD_BOOT_CHECK:
+        jsr     BOOT_CHECK_STAGE1
+        bcs     CMD_BOOT_ERROR
+        ldx     S1_BASE+10
+        jmp     0,x
+CMD_BOOT_ERROR:
+        jmp     MAIN_LOOP_ERROR
+
+BOOT_SET_LBA16:
+        clr     SD_LBA0
+        clr     SD_LBA1
+        clr     SD_LBA2
+        ldaa    #$10
+        staa    SD_LBA3
+        rts
+
+BOOT_INC_SD_LBA:
+        inc     SD_LBA3
+        bne     BOOT_INC_SD_LBA_DONE
+        inc     SD_LBA2
+        bne     BOOT_INC_SD_LBA_DONE
+        inc     SD_LBA1
+        bne     BOOT_INC_SD_LBA_DONE
+        inc     SD_LBA0
+BOOT_INC_SD_LBA_DONE:
+        rts
+
+BOOT_CHECK_STAGE1:
+        ldx     #S1_BASE
+        ldaa    0,x
+        cmpa    #'S'
+        bne     BOOT_STAGE1_SIG_FAIL
+        ldaa    1,x
+        cmpa    #'1'
+        bne     BOOT_STAGE1_SIG_FAIL
+        ldaa    2,x
+        cmpa    #'A'
+        bne     BOOT_STAGE1_SIG_FAIL
+        ldaa    3,x
+        cmpa    #'P'
+        bne     BOOT_STAGE1_SIG_FAIL
+        ldaa    4,x
+        cmpa    #'I'
+        bne     BOOT_STAGE1_SIG_FAIL
+        ldaa    5,x
+        cmpa    #'6'
+        bne     BOOT_STAGE1_SIG_FAIL
+        ldaa    6,x
+        cmpa    #'8'
+        bne     BOOT_STAGE1_SIG_FAIL
+        ldaa    7,x
+        cmpa    #1
+        bne     BOOT_STAGE1_SIG_FAIL
+
+        ldaa    12,x
+        oraa    13,x
+        beq     BOOT_STAGE1_SIZE_FAIL
+        ldaa    12,x
+        cmpa    #S1_BOOT_MAX_HI
+        bhi     BOOT_STAGE1_SIZE_FAIL
+        blo     BOOT_STAGE1_CHECK_ENTRY
+        ldaa    13,x
+        cmpa    #S1_BOOT_MAX_LO
+        bhi     BOOT_STAGE1_SIZE_FAIL
+
+BOOT_STAGE1_CHECK_ENTRY:
+        ldaa    10,x
+        suba    #S1_BASE/$0100
+        bcs     BOOT_STAGE1_SIZE_FAIL
+        staa    FAT_TMP
+        cmpa    #S1_BOOT_MAX_HI
+        bhs     BOOT_STAGE1_SIZE_FAIL
+        ldaa    FAT_TMP
+        cmpa    12,x
+        bhi     BOOT_STAGE1_SIZE_FAIL
+        blo     BOOT_STAGE1_OK
+        ldaa    11,x
+        cmpa    13,x
+        bhs     BOOT_STAGE1_SIZE_FAIL
+BOOT_STAGE1_OK:
+        clc
+        rts
+BOOT_STAGE1_SIG_FAIL:
+        ldaa    #FAT_ERR_SIG
+        jmp     BOOT_FAIL_A
+BOOT_STAGE1_SIZE_FAIL:
+        ldaa    #FAT_ERR_SIZE
+        jmp     BOOT_FAIL_A
+BOOT_FAIL_A:
+        staa    FAT_ERROR
+        sec
+        rts
+
+SDFS3SYS_FIXED_LBA equ 64
+SDFS3SYS_HEADER_SIZE equ $20
+SDFS3SYS_MAX_HI equ $40
+SDFS3SYS_MAX_LO equ $00
+SDFS3SYS_MIN_LO equ SDFS3SYS_HEADER_SIZE+1
+
+BOOT3_EXPECTED_SUM equ FAT_VOLUME_LBA0
+BOOT3_COMPUTED_SUM equ FAT_VOLUME_LBA2
+BOOT3_REMAIN       equ FAT_FAT_LBA0
+BOOT3_PAYLOAD      equ FAT_FAT_LBA2
+BOOT3_COUNT        equ FAT_DATA_LBA0
+BOOT3_SRC_PTR      equ FAT_DATA_LBA2
+BOOT3_DST_PTR      equ FAT_ROOT_CLUS0
+
+CMD_BOOT3:
+        jsr     SD_INIT
+        bcs     CMD_BOOT3_ERROR
+        jsr     BOOT3_SET_LBA
+        jsr     BOOT3_READ_SECTOR
+        bcs     CMD_BOOT3_ERROR
+        jsr     BOOT3_CHECK_HEADER
+        bcs     CMD_BOOT3_ERROR
+        jsr     BOOT3_COPY_PAYLOAD
+        bcs     CMD_BOOT3_ERROR
+        jsr     SDFS3_FIND_API
+        bcs     CMD_BOOT3_ERROR
+        ldx     #TXT_OK
+        jsr     PDATA1
+        jmp     MAIN_LOOP
+CMD_BOOT3_ERROR:
+        jmp     MAIN_LOOP_ERROR
+
+BOOT3_CHECK_HEADER:
+        ldx     #SD_SECTOR_BUF
+        ldaa    0,x
+        cmpa    #'S'
+        bne     BOOT3_HEADER_FAIL_SIG
+        ldaa    1,x
+        cmpa    #'D'
+        bne     BOOT3_HEADER_FAIL_SIG
+        ldaa    2,x
+        cmpa    #'F'
+        bne     BOOT3_HEADER_FAIL_SIG
+        ldaa    3,x
+        cmpa    #'S'
+        bne     BOOT3_HEADER_FAIL_SIG
+        ldaa    4,x
+        cmpa    #'3'
+        bne     BOOT3_HEADER_FAIL_SIG
+        ldaa    5,x
+        cmpa    #'S'
+        bne     BOOT3_HEADER_FAIL_SIG
+        ldaa    6,x
+        cmpa    #'Y'
+        bne     BOOT3_HEADER_FAIL_SIG
+        ldaa    7,x
+        cmpa    #'S'
+        bne     BOOT3_HEADER_FAIL_SIG
+        ldaa    8,x
+        cmpa    #1
+        bne     BOOT3_HEADER_FAIL_SIG
+        ldaa    9,x
+        cmpa    #SDFS3_API_MAJOR
+        bne     BOOT3_HEADER_FAIL_SIG
+        ldaa    11,x
+        cmpa    #1
+        bne     BOOT3_HEADER_FAIL_SIG
+        ldaa    12,x
+        cmpa    #SDFS3_LOAD_BASE/$0100
+        bne     BOOT3_HEADER_FAIL_SIZE
+        ldaa    13,x
+        cmpa    #SDFS3_LOAD_BASE&$00FF
+        bne     BOOT3_HEADER_FAIL_SIZE
+        ldaa    26,x
+        bne     BOOT3_HEADER_FAIL_SIZE
+        ldaa    27,x
+        cmpa    #SDFS3SYS_HEADER_SIZE
+        bne     BOOT3_HEADER_FAIL_SIZE
+        ldaa    14,x
+        cmpa    #SDFS3SYS_MAX_HI
+        bhi     BOOT3_HEADER_FAIL_SIZE
+        blo     BOOT3_CHECK_MIN
+        ldaa    15,x
+        cmpa    #SDFS3SYS_MAX_LO
+        bhi     BOOT3_HEADER_FAIL_SIZE
+BOOT3_CHECK_MIN:
+        ldaa    14,x
+        bne     BOOT3_CHECKSUM_PREP
+        ldaa    15,x
+        cmpa    #SDFS3SYS_MIN_LO
+        blo     BOOT3_HEADER_FAIL_SIZE
+        bra     BOOT3_CHECKSUM_PREP
+BOOT3_HEADER_FAIL_SIG:
+        jmp     BOOT3_FAIL_SIG
+BOOT3_HEADER_FAIL_SIZE:
+        jmp     BOOT3_FAIL_SIZE
+BOOT3_CHECKSUM_PREP:
+        ldaa    24,x
+        staa    BOOT3_EXPECTED_SUM
+        ldaa    25,x
+        staa    BOOT3_EXPECTED_SUM+1
+        clr     24,x
+        clr     25,x
+        clr     BOOT3_COMPUTED_SUM
+        clr     BOOT3_COMPUTED_SUM+1
+        ldaa    14,x
+        staa    BOOT3_REMAIN
+        ldaa    15,x
+        staa    BOOT3_REMAIN+1
+        jsr     BOOT3_SUM_CURRENT
+BOOT3_SUM_LOOP:
+        ldaa    BOOT3_REMAIN
+        oraa    BOOT3_REMAIN+1
+        beq     BOOT3_SUM_DONE
+        jsr     BOOT_INC_SD_LBA
+        jsr     BOOT3_READ_SECTOR
+        bcs     BOOT3_SUM_FAIL_SD
+        jsr     BOOT3_SUM_CURRENT
+        bra     BOOT3_SUM_LOOP
+BOOT3_SUM_DONE:
+        ldaa    BOOT3_COMPUTED_SUM
+        cmpa    BOOT3_EXPECTED_SUM
+        bne     BOOT3_SUM_FAIL_SUM
+        ldaa    BOOT3_COMPUTED_SUM+1
+        cmpa    BOOT3_EXPECTED_SUM+1
+        bne     BOOT3_SUM_FAIL_SUM
+        clc
+        rts
+BOOT3_SUM_FAIL_SD:
+        jmp     BOOT3_FAIL_SD
+BOOT3_SUM_FAIL_SUM:
+        jmp     BOOT3_FAIL_SUM
+
+BOOT3_COPY_PAYLOAD:
+        jsr     BOOT3_SET_LBA
+        jsr     BOOT3_READ_SECTOR
+        bcs     BOOT3_COPY_FAIL_SD
+        ldx     #SD_SECTOR_BUF
+        ldaa    14,x
+        staa    BOOT3_PAYLOAD
+        ldaa    15,x
+        suba    #SDFS3SYS_HEADER_SIZE
+        staa    BOOT3_PAYLOAD+1
+        bcc     BOOT3_COPY_SIZE_OK
+        dec     BOOT3_PAYLOAD
+BOOT3_COPY_SIZE_OK:
+        ldx     #SD_SECTOR_BUF+SDFS3SYS_HEADER_SIZE
+        stx     BOOT3_SRC_PTR
+        ldx     #SDFS3_LOAD_BASE
+        stx     BOOT3_DST_PTR
+        jsr     BOOT3_SET_COUNT_480
+        jsr     BOOT3_COPY_CURRENT
+BOOT3_COPY_LOOP:
+        ldaa    BOOT3_PAYLOAD
+        oraa    BOOT3_PAYLOAD+1
+        beq     BOOT3_COPY_DONE
+        jsr     BOOT_INC_SD_LBA
+        jsr     BOOT3_READ_SECTOR
+        bcs     BOOT3_COPY_FAIL_SD
+        ldx     #SD_SECTOR_BUF
+        stx     BOOT3_SRC_PTR
+        jsr     BOOT3_SET_PAYLOAD_COUNT_512
+        jsr     BOOT3_COPY_CURRENT
+        bra     BOOT3_COPY_LOOP
+BOOT3_COPY_DONE:
+        clc
+        rts
+BOOT3_COPY_FAIL_SD:
+        jmp     BOOT3_FAIL_SD
+
+BOOT3_SUM_CURRENT:
+        jsr     BOOT3_SET_REMAIN_COUNT_512
+        ldx     #SD_SECTOR_BUF
+BOOT3_SUM_BYTE:
+        ldaa    BOOT3_COUNT
+        oraa    BOOT3_COUNT+1
+        beq     BOOT3_SUM_CURRENT_DONE
+        ldaa    0,x
+        adda    BOOT3_COMPUTED_SUM+1
+        staa    BOOT3_COMPUTED_SUM+1
+        bcc     BOOT3_SUM_NO_CARRY
+        inc     BOOT3_COMPUTED_SUM
+BOOT3_SUM_NO_CARRY:
+        inx
+        jsr     BOOT3_DEC_COUNT_REMAIN
+        bra     BOOT3_SUM_BYTE
+BOOT3_SUM_CURRENT_DONE:
+        rts
+
+BOOT3_COPY_CURRENT:
+        ldaa    BOOT3_COUNT
+        oraa    BOOT3_COUNT+1
+        beq     BOOT3_COPY_CURRENT_DONE
+        ldx     BOOT3_SRC_PTR
+        ldaa    0,x
+        inx
+        stx     BOOT3_SRC_PTR
+        ldx     BOOT3_DST_PTR
+        staa    0,x
+        inx
+        stx     BOOT3_DST_PTR
+        jsr     BOOT3_DEC_COUNT_PAYLOAD
+        bra     BOOT3_COPY_CURRENT
+BOOT3_COPY_CURRENT_DONE:
+        rts
+
+BOOT3_SET_REMAIN_COUNT_512:
+        ldaa    BOOT3_REMAIN
+        cmpa    #2
+        bhs     BOOT3_SET_COUNT_512
+        staa    BOOT3_COUNT
+        ldaa    BOOT3_REMAIN+1
+        staa    BOOT3_COUNT+1
+        rts
+BOOT3_SET_PAYLOAD_COUNT_512:
+        ldaa    BOOT3_PAYLOAD
+        cmpa    #2
+        bhs     BOOT3_SET_COUNT_512
+        staa    BOOT3_COUNT
+        ldaa    BOOT3_PAYLOAD+1
+        staa    BOOT3_COUNT+1
+        rts
+BOOT3_SET_COUNT_512:
+        ldaa    #2
+        staa    BOOT3_COUNT
+        clr     BOOT3_COUNT+1
+        rts
+BOOT3_SET_COUNT_480:
+        ldaa    BOOT3_PAYLOAD
+        cmpa    #1
+        bhi     BOOT3_COUNT_480
+        bne     BOOT3_COUNT_PAYLOAD
+        ldaa    BOOT3_PAYLOAD+1
+        cmpa    #$E0
+        bhs     BOOT3_COUNT_480
+BOOT3_COUNT_PAYLOAD:
+        ldaa    BOOT3_PAYLOAD
+        staa    BOOT3_COUNT
+        ldaa    BOOT3_PAYLOAD+1
+        staa    BOOT3_COUNT+1
+        rts
+BOOT3_COUNT_480:
+        ldaa    #1
+        staa    BOOT3_COUNT
+        ldaa    #$E0
+        staa    BOOT3_COUNT+1
+        rts
+
+BOOT3_DEC_COUNT_REMAIN:
+        jsr     BOOT3_DEC_COUNT
+        dec     BOOT3_REMAIN+1
+        ldaa    BOOT3_REMAIN+1
+        cmpa    #$FF
+        bne     BOOT3_DEC_REMAIN_DONE
+        dec     BOOT3_REMAIN
+BOOT3_DEC_REMAIN_DONE:
+        rts
+BOOT3_DEC_COUNT_PAYLOAD:
+        jsr     BOOT3_DEC_COUNT
+        dec     BOOT3_PAYLOAD+1
+        ldaa    BOOT3_PAYLOAD+1
+        cmpa    #$FF
+        bne     BOOT3_DEC_PAYLOAD_DONE
+        dec     BOOT3_PAYLOAD
+BOOT3_DEC_PAYLOAD_DONE:
+        rts
+BOOT3_DEC_COUNT:
+        dec     BOOT3_COUNT+1
+        ldaa    BOOT3_COUNT+1
+        cmpa    #$FF
+        bne     BOOT3_DEC_COUNT_DONE
+        dec     BOOT3_COUNT
+BOOT3_DEC_COUNT_DONE:
+        rts
+
+BOOT3_SET_LBA:
+        clr     SD_LBA0
+        clr     SD_LBA1
+        clr     SD_LBA2
+        ldaa    #SDFS3SYS_FIXED_LBA
+        staa    SD_LBA3
+        rts
+BOOT3_READ_SECTOR:
+        ldx     #SD_SECTOR_BUF
+        jmp     SD_READ_SECTOR
+BOOT3_FAIL_SIG:
+        ldaa    #FAT_ERR_SIG
+        bra     BOOT3_FAIL_A
+BOOT3_FAIL_SIZE:
+        ldaa    #FAT_ERR_SIZE
+        bra     BOOT3_FAIL_A
+BOOT3_FAIL_SUM:
+        ldaa    #FAT_ERR_CHECKSUM
+        bra     BOOT3_FAIL_A
+BOOT3_FAIL_SD:
+        ldaa    SD_ERROR
+BOOT3_FAIL_A:
+        staa    FAT_ERROR
+        sec
+        rts
+
+SDFS3_API_MAJOR    equ 1
+SDFS3_API_MIN_COUNT equ 9
+
+SDFS3_FIND_API:
+        ldx     #SDFS3_LOAD_BASE
+        ldaa    0,x
+        cmpa    #'S'
+        bne     SDFS3_FIND_API_FAIL
+        ldaa    1,x
+        cmpa    #'D'
+        bne     SDFS3_FIND_API_FAIL
+        ldaa    2,x
+        cmpa    #'F'
+        bne     SDFS3_FIND_API_FAIL
+        ldaa    3,x
+        cmpa    #'S'
+        bne     SDFS3_FIND_API_FAIL
+        ldaa    4,x
+        cmpa    #'3'
+        bne     SDFS3_FIND_API_FAIL
+        ldaa    5,x
+        cmpa    #'A'
+        bne     SDFS3_FIND_API_FAIL
+        ldaa    6,x
+        cmpa    #'P'
+        bne     SDFS3_FIND_API_FAIL
+        ldaa    7,x
+        cmpa    #'I'
+        bne     SDFS3_FIND_API_FAIL
+        ldaa    8,x
+        cmpa    #SDFS3_API_MAJOR
+        bne     SDFS3_FIND_API_FAIL
+        ldaa    10,x
+        cmpa    #SDFS3_API_MIN_COUNT
+        blo     SDFS3_FIND_API_FAIL
+        ldx     #SDFS3_LOAD_BASE
+        clc
+        rts
+SDFS3_FIND_API_FAIL:
+        sec
+        rts
+
+CMD_SDFS3:
+        ldab    LINE_LEN
+        cmpb    #4
+        blo     CMD_SDFS3_ERROR
+        ldaa    LINE_BUF+3
+        cmpa    #CHR_SPACE
+        bne     CMD_SDFS3_ERROR
+        ldx     #LINE_BUF+4
+        subb    #4
+        bra     CMD_SDFS3_CALL
+CMD_SDFS3_CALL:
+        stx     ARG_PTR
+        stab    ARG_LEN
+        jsr     SDFS3_FIND_API
+        bcs     CMD_SDFS3_ERROR
+        ldx     12,x
+        ldx     2,x
+        stx     SDFS3_DISPATCH
+        ldx     #CMD_SDFS3_RETURN
+        stx     SDFS3_RETURN
+        ldaa    SDFS3_RETURN+1
+        psha
+        ldaa    SDFS3_RETURN
+        psha
+        ldaa    SDFS3_DISPATCH+1
+        psha
+        ldaa    SDFS3_DISPATCH
+        psha
+        ldx     ARG_PTR
+        ldab    ARG_LEN
+        clra
+        rts
+CMD_SDFS3_RETURN:
+        bcs     CMD_SDFS3_ERROR
+        jmp     MAIN_LOOP
+CMD_SDFS3_ERROR:
+        jmp     MAIN_LOOP_ERROR
+ endif
+ endif
+ if MONITOR_FEATURE_FAT
 CMD_DIR:
         ldab    LINE_LEN
         cmpb    #3
@@ -1036,6 +2212,7 @@ CMD_DIR_SKIP_ENTRY:
         bra     CMD_DIR_CLUSTER
 CMD_DIR_DONE:
         jmp     MAIN_LOOP
+ endif
 
 PRINT_PROMPT:
         ldaa    #CHR_PROMPT
@@ -1050,7 +2227,7 @@ READ_LINE:
         clr     LINE_LEN
 
 READ_LINE_LOOP:
-        jsr     ACIA_GETC
+        jsr     CONSOLE_GETC
         cmpa    #CHR_LF
         beq     READ_LINE_LOOP
         cmpa    #CHR_CR
@@ -1084,11 +2261,11 @@ READ_LINE_BACKSPACE:
         dec     LINE_LEN
 
         ldaa    #CHR_BS
-        jsr     ACIA_PUTC
+        jsr     MON_OUTEEE
         ldaa    #CHR_SPACE
-        jsr     ACIA_PUTC
+        jsr     MON_OUTEEE
         ldaa    #CHR_BS
-        jsr     ACIA_PUTC
+        jsr     MON_OUTEEE
         bra     READ_LINE_LOOP
 
 READ_LINE_DONE:
@@ -1443,12 +2620,15 @@ ADD_TO_LOADER_SUM:
         rts
 
 LOADER_GETC:
+ if MONITOR_FEATURE_FAT
         ldaa    LOADER_INPUT
         cmpa    #LOAD_INPUT_FAT
         beq     LOADER_GETC_FAT
+ endif
         jsr     ACIA_GETC
         clc
         rts
+ if MONITOR_FEATURE_FAT
 LOADER_GETC_FAT:
         pshb
         jsr     FAT32_STREAM_GETC
@@ -1460,6 +2640,7 @@ LOADER_GETC_FAT_OK:
         pulb
         clc
         rts
+ endif
 
 PRINT_HEX8:
         psha
@@ -1481,7 +2662,7 @@ PRINT_NIBBLE:
 PRINT_NIBBLE_AF:
         adda    #'A'-10
 PRINT_NIBBLE_OUT:
-        jsr     ACIA_PUTC
+        jsr     MON_OUTEEE
         rts
 
 PRINT_HEX16:
@@ -1763,44 +2944,200 @@ TXT_BRK:        fcc     "BRK "
                 fcb     $04
 TXT_WELCOME:    fcc     "MC6800 MONITOR"
                 fcb     $04
-TXT_HELP:       fcc     "D DIR M MAP G L LF B C R U H F"
-                fcb     $04
+TXT_HELP:
+ if MONITOR_FEATURE_FAT
+ if MONITOR_FEATURE_VDG
+                fcc     "D DS DIR M MAP RAMTEST G L LF BOOT BOOT3 CMD B C R U UW H F"
+ else
+                fcc     "D DIR M MAP RAMTEST G L LF BOOT BOOT3 CMD B C R U H F"
+ endif
+ else
+ if MONITOR_FEATURE_SD
+ if S1_SUPPORTED
+ if MONITOR_FEATURE_VDG
+                fcc     "D DS M MAP RAMTEST G L BOOT BOOT3 CMD B C R U UW H F"
+ else
+                fcc     "D M MAP RAMTEST G L BOOT BOOT3 CMD B C R U H F"
+ endif
+ else
+ if MONITOR_FEATURE_VDG
+                fcc     "D DS M MAP RAMTEST G L B C R U UW H F"
+ else
+                fcc     "D M MAP RAMTEST G L B C R U H F"
+ endif
+ endif
+ else
+ if MONITOR_FEATURE_VDG
+                fcc     "D DS M MAP RAMTEST G L B C R U UW H F"
+ else
+                fcc     "D M MAP RAMTEST G L B C R U H F"
+ endif
+ endif
+ endif
+                    fcb     $04
 TXT_OK:         fcc     "OK"
                 fcb     $04
+TXT_RAMTEST_PREFIX: fcc     "RAMTEST "
+                    fcb     $04
+TXT_RAMTEST_NG:     fcc     "NG "
+                    fcb     $04
+ if MONITOR_PROFILE_BASE
 TXT_MAP_BASE:       fcc     "MAP BASE"
                     fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_BASE8K
 TXT_MAP_BASE_RAM:   fcc     "RAM 0000-1FFF"
                     fcb     $04
 TXT_MAP_BASE_USER:  fcc     "USER 0000-1FFF"
                     fcb     $04
 TXT_MAP_BASE_WORK:  fcc     "WORK 1C00-1FFF"
                     fcb     $04
+ if MONITOR_FEATURE_SD
 TXT_MAP_BASE_SD:    fcc     "SD 1C00"
                     fcb     $04
+ endif
 TXT_MAP_BASE_MON:   fcc     "MON 1E00"
                     fcb     $04
+ endif
+ if MONITOR_PROFILE_SBCIO
+ if MONITOR_FEATURE_VDG
+TXT_MAP_SBCIO_VDG:  fcc     "MAP SBCIO VDG"
+                    fcb     $04
+ else
 TXT_MAP_SBCIO:      fcc     "MAP SBCIO"
                     fcb     $04
+ endif
+ endif
+ if MONITOR_PROFILE_SBCIO_4000
+TXT_MAP_SBCIO_4000: fcc     "MAP SBCIO 4000"
+                    fcb     $04
+ endif
+ if MONITOR_PROFILE_K6802_4000
+TXT_MAP_K6802_4000: fcc     "MAP K6802 4000"
+                    fcb     $04
+ endif
+ if MONITOR_PROFILE_K6802_VDG
+TXT_MAP_K6802_VDG:  fcc     "MAP K6802 VDG"
+                    fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_C000_WORK
 TXT_MAP_SBCIO_RAM:  fcc     "RAM 0000-7FFF"
                     fcb     $04
 TXT_MAP_SBCIO_USER: fcc     "USER 0000-7FFF"
                     fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_A000_WORK
+TXT_MAP_SBCIO_RAM:  fcc     "RAM 0000-7FFF"
+                    fcb     $04
+TXT_MAP_SBCIO_USER: fcc     "USER 0000-7FFF"
+                    fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_4000_WORK
+TXT_MAP_RAM64_4000_RAM:  fcc     "RAM 0000-7FFF"
+                    fcb     $04
+TXT_MAP_RAM64_4000_USER: fcc     "USER 0000-3FFF"
+                    fcb     $04
+TXT_MAP_RAM64_4000_WORK: fcc     "WORK 4000-7FFF"
+                    fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_C000_WORK
 TXT_MAP_SBCIO_WORK: fcc     "WORK C000-DFFF"
                     fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_A000_WORK
+TXT_MAP_K6802_WORK: fcc     "WORK A000-BFFF"
+                    fcb     $04
+ endif
+ if MONITOR_FEATURE_SD
+ if BUILD_MEMORY_CONFIG_RAM64_C000_WORK
 TXT_MAP_SBCIO_SD:   fcc     "SD C000"
                     fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_A000_WORK
+TXT_MAP_K6802_SD:   fcc     "SD A000"
+                    fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_4000_WORK
+ if BUILD_VDG_VRAM_C000
+TXT_MAP_RAM64_4000_SD:   fcc     "SD A000"
+                    fcb     $04
+ else
+TXT_MAP_RAM64_4000_SD:   fcc     "SD C000"
+                    fcb     $04
+ endif
+ endif
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_C000_WORK
 TXT_MAP_SBCIO_MON:  fcc     "MON C200"
                     fcb     $04
-TXT_MAP_MIK:        fcc     "MIK 1F00"
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_A000_WORK
+TXT_MAP_K6802_MON:  fcc     "MON A200"
                     fcb     $04
-TXT_MAP_STK:        fcc     "STK 1F42"
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_4000_WORK
+TXT_MAP_RAM64_4000_MON:  fcc     "MON 4200"
                     fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_BASE8K
+TXT_MAP_BASE_MIK:   fcc     "MIK 1F00"
+                    fcb     $04
+TXT_MAP_BASE_STK:   fcc     "STK 1F42"
+                    fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_C000_WORK
+TXT_MAP_SBCIO_MIK:  fcc     "MIK C300"
+                    fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_A000_WORK
+TXT_MAP_K6802_MIK:  fcc     "MIK A300"
+                    fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_4000_WORK
+TXT_MAP_RAM64_4000_MIK:  fcc     "MIK 4300"
+                    fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_C000_WORK
+TXT_MAP_SBCIO_STK:  fcc     "STK DFFF"
+                    fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_A000_WORK
+TXT_MAP_K6802_STK:  fcc     "STK BFFF"
+                    fcb     $04
+ endif
+ if BUILD_MEMORY_CONFIG_RAM64_4000_WORK
+TXT_MAP_RAM64_4000_STK:  fcc     "STK 7FFF"
+                    fcb     $04
+ endif
+ if MONITOR_FEATURE_VDG
+ if BUILD_VDG_VRAM_C000
+TXT_MAP_K6802_VRAM: fcc     "VRAM C000-DFFF"
+                    fcb     $04
+ else
+TXT_MAP_VDG_VRAM:   fcc     "VRAM A000-BFFF"
+                    fcb     $04
+ endif
+TXT_MAP_VDG_CTL:    fcc     "VDG 8110"
+                    fcb     $04
+ endif
+ if MONITOR_FEATURE_KEYBOARD
+TXT_MAP_KEYBOARD:   fcc     "KEY 8094-8095"
+                    fcb     $04
+ endif
 TXT_MAP_ROM:        fcc     "ROM E000-FFFF"
                     fcb     $04
 TXT_BP:         fcc     "BP "
                 fcb     $04
 TXT_NONE:       fcc     "NONE"
                 fcb     $04
+ if MONITOR_FEATURE_VDG
+TXT_UW:         fcc     "UW "
+                fcb     $04
+TXT_ON:         fcc     "ON"
+                fcb     $04
+TXT_OFF:        fcc     "OFF"
+                fcb     $04
+ endif
 TXT_A:          fcc     "A="
                 fcb     $04
 TXT_B:          fcc     "B="
@@ -1879,8 +3216,14 @@ SPURIOUS_IRQ:
         rti
 
         include "acia6850.asm"
+ if MONITOR_FEATURE_SD
         include "sdcard.asm"
+ endif
+ if MONITOR_FEATURE_FAT
+FAT32_INCLUDE_FIND_API equ 1
+FAT32_INCLUDE_FILE_API equ 1
         include "fat32.asm"
+ endif
 
         org     VEC_IRQ
         fdb     SPURIOUS_IRQ     ; VEC_IRQ

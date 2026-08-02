@@ -1,0 +1,238 @@
+#!/usr/bin/env python3
+"""Generate monitor_config.inc from build configuration axes."""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+
+MEMORY_CONFIGS = {
+    "base8k": {
+        "RAM_END": "$1FFF",
+        "USER_RAM_END": "RAM_END",
+        "WORK_RAM_START": "$1C00",
+        "WORK_RAM_END": "$1FFF",
+        "MIKBUG_VAR_BASE": "$1F00",
+        "MIKBUG_STACK_TOP": "$1F42",
+        "MONITOR_RAM_BASE": "$1E00",
+        "S1_SUPPORTED": "0",
+        "S1_BASE": "$0000",
+        "S1_LIMIT": "$0000",
+        "SDFS_LOAD_BASE": "$0000",
+        "SDFS_LOAD_LIMIT": "$0000",
+        "RAMTEST1_ENABLED": "1",
+        "RAMTEST1_END": "$1BFF",
+        "RAMTEST2_ENABLED": "0",
+        "RAMTEST2_START": "$2000",
+        "RAMTEST2_END": "$7FFF",
+    },
+    "ram64_c000_work": {
+        "RAM_END": "$7FFF",
+        "USER_RAM_END": "$7FFF",
+        "WORK_RAM_START": "$C000",
+        "WORK_RAM_END": "$DFFF",
+        "MIKBUG_VAR_BASE": "$C300",
+        "MIKBUG_STACK_TOP": "$DFFF",
+        "MONITOR_RAM_BASE": "$C200",
+        "S1_SUPPORTED": "1",
+        "S1_BASE": "$C400",
+        "S1_LIMIT": "$CFFF",
+        "SDFS_LOAD_BASE": "$D000",
+        "SDFS_LOAD_LIMIT": "$DEFF",
+        "RAMTEST1_ENABLED": "1",
+        "RAMTEST1_END": "$7FFF",
+        "RAMTEST2_ENABLED": "1",
+        "RAMTEST2_START": "$C000",
+        "RAMTEST2_END": "$DFFF",
+    },
+    "ram64_a000_work": {
+        "RAM_END": "$7FFF",
+        "USER_RAM_END": "$7FFF",
+        "WORK_RAM_START": "$A000",
+        "WORK_RAM_END": "$BFFF",
+        "MIKBUG_VAR_BASE": "$A300",
+        "MIKBUG_STACK_TOP": "$BFFF",
+        "MONITOR_RAM_BASE": "$A200",
+        "S1_SUPPORTED": "1",
+        "S1_BASE": "$A400",
+        "S1_LIMIT": "$AFFF",
+        "SDFS_LOAD_BASE": "$B000",
+        "SDFS_LOAD_LIMIT": "$BEFF",
+        "RAMTEST1_ENABLED": "1",
+        "RAMTEST1_END": "$7FFF",
+        "RAMTEST2_ENABLED": "1",
+        "RAMTEST2_START": "$A000",
+        "RAMTEST2_END": "$BFFF",
+    },
+    "ram64_4000_work": {
+        "RAM_END": "$7FFF",
+        "USER_RAM_END": "$3FFF",
+        "WORK_RAM_START": "$4000",
+        "WORK_RAM_END": "$7FFF",
+        "MIKBUG_VAR_BASE": "$4300",
+        "MIKBUG_STACK_TOP": "$7FFF",
+        "MONITOR_RAM_BASE": "$4200",
+        "S1_SUPPORTED": "1",
+        "S1_BASE": "$4400",
+        "S1_LIMIT": "$4FFF",
+        "SDFS_LOAD_BASE": "$5000",
+        "SDFS_LOAD_LIMIT": "$7EFF",
+        "RAMTEST1_ENABLED": "1",
+        "RAMTEST1_END": "$3FFF",
+        "RAMTEST2_ENABLED": "1",
+        "RAMTEST2_START": "$4000",
+        "RAMTEST2_END": "$7FFF",
+    },
+}
+
+SD_SECTOR_BUF = {
+    "base8k": "$1C00",
+    "ram64_c000_work": "$C000",
+    "ram64_a000_work": "$A000",
+}
+
+VDG_VRAM = {
+    "a000": ("$A000", "$BFFF", "$A1FF"),
+    "c000": ("$C000", "$DFFF", "$C1FF"),
+}
+
+
+def feature(value: str) -> int:
+    if value not in {"0", "1"}:
+        raise argparse.ArgumentTypeError("feature values must be 0 or 1")
+    return int(value)
+
+
+def optional_address(value: str) -> str | None:
+    if value == "":
+        return None
+    try:
+        if value.startswith("$"):
+            parsed = int(value[1:], 16)
+        else:
+            parsed = int(value, 0)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"invalid address: {value}") from exc
+    if not 0 <= parsed <= 0xFFFF:
+        raise argparse.ArgumentTypeError(f"address out of range: {value}")
+    return f"${parsed:04X}"
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output", required=True)
+    parser.add_argument("--monitor-profile", required=True)
+    parser.add_argument("--memory-config", choices=MEMORY_CONFIGS, required=True)
+    parser.add_argument("--board-io", choices=("none", "sbcio"), required=True)
+    parser.add_argument("--feature-sd", type=feature, required=True)
+    parser.add_argument("--feature-fat", type=feature, default=None)
+    parser.add_argument("--feature-vdg", type=feature, required=True)
+    parser.add_argument("--feature-keyboard", type=feature, required=True)
+    parser.add_argument("--feature-i2c", type=feature, required=True)
+    parser.add_argument("--vdg-vram-config", choices=VDG_VRAM, required=True)
+    parser.add_argument("--sdfs3-load-base", type=optional_address, default=None)
+    parser.add_argument("--sdfs3-load-limit", type=optional_address, default=None)
+    args = parser.parse_args()
+    feature_fat = args.feature_sd if args.feature_fat is None else args.feature_fat
+    if feature_fat and not args.feature_sd:
+        raise SystemExit("FEATURE_FAT=1 requires FEATURE_SD=1")
+    if (args.sdfs3_load_base is None) != (args.sdfs3_load_limit is None):
+        raise SystemExit("SDFS3_LOAD_BASE and SDFS3_LOAD_LIMIT must be specified together")
+
+    memory = MEMORY_CONFIGS[args.memory_config]
+    sdfs3_load_base = args.sdfs3_load_base or memory["SDFS_LOAD_BASE"]
+    sdfs3_load_limit = args.sdfs3_load_limit or memory["SDFS_LOAD_LIMIT"]
+    is_base = args.memory_config == "base8k" and args.board_io == "none"
+    is_sbcio = args.board_io == "sbcio"
+    is_k6802_vdg = (
+        args.memory_config == "ram64_a000_work"
+        and args.feature_vdg == 1
+        and args.vdg_vram_config == "c000"
+    )
+    is_sbcio_4000 = (
+        args.board_io == "sbcio"
+        and args.memory_config == "ram64_4000_work"
+        and args.vdg_vram_config == "a000"
+    )
+    is_k6802_4000 = (
+        args.board_io == "sbcio"
+        and args.memory_config == "ram64_4000_work"
+        and args.vdg_vram_config == "c000"
+    )
+
+    lines = ["; Generated by tools/generate_monitor_config.py. Do not edit."]
+    for name in MEMORY_CONFIGS:
+        lines.append(f"BUILD_MEMORY_CONFIG_{name.upper()} equ {1 if args.memory_config == name else 0}")
+    for name in ("none", "sbcio"):
+        lines.append(f"BUILD_BOARD_IO_{name.upper()} equ {1 if args.board_io == name else 0}")
+    for name in VDG_VRAM:
+        lines.append(f"BUILD_VDG_VRAM_{name.upper()} equ {1 if args.vdg_vram_config == name else 0}")
+    lines.extend([
+        "",
+        f"MONITOR_PROFILE_BASE equ {1 if is_base else 0}",
+        f"MONITOR_PROFILE_SBCIO equ {1 if is_sbcio else 0}",
+        f"MONITOR_PROFILE_SBCIO_4000 equ {1 if is_sbcio_4000 else 0}",
+        f"MONITOR_PROFILE_K6802_4000 equ {1 if is_k6802_4000 else 0}",
+        f"MONITOR_PROFILE_K6802_VDG equ {1 if is_k6802_vdg else 0}",
+        f"MONITOR_FEATURE_SD equ {args.feature_sd}",
+        f"MONITOR_FEATURE_FAT equ {feature_fat}",
+        f"MONITOR_FEATURE_VDG equ {args.feature_vdg}",
+        f"MONITOR_FEATURE_KEYBOARD equ {args.feature_keyboard}",
+        f"MONITOR_FEATURE_I2C equ {args.feature_i2c}",
+        "",
+        "RAM_START        equ $0000",
+        f"RAM_END          equ {memory['RAM_END']}",
+        f"USER_RAM_END     equ {memory['USER_RAM_END']}",
+        f"WORK_RAM_START   equ {memory['WORK_RAM_START']}",
+        f"WORK_RAM_END     equ {memory['WORK_RAM_END']}",
+        f"MIKBUG_VAR_BASE  equ {memory['MIKBUG_VAR_BASE']}",
+        f"MIKBUG_STACK_TOP equ {memory['MIKBUG_STACK_TOP']}",
+        f"MONITOR_RAM_BASE equ {memory['MONITOR_RAM_BASE']}",
+        f"S1_SUPPORTED    equ {memory['S1_SUPPORTED']}",
+        f"S1_BASE         equ {memory['S1_BASE']}",
+        f"S1_LIMIT        equ {memory['S1_LIMIT']}",
+        f"SDFS_LOAD_BASE  equ {memory['SDFS_LOAD_BASE']}",
+        f"SDFS_LOAD_LIMIT equ {memory['SDFS_LOAD_LIMIT']}",
+        f"SDFS3_LOAD_BASE equ {sdfs3_load_base}",
+        f"SDFS3_LOAD_LIMIT equ {sdfs3_load_limit}",
+        "STACK_TOP        equ MIKBUG_STACK_TOP",
+        "",
+    ])
+
+    if args.feature_sd:
+        buf_addr = ("$C000" if args.vdg_vram_config == "a000" else "$A000") if args.memory_config == "ram64_4000_work" else SD_SECTOR_BUF[args.memory_config]
+        lines.extend([
+            f"SD_SECTOR_BUF    equ {buf_addr}",
+            "",
+        ])
+
+    lines.extend([
+        f"RAMTEST1_ENABLED equ {memory['RAMTEST1_ENABLED']}",
+        "RAMTEST1_START   equ $0100",
+        f"RAMTEST1_END     equ {memory['RAMTEST1_END']}",
+        f"RAMTEST2_ENABLED equ {memory['RAMTEST2_ENABLED']}",
+        f"RAMTEST2_START   equ {memory['RAMTEST2_START']}",
+        f"RAMTEST2_END     equ {memory['RAMTEST2_END']}",
+        "RAMTEST3_ENABLED equ 0",
+        "RAMTEST3_START   equ $C000",
+        "RAMTEST3_END     equ $DFFF",
+    ])
+
+    if args.feature_vdg:
+        vram_start, vram_end, text_end = VDG_VRAM[args.vdg_vram_config]
+        lines.extend([
+            "",
+            "VDG_CTL          equ $8110",
+            "VDG_MODE         equ $00",
+            f"VDG_VRAM_START   equ {vram_start}",
+            f"VDG_VRAM_END     equ {vram_end}",
+            f"VDG_TEXT_END      equ {text_end}",
+        ])
+
+    output = Path(args.output)
+    output.write_text("\n".join(lines) + "\n", encoding="ascii")
+
+
+if __name__ == "__main__":
+    main()

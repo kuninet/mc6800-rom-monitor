@@ -2,28 +2,218 @@ ASL ?= asl
 P2BIN ?= p2bin
 P2HEX ?= p2hex
 MINIPRO ?= minipro
+PYTHON ?= python3
 
 MONITOR_PROFILE ?= base
 ifeq ($(MONITOR_PROFILE),base)
-TARGET_SUFFIX :=
+PROFILE_TARGET_SUFFIX :=
+PROFILE_MEMORY_CONFIG := base8k
+PROFILE_BOARD_IO := none
+PROFILE_FEATURE_SD := 0
+PROFILE_FEATURE_FAT := 0
+PROFILE_FEATURE_VDG := 0
+PROFILE_FEATURE_KEYBOARD := 0
+PROFILE_FEATURE_I2C := 0
+PROFILE_VDG_VRAM_CONFIG := a000
 else ifeq ($(MONITOR_PROFILE),sbcio)
-TARGET_SUFFIX := -sbcio
+PROFILE_TARGET_SUFFIX := -sbcio
+PROFILE_MEMORY_CONFIG := ram64_c000_work
+PROFILE_BOARD_IO := sbcio
+PROFILE_FEATURE_SD := 0
+PROFILE_FEATURE_FAT := 0
+PROFILE_FEATURE_VDG := 0
+PROFILE_FEATURE_KEYBOARD := 1
+PROFILE_FEATURE_I2C := 0
+PROFILE_VDG_VRAM_CONFIG := a000
+else ifeq ($(MONITOR_PROFILE),sbcio_vdg)
+PROFILE_TARGET_SUFFIX := -sbcio-vdg
+PROFILE_MEMORY_CONFIG := ram64_c000_work
+PROFILE_BOARD_IO := sbcio
+PROFILE_FEATURE_SD := 1
+PROFILE_FEATURE_FAT := 0
+PROFILE_FEATURE_VDG := 1
+PROFILE_FEATURE_KEYBOARD := 1
+PROFILE_FEATURE_I2C := 0
+PROFILE_VDG_VRAM_CONFIG := a000
+else ifeq ($(MONITOR_PROFILE),k6802_vdg)
+PROFILE_TARGET_SUFFIX := -k6802-vdg
+PROFILE_MEMORY_CONFIG := ram64_a000_work
+PROFILE_BOARD_IO := sbcio
+PROFILE_FEATURE_SD := 1
+PROFILE_FEATURE_FAT := 0
+PROFILE_FEATURE_VDG := 1
+PROFILE_FEATURE_KEYBOARD := 1
+PROFILE_FEATURE_I2C := 0
+PROFILE_VDG_VRAM_CONFIG := c000
+else ifeq ($(MONITOR_PROFILE),sbcio_4000)
+PROFILE_TARGET_SUFFIX := -sbcio-4000
+PROFILE_MEMORY_CONFIG := ram64_4000_work
+PROFILE_BOARD_IO := sbcio
+PROFILE_FEATURE_SD := 1
+PROFILE_FEATURE_FAT := 0
+PROFILE_FEATURE_VDG := 0
+PROFILE_FEATURE_KEYBOARD := 1
+PROFILE_FEATURE_I2C := 0
+PROFILE_VDG_VRAM_CONFIG := a000
+else ifeq ($(MONITOR_PROFILE),k6802_4000)
+PROFILE_TARGET_SUFFIX := -k6802-4000
+PROFILE_MEMORY_CONFIG := ram64_4000_work
+PROFILE_BOARD_IO := sbcio
+PROFILE_FEATURE_SD := 1
+PROFILE_FEATURE_FAT := 0
+PROFILE_FEATURE_VDG := 0
+PROFILE_FEATURE_KEYBOARD := 1
+PROFILE_FEATURE_I2C := 0
+PROFILE_VDG_VRAM_CONFIG := c000
 else
 $(error Unsupported MONITOR_PROFILE '$(MONITOR_PROFILE)')
+endif
+
+AXIS_OVERRIDE :=
+ifneq ($(filter command line environment environment override,$(origin MEMORY_CONFIG)),)
+AXIS_OVERRIDE := 1
+endif
+ifneq ($(filter command line environment environment override,$(origin BOARD_IO)),)
+AXIS_OVERRIDE := 1
+endif
+ifneq ($(filter command line environment environment override,$(origin FEATURE_SD)),)
+AXIS_OVERRIDE := 1
+endif
+ifneq ($(filter command line environment environment override,$(origin FEATURE_FAT)),)
+AXIS_OVERRIDE := 1
+endif
+ifneq ($(filter command line environment environment override,$(origin FEATURE_VDG)),)
+AXIS_OVERRIDE := 1
+endif
+ifneq ($(filter command line environment environment override,$(origin FEATURE_KEYBOARD)),)
+AXIS_OVERRIDE := 1
+endif
+ifneq ($(filter command line environment environment override,$(origin FEATURE_I2C)),)
+AXIS_OVERRIDE := 1
+endif
+ifneq ($(filter command line environment environment override,$(origin VDG_VRAM_CONFIG)),)
+AXIS_OVERRIDE := 1
+endif
+ifneq ($(filter command line environment environment override,$(origin SDFS3_LOAD_BASE)),)
+AXIS_OVERRIDE := 1
+endif
+ifneq ($(filter command line environment environment override,$(origin SDFS3_LOAD_LIMIT)),)
+AXIS_OVERRIDE := 1
+endif
+
+MEMORY_CONFIG ?= $(PROFILE_MEMORY_CONFIG)
+BOARD_IO ?= $(PROFILE_BOARD_IO)
+FEATURE_SD ?= $(PROFILE_FEATURE_SD)
+FEATURE_FAT ?= $(PROFILE_FEATURE_FAT)
+FEATURE_VDG ?= $(PROFILE_FEATURE_VDG)
+FEATURE_KEYBOARD ?= $(PROFILE_FEATURE_KEYBOARD)
+FEATURE_I2C ?= $(PROFILE_FEATURE_I2C)
+VDG_VRAM_CONFIG ?= $(PROFILE_VDG_VRAM_CONFIG)
+SDFS3_LOAD_BASE ?=
+SDFS3_LOAD_LIMIT ?=
+
+VALID_MEMORY_CONFIGS := base8k ram64_c000_work ram64_a000_work ram64_4000_work
+VALID_BOARD_IO := none sbcio
+VALID_FEATURE_VALUES := 0 1
+VALID_VDG_VRAM_CONFIGS := a000 c000
+
+ifeq ($(filter $(MEMORY_CONFIG),$(VALID_MEMORY_CONFIGS)),)
+$(error Unsupported MEMORY_CONFIG '$(MEMORY_CONFIG)')
+endif
+ifeq ($(filter $(BOARD_IO),$(VALID_BOARD_IO)),)
+$(error Unsupported BOARD_IO '$(BOARD_IO)')
+endif
+ifeq ($(filter $(FEATURE_SD),$(VALID_FEATURE_VALUES)),)
+$(error Unsupported FEATURE_SD '$(FEATURE_SD)')
+endif
+ifeq ($(filter $(FEATURE_FAT),$(VALID_FEATURE_VALUES)),)
+$(error Unsupported FEATURE_FAT '$(FEATURE_FAT)')
+endif
+ifeq ($(filter $(FEATURE_VDG),$(VALID_FEATURE_VALUES)),)
+$(error Unsupported FEATURE_VDG '$(FEATURE_VDG)')
+endif
+ifeq ($(filter $(FEATURE_KEYBOARD),$(VALID_FEATURE_VALUES)),)
+$(error Unsupported FEATURE_KEYBOARD '$(FEATURE_KEYBOARD)')
+endif
+ifeq ($(filter $(FEATURE_I2C),$(VALID_FEATURE_VALUES)),)
+$(error Unsupported FEATURE_I2C '$(FEATURE_I2C)')
+endif
+ifeq ($(filter $(VDG_VRAM_CONFIG),$(VALID_VDG_VRAM_CONFIGS)),)
+$(error Unsupported VDG_VRAM_CONFIG '$(VDG_VRAM_CONFIG)')
+endif
+
+ifneq ($(FEATURE_SD),0)
+ifneq ($(BOARD_IO),sbcio)
+$(error FEATURE_SD=1 requires BOARD_IO=sbcio)
+endif
+endif
+ifneq ($(FEATURE_FAT),0)
+ifeq ($(FEATURE_SD),0)
+$(error FEATURE_FAT=1 requires FEATURE_SD=1)
+endif
+endif
+ifneq ($(FEATURE_KEYBOARD),0)
+ifneq ($(BOARD_IO),sbcio)
+$(error FEATURE_KEYBOARD=1 requires BOARD_IO=sbcio)
+endif
+endif
+ifneq ($(FEATURE_I2C),0)
+ifneq ($(BOARD_IO),sbcio)
+$(error FEATURE_I2C=1 requires BOARD_IO=sbcio)
+endif
+endif
+
+ifneq ($(BUILD_CONFIG_NAME),)
+TARGET_SUFFIX := -$(BUILD_CONFIG_NAME)
+else ifeq ($(AXIS_OVERRIDE),1)
+TARGET_SUFFIX := -$(MEMORY_CONFIG)-$(BOARD_IO)-sd$(FEATURE_SD)-vdg$(FEATURE_VDG)-vram$(VDG_VRAM_CONFIG)-key$(FEATURE_KEYBOARD)-i2c$(FEATURE_I2C)
+else
+TARGET_SUFFIX := $(PROFILE_TARGET_SUFFIX)
 endif
 
 TARGET := mc6800-monitor$(TARGET_SUFFIX)
 OUTDIR := build
 TOPSRC := src/main.asm
+STAGE1_TOPSRC := src/stage1.asm
+SDFS_TOPSRC := src/sdfs68.asm
 OBJ := $(OUTDIR)/$(TARGET).p
 LST := $(OUTDIR)/$(TARGET).lst
 BIN := $(OUTDIR)/$(TARGET).bin
 SREC := $(OUTDIR)/$(TARGET).srec
 IHEX := $(OUTDIR)/$(TARGET).hex
-PROFILE_SRC := include/profiles/$(MONITOR_PROFILE).inc
-PROFILE_INC := $(OUTDIR)/monitor_profile.inc
+STAGE1_TARGET := stage1$(TARGET_SUFFIX)
+STAGE1_OBJ := $(OUTDIR)/$(STAGE1_TARGET).p
+STAGE1_LST := $(OUTDIR)/$(STAGE1_TARGET).lst
+STAGE1_BIN := $(OUTDIR)/$(STAGE1_TARGET).bin
+SDFS_TARGET := SDFS$(TARGET_SUFFIX)
+SDFS_OBJ := $(OUTDIR)/$(SDFS_TARGET).p
+SDFS_LST := $(OUTDIR)/$(SDFS_TARGET).lst
+SDFS_BIN := $(OUTDIR)/$(SDFS_TARGET).BIN
+SDFS3_TOPSRC := src/sdfs68_v3/resident_stub.asm
+SDFS3_TARGET := SDFS3$(TARGET_SUFFIX)
+SDFS3_OBJ := $(OUTDIR)/$(SDFS3_TARGET).p
+SDFS3_LST := $(OUTDIR)/$(SDFS3_TARGET).lst
+SDFS3_BIN := $(OUTDIR)/$(SDFS3_TARGET).BIN
+SDFS3SYS_BIN := $(OUTDIR)/SDFS3SYS$(TARGET_SUFFIX).BIN
+SDFS_TOOLS_DIR := sdfs_tools
+SDFS_TOOL_HELLO_S_SRC := $(SDFS_TOOLS_DIR)/HELLO_S.ASM
+SDFS_TOOL_HELLO_COM_SRC := $(SDFS_TOOLS_DIR)/HELLO_COM.ASM
+SDFS_TOOL_ARGS_COM_SRC := $(SDFS_TOOLS_DIR)/ARGS_COM.ASM
+SDFS_TOOL_HELLO_S_OBJ := $(OUTDIR)/HELLO_S.p
+SDFS_TOOL_HELLO_S_LST := $(OUTDIR)/HELLO_S.lst
+SDFS_TOOL_HELLO_S := $(OUTDIR)/HELLO.S
+SDFS_TOOL_HELLO_COM_OBJ := $(OUTDIR)/HELLO_COM.p
+SDFS_TOOL_HELLO_COM_LST := $(OUTDIR)/HELLO_COM.lst
+SDFS_TOOL_HELLO_COM := $(OUTDIR)/HELLO.COM
+SDFS_TOOL_ARGS_COM_OBJ := $(OUTDIR)/ARGS_COM.p
+SDFS_TOOL_ARGS_COM_LST := $(OUTDIR)/ARGS_COM.lst
+SDFS_TOOL_ARGS_COM := $(OUTDIR)/ARGS.COM
+SDFS_TOOL_SREC := $(SDFS_TOOL_HELLO_S)
+SDFS_TOOL_COM := $(SDFS_TOOL_HELLO_COM) $(SDFS_TOOL_ARGS_COM)
+CONFIG_INC := $(OUTDIR)/monitor_config.inc
 ROM_KIND ?= 27C64
 ROM_FILL ?= 0xFF
+ROM_CODE_LIMIT ?= 8192
 
 ifeq ($(ROM_KIND),27C64)
 ROM_CHIP_SIZE := 0x2000
@@ -66,34 +256,107 @@ ASL_PATHSEP := ;
 ASL_INCLUDE_ARG = "$(ASL_INCLUDE)"
 MKDIR_P := python -c "from pathlib import Path; Path('$(OUTDIR)').mkdir(parents=True, exist_ok=True)"
 RM_RF := python -c "import shutil; shutil.rmtree('$(OUTDIR)', ignore_errors=True)"
-COPY_PROFILE := python -c "import shutil; shutil.copyfile('$(PROFILE_SRC)', '$(PROFILE_INC)')"
 else
 ASL_PATHSEP := :
 ASL_INCLUDE_ARG = "$(ASL_INCLUDE)"
 MKDIR_P := mkdir -p "$(OUTDIR)"
 RM_RF := rm -rf "$(OUTDIR)"
-COPY_PROFILE := cp "$(PROFILE_SRC)" "$(PROFILE_INC)"
 endif
 
 ASL_INCLUDE := $(CURDIR)/$(OUTDIR)$(ASL_PATHSEP)$(CURDIR)/include$(ASL_PATHSEP)$(CURDIR)/src
 
-.PHONY: all clean bin srec ihex rombin rombin-27c64 rombin-27c128 rombin-27c256 rombin-28c256 rombin-w27c512 program verify readback program-27c64 program-27c128 program-27c256 program-28c256 program-w27c512 program-upd28c256 FORCE
+.PHONY: all clean bin test check-rom-size srec ihex stage1 sdfs sdfs3 sdfs3sys sdfs-tools sdfs-tools-srec sdfs-tools-com check-stage1-config rombin rombin-27c64 rombin-27c128 rombin-27c256 rombin-28c256 rombin-w27c512 program verify readback program-27c64 program-27c128 program-27c256 program-28c256 program-w27c512 program-upd28c256 FORCE
 
-all: srec ihex
+all: check-rom-size srec ihex
 
 $(OUTDIR):
 	$(MKDIR_P)
 
-$(PROFILE_INC): FORCE $(PROFILE_SRC) | $(OUTDIR)
-	$(COPY_PROFILE)
+$(CONFIG_INC): FORCE tools/generate_monitor_config.py | $(OUTDIR)
+	"$(PYTHON)" tools/generate_monitor_config.py --output "$(CONFIG_INC)" --monitor-profile "$(MONITOR_PROFILE)" --memory-config "$(MEMORY_CONFIG)" --board-io "$(BOARD_IO)" --feature-sd "$(FEATURE_SD)" --feature-fat "$(FEATURE_FAT)" --feature-vdg "$(FEATURE_VDG)" --feature-keyboard "$(FEATURE_KEYBOARD)" --feature-i2c "$(FEATURE_I2C)" --vdg-vram-config "$(VDG_VRAM_CONFIG)" --sdfs3-load-base "$(SDFS3_LOAD_BASE)" --sdfs3-load-limit "$(SDFS3_LOAD_LIMIT)"
 
-$(OBJ): FORCE $(TOPSRC) include/hardware.inc include/mikbug.inc $(PROFILE_INC) src/acia6850.asm src/sdcard.asm src/fat32.asm | $(OUTDIR)
+$(OBJ): FORCE $(TOPSRC) include/hardware.inc include/mikbug.inc $(CONFIG_INC) src/acia6850.asm src/sdcard.asm src/fat32.asm | $(OUTDIR)
 	"$(ASL)" -q -L -olist $(LST) -o $(OBJ) -i $(ASL_INCLUDE_ARG) $(TOPSRC)
 
-bin: $(BIN)
+bin: check-rom-size
 
 $(BIN): $(OBJ)
 	"$(P2BIN)" $(OBJ) $(BIN) -q
+
+check-rom-size: $(BIN)
+	"$(PYTHON)" -c "from pathlib import Path; import sys; p=Path('$(BIN)'); size=p.stat().st_size; limit=int('$(ROM_CODE_LIMIT)', 0); print(f'{p}: {size}/{limit} bytes'); sys.exit(0 if limit <= 0 or size <= limit else 1)"
+
+# 全テストをビルド前提込みで実行する(CI windows-emu.yml と同等)。
+# エミュテストは最新ビルドのROM/listを使うため base と sbcio を先にビルドする。
+test:
+	$(MAKE) bin MONITOR_PROFILE=base
+	$(MAKE) bin MONITOR_PROFILE=sbcio
+	REQUIRE_BUILD_ROM=1 "$(PYTHON)" tests/test_smoke.py
+	REQUIRE_BUILD_ROM=1 "$(PYTHON)" tests/test_sd_fixture.py
+	REQUIRE_BUILD_ROM=1 MONITOR_PROFILE=sbcio MONITOR_ROM_PATH=$(OUTDIR)/mc6800-monitor-sbcio.bin MONITOR_LST_PATH=$(OUTDIR)/mc6800-monitor-sbcio.lst "$(PYTHON)" tests/test_smoke.py
+	REQUIRE_BUILD_ROM=1 MONITOR_PROFILE=sbcio MONITOR_ROM_PATH=$(OUTDIR)/mc6800-monitor-sbcio.bin MONITOR_LST_PATH=$(OUTDIR)/mc6800-monitor-sbcio.lst "$(PYTHON)" tests/test_sd_fixture.py
+	"$(PYTHON)" tests/test_sdfs68_build.py
+	"$(PYTHON)" tests/test_sdfs68_v3_build.py
+	"$(PYTHON)" tests/test_stage1_build.py
+	"$(PYTHON)" tests/test_mk_sdfs_image.py
+
+stage1: check-stage1-config $(STAGE1_BIN)
+
+sdfs: check-stage1-config $(SDFS_BIN)
+
+sdfs3: check-stage1-config $(SDFS3_BIN)
+
+sdfs3sys: check-stage1-config $(SDFS3SYS_BIN)
+
+check-stage1-config:
+	"$(PYTHON)" -c "import sys; sd='$(FEATURE_SD)'; board='$(BOARD_IO)'; memory='$(MEMORY_CONFIG)'; ok = sd == '1' and board == 'sbcio' and memory in ('ram64_c000_work', 'ram64_a000_work', 'ram64_4000_work'); sys.exit(0 if ok else 1)" || (echo "stage1 target requires FEATURE_SD=1 BOARD_IO=sbcio and MEMORY_CONFIG=ram64_c000_work, ram64_a000_work or ram64_4000_work" && exit 1)
+
+$(STAGE1_OBJ): FORCE $(STAGE1_TOPSRC) include/hardware.inc $(CONFIG_INC) src/sdcard.asm src/fat32.asm | $(OUTDIR)
+	"$(ASL)" -q -L -olist $(STAGE1_LST) -o $(STAGE1_OBJ) -i $(ASL_INCLUDE_ARG) $(STAGE1_TOPSRC)
+
+$(STAGE1_BIN): $(STAGE1_OBJ)
+	"$(P2BIN)" $(STAGE1_OBJ) $(STAGE1_BIN) -q
+
+$(SDFS_OBJ): FORCE $(SDFS_TOPSRC) include/hardware.inc $(CONFIG_INC) | $(OUTDIR)
+	"$(ASL)" -q -L -olist $(SDFS_LST) -o $(SDFS_OBJ) -i $(ASL_INCLUDE_ARG) $(SDFS_TOPSRC)
+
+$(SDFS_BIN): $(SDFS_OBJ)
+	"$(P2BIN)" $(SDFS_OBJ) $(SDFS_BIN) -q
+
+$(SDFS3_OBJ): FORCE $(SDFS3_TOPSRC) include/hardware.inc $(CONFIG_INC) | $(OUTDIR)
+	"$(ASL)" -q -L -olist $(SDFS3_LST) -o $(SDFS3_OBJ) -i $(ASL_INCLUDE_ARG) $(SDFS3_TOPSRC)
+
+$(SDFS3_BIN): $(SDFS3_OBJ)
+	"$(P2BIN)" $(SDFS3_OBJ) $(SDFS3_BIN) -q
+
+$(SDFS3_LST): $(SDFS3_OBJ)
+
+$(SDFS3SYS_BIN): $(SDFS3_BIN) $(SDFS3_LST) tools/mk_sdfs3sys.py
+	"$(PYTHON)" tools/mk_sdfs3sys.py --input "$(SDFS3_BIN)" --listing "$(SDFS3_LST)" --output "$(SDFS3SYS_BIN)"
+
+sdfs-tools: sdfs-tools-srec sdfs-tools-com
+
+sdfs-tools-srec: $(SDFS_TOOL_SREC)
+
+sdfs-tools-com: $(SDFS_TOOL_COM)
+
+$(SDFS_TOOL_HELLO_S_OBJ): $(SDFS_TOOL_HELLO_S_SRC) | $(OUTDIR)
+	"$(ASL)" -q -L -olist $(SDFS_TOOL_HELLO_S_LST) -o $(SDFS_TOOL_HELLO_S_OBJ) $(SDFS_TOOL_HELLO_S_SRC)
+
+$(SDFS_TOOL_HELLO_S): $(SDFS_TOOL_HELLO_S_OBJ)
+	"$(P2HEX)" $(SDFS_TOOL_HELLO_S_OBJ) $(SDFS_TOOL_HELLO_S) -q -F Moto -M 2
+
+$(SDFS_TOOL_HELLO_COM_OBJ): $(SDFS_TOOL_HELLO_COM_SRC) | $(OUTDIR)
+	"$(ASL)" -q -L -olist $(SDFS_TOOL_HELLO_COM_LST) -o $(SDFS_TOOL_HELLO_COM_OBJ) $(SDFS_TOOL_HELLO_COM_SRC)
+
+$(SDFS_TOOL_HELLO_COM): $(SDFS_TOOL_HELLO_COM_OBJ)
+	"$(P2BIN)" $(SDFS_TOOL_HELLO_COM_OBJ) $(SDFS_TOOL_HELLO_COM) -q
+
+$(SDFS_TOOL_ARGS_COM_OBJ): $(SDFS_TOOL_ARGS_COM_SRC) | $(OUTDIR)
+	"$(ASL)" -q -L -olist $(SDFS_TOOL_ARGS_COM_LST) -o $(SDFS_TOOL_ARGS_COM_OBJ) $(SDFS_TOOL_ARGS_COM_SRC)
+
+$(SDFS_TOOL_ARGS_COM): $(SDFS_TOOL_ARGS_COM_OBJ)
+	"$(P2BIN)" $(SDFS_TOOL_ARGS_COM_OBJ) $(SDFS_TOOL_ARGS_COM) -q
 
 srec: $(SREC)
 
@@ -105,7 +368,7 @@ ihex: $(IHEX)
 $(IHEX): $(OBJ)
 	"$(P2HEX)" $(OBJ) $(IHEX) -q -F Intel -i 1
 
-rombin: $(ROMBIN)
+rombin: check-rom-size $(ROMBIN)
 
 $(ROMBIN): $(OBJ)
 	"$(P2BIN)" $(OBJ) $(ROMBIN) -q -r $(ROM_RANGE_START)-$(ROM_RANGE_END) -l $(ROM_FILL)
@@ -125,10 +388,10 @@ rombin-28c256:
 rombin-w27c512:
 	$(MAKE) rombin ROM_KIND=W27C512
 
-program: $(ROMBIN)
+program: check-rom-size $(ROMBIN)
 	$(MINIPRO) -p "$(MINIPRO_DEVICE)" -w $(ROMBIN)
 
-verify: $(ROMBIN)
+verify: check-rom-size $(ROMBIN)
 	$(MINIPRO) -p "$(MINIPRO_DEVICE)" -m $(ROMBIN)
 
 readback:

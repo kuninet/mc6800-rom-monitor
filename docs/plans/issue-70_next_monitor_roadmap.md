@@ -77,7 +77,7 @@ SBC-IO の MC6821 PIA 経由で SD/FAT read-only の `DIR` と `LF filename` が
 | 4 | 2nd ACIAキーボード | PC保守コンソールを残したままキーボード入力を追加 | PS/2かUSB+MCUかの選定 |
 | 5 | PTMタイマ | timeout、tick、キー入力補助の土台を作る | 最初から割り込み前提にしない |
 | 6 | PIA Port A I2C RTC | SDボード+RTCボード構想を検証する | PIA共有、I2Cプルアップ、レベル変換 |
-| 7 | AUTOEXEC.S と BOOT | SDから起動時初期化やBASIC起動を自動化する | 自動実行アドレス規約を決める |
+| 7 | BOOT / SDFS.BIN / AUTOEXEC.S | SDから第2段を起動し、起動時初期化やBASIC起動を自動化する | BOOTとAUTOEXEC.Sの責務を分ける |
 | 8 | SD bootstrap / M6800 DOS | ROM容量逼迫時に機能をRAM側へ逃がす | 専用SD作成手順が必要 |
 | 9 | SAVE/write | スタンドアロン運用でSDへ保存できるようにする | FAT更新の安全性と電源断耐性 |
 
@@ -138,12 +138,13 @@ PTMは最初から割り込み前提にせず、まずは待ち時間やtick用�
 - RTCは `AUTOEXEC.S` や将来のDOS相当機能から時刻を読む用途を想定する。
 - Port B の余りビット (bit 6/7) を I2C に流用する代替案と、RTC/EEPROM/OLED の同居検討は [i2c_bus_overlay_evaluation.md](i2c_bus_overlay_evaluation.md) にまとめてある。
 
-### 7. AUTOEXEC.S と BOOT
+### 7. BOOT / SDFS.BIN / AUTOEXEC.S
 
 SD LOADが実機動作したため、起動自動化は有力な次期機能。
 
-- `BOOT` コマンドで root の `AUTOEXEC.S` を探してLOADする。
-- 初期はS-Recordのみを対象にする。
+- `BOOT` は root の `AUTOEXEC.S` を直接 LOAD するコマンドではなく、SD上の第2段システムを起動する入口として扱う。
+- 第2段の初期候補は root directory の `SDFS.BIN` とし、`BOOT` は `SDFS.BIN` の LOAD/RUN までを担当する。
+- `AUTOEXEC.S` は `SDFS.BIN` または将来の M6800 DOS 相当が起動後に任意で探す起動スクリプト相当として扱う。
 - AUTOEXECからRTC初期化、VDG初期化、BASIC起動を行う構成にする。
 
 ### 8. SDシステム領域bootstrapとオリジナルDOS構想
@@ -152,6 +153,7 @@ ROM容量が FAT read-only と VDG 対応で厳しくなる場合、SDカード�
 
 - ROMにはSD初期化と第1段bootstrap readだけを残し、FAT/DIR/LF/VDG/キーボードなどをRAM上の第2段へ逃がす。
 - 第2段はrootの `SDFS.BIN` など通常ファイルに置く案を優先し、固定sectorは最小bootstrapに限定する。
+- `AUTOEXEC.S` は第2段起動後の処理であり、ROM側 `BOOT` や第1段bootstrapが直接扱う対象にはしない。
 - SD予約領域を使う場合は、専用SD作成ツールとsignature検査が必要になる。
 - 通常のモニタ拡張というより、M6800 DOS相当の別構想として扱う。
 - 初期ロードマップでは実装対象外だが、ROM容量が逼迫した時の退避先として残す。
@@ -172,7 +174,7 @@ FAT write は便利だが、実装ミスでSDカードを壊しやすい。VDG/�
 5. 2nd ACIAキーボード入力。
 6. PTMタイマ。
 7. PIA Port A I2C RTCのPoC。
-8. `BOOT` / `AUTOEXEC.S`。
+8. `BOOT` / `SDFS.BIN` / `AUTOEXEC.S`。
 9. SDシステム領域bootstrapとオリジナルDOS構想の再評価。
 10. SAVE/write。
 

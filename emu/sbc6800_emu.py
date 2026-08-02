@@ -27,6 +27,8 @@ RAM_START = 0x0000
 RAM_END = 0x1FFF
 ACIA_CTRL = 0x8018
 ACIA_DATA = 0x8019
+ACIA2_CTRL = 0x8094
+ACIA2_DATA = 0x8095
 PIA_PRA = 0x8050
 PIA_CRA = 0x8051
 PIA_PRB = 0x8052
@@ -48,15 +50,39 @@ VEC_NMI = 0xFFFC
 VEC_RESET = 0xFFFE
 
 
+def _parse_dump_range(value):
+    try:
+        start_text, end_text = value.split("-", 1)
+        start = int(start_text, 16)
+        end = int(end_text, 16)
+    except ValueError as exc:
+        raise SystemExit(f"invalid --dump-memory range: {value!r}") from exc
+    if not (0 <= start <= end <= 0xFFFF):
+        raise SystemExit(f"invalid --dump-memory range: {value!r}")
+    return start, end
+
+
+def _print_memory_dump(mem, start, end):
+    addr = start
+    while addr <= end:
+        count = min(16, end - addr + 1)
+        values = mem[addr:addr + count]
+        hex_part = " ".join(f"{b:02X}" for b in values)
+        ascii_part = "".join(chr(b) if 0x20 <= b <= 0x7E else "." for b in values)
+        print(f"{addr:04X} {hex_part:<47}  {ascii_part}")
+        addr += count
+
+
 class ACIA:
     """MC6850 ACIA の擬似実装（標準入出力をシリアル端末として扱う）"""
 
-    def __init__(self, input_data=None):
+    def __init__(self, input_data=None, exit_on_eof=None, tx_ready=True):
         self._input_buf = []
         self._input_data = input_data  # スクリプト入力用
         self._input_pos = 0
+        self._tx_ready = tx_ready
         self._interactive = input_data is None
-        self._exit_on_eof = input_data is not None
+        self._exit_on_eof = input_data is not None if exit_on_eof is None else exit_on_eof
         self._old_termios = None
         if self._interactive and sys.stdin.isatty() and not _IS_WINDOWS:
             self._old_termios = termios.tcgetattr(sys.stdin)
@@ -71,7 +97,7 @@ class ACIA:
         """ACIA ステータスレジスタを読む"""
         if self._exit_on_eof and self._input_data is not None and self._input_pos >= len(self._input_data):
             raise SystemExit(0)
-        status = ACIA_STAT_TDRE  # 送信は常にレディ
+        status = ACIA_STAT_TDRE if self._tx_ready else 0
         if self._has_input():
             status |= ACIA_STAT_RDRF
         return status
@@ -84,9 +110,11 @@ class ACIA:
                 ch = self._input_data[self._input_pos]
                 self._input_pos += 1
                 return ch
-            else:
+            elif self._exit_on_eof:
                 # 入力が尽きたら終了
                 raise SystemExit(0)
+            else:
+                return 0
         else:
             # 対話モード
             if _IS_WINDOWS:
@@ -106,6 +134,8 @@ class ACIA:
 
     def write_data(self, value):
         """ACIA データレジスタへ書く（1文字送信）"""
+        if not self._tx_ready:
+            return
         ch = chr(value & 0x7F)
         sys.stdout.write(ch)
         sys.stdout.flush()
@@ -302,7 +332,7 @@ class PIA:
 class MC6800:
     """MC6800 CPU エミュレータコア"""
 
-    def __init__(self, acia, pia=None):
+    def __init__(self, acia, acia2=None, pia=None):
         # レジスタ
         self.a = 0x00       # アキュムレータ A
         self.b = 0x00       # アキュムレータ B
@@ -322,6 +352,7 @@ class MC6800:
 
         # ACIA
         self.acia = acia
+        self.acia2 = acia2
         self.pia = pia
 
         # 実行カウンタ（暴走検知用）
@@ -336,6 +367,10 @@ class MC6800:
             return self.acia.read_status()
         elif addr == ACIA_DATA:
             return self.acia.read_data()
+        elif self.acia2 is not None and addr == ACIA2_CTRL:
+            return self.acia2.read_status()
+        elif self.acia2 is not None and addr == ACIA2_DATA:
+            return self.acia2.read_data()
         elif self.pia is not None and PIA_PRA <= addr <= PIA_CRB:
             return self.pia.read(addr)
         return self.mem[addr]
@@ -349,6 +384,12 @@ class MC6800:
             return
         elif addr == ACIA_DATA:
             self.acia.write_data(val)
+            return
+        elif self.acia2 is not None and addr == ACIA2_CTRL:
+            self.acia2.write_ctrl(val)
+            return
+        elif self.acia2 is not None and addr == ACIA2_DATA:
+            self.acia2.write_data(val)
             return
         elif self.pia is not None and PIA_PRA <= addr <= PIA_CRB:
             self.pia.write(addr, val)
@@ -1076,9 +1117,27 @@ class MC6800:
             self.a = result & 0xFF
             self.update_nz(self.a)
 
+        elif opcode == 0x89:  # ADCA #imm
+            val = self.addr_imm8()
+            carry_in = 1 if self.cc_c else 0
+            result = self.a + val + carry_in
+            self.cc_c = result > 0xFF
+            self.cc_v = bool((~(self.a ^ val) & (self.a ^ result)) & 0x80)
+            self.a = result & 0xFF
+            self.update_nz(self.a)
+
         elif opcode == 0x80:  # SUBA #imm
             val = self.addr_imm8()
             result = self.a - val
+            self.cc_c = result < 0
+            self.cc_v = bool(((self.a ^ val) & (self.a ^ result)) & 0x80)
+            self.a = result & 0xFF
+            self.update_nz(self.a)
+
+        elif opcode == 0x82:  # SBCA #imm
+            val = self.addr_imm8()
+            carry_in = 1 if self.cc_c else 0
+            result = self.a - val - carry_in
             self.cc_c = result < 0
             self.cc_v = bool(((self.a ^ val) & (self.a ^ result)) & 0x80)
             self.a = result & 0xFF
@@ -1129,10 +1188,30 @@ class MC6800:
             self.a = result & 0xFF
             self.update_nz(self.a)
 
+        elif opcode == 0x99:  # ADCA direct
+            addr = self.addr_direct()
+            val = self.read(addr)
+            carry_in = 1 if self.cc_c else 0
+            result = self.a + val + carry_in
+            self.cc_c = result > 0xFF
+            self.cc_v = bool((~(self.a ^ val) & (self.a ^ result)) & 0x80)
+            self.a = result & 0xFF
+            self.update_nz(self.a)
+
         elif opcode == 0x90:  # SUBA direct
             addr = self.addr_direct()
             val = self.read(addr)
             result = self.a - val
+            self.cc_c = result < 0
+            self.cc_v = bool(((self.a ^ val) & (self.a ^ result)) & 0x80)
+            self.a = result & 0xFF
+            self.update_nz(self.a)
+
+        elif opcode == 0x92:  # SBCA direct
+            addr = self.addr_direct()
+            val = self.read(addr)
+            carry_in = 1 if self.cc_c else 0
+            result = self.a - val - carry_in
             self.cc_c = result < 0
             self.cc_v = bool(((self.a ^ val) & (self.a ^ result)) & 0x80)
             self.a = result & 0xFF
@@ -1187,10 +1266,30 @@ class MC6800:
             self.a = result & 0xFF
             self.update_nz(self.a)
 
+        elif opcode == 0xA9:  # ADCA indexed
+            addr = self.addr_indexed()
+            val = self.read(addr)
+            carry_in = 1 if self.cc_c else 0
+            result = self.a + val + carry_in
+            self.cc_c = result > 0xFF
+            self.cc_v = bool((~(self.a ^ val) & (self.a ^ result)) & 0x80)
+            self.a = result & 0xFF
+            self.update_nz(self.a)
+
         elif opcode == 0xA0:  # SUBA indexed
             addr = self.addr_indexed()
             val = self.read(addr)
             result = self.a - val
+            self.cc_c = result < 0
+            self.cc_v = bool(((self.a ^ val) & (self.a ^ result)) & 0x80)
+            self.a = result & 0xFF
+            self.update_nz(self.a)
+
+        elif opcode == 0xA2:  # SBCA indexed
+            addr = self.addr_indexed()
+            val = self.read(addr)
+            carry_in = 1 if self.cc_c else 0
+            result = self.a - val - carry_in
             self.cc_c = result < 0
             self.cc_v = bool(((self.a ^ val) & (self.a ^ result)) & 0x80)
             self.a = result & 0xFF
@@ -1245,10 +1344,30 @@ class MC6800:
             self.a = result & 0xFF
             self.update_nz(self.a)
 
+        elif opcode == 0xB9:  # ADCA extended
+            addr = self.addr_extended()
+            val = self.read(addr)
+            carry_in = 1 if self.cc_c else 0
+            result = self.a + val + carry_in
+            self.cc_c = result > 0xFF
+            self.cc_v = bool((~(self.a ^ val) & (self.a ^ result)) & 0x80)
+            self.a = result & 0xFF
+            self.update_nz(self.a)
+
         elif opcode == 0xB0:  # SUBA extended
             addr = self.addr_extended()
             val = self.read(addr)
             result = self.a - val
+            self.cc_c = result < 0
+            self.cc_v = bool(((self.a ^ val) & (self.a ^ result)) & 0x80)
+            self.a = result & 0xFF
+            self.update_nz(self.a)
+
+        elif opcode == 0xB2:  # SBCA extended
+            addr = self.addr_extended()
+            val = self.read(addr)
+            carry_in = 1 if self.cc_c else 0
+            result = self.a - val - carry_in
             self.cc_c = result < 0
             self.cc_v = bool(((self.a ^ val) & (self.a ^ result)) & 0x80)
             self.a = result & 0xFF
@@ -1301,9 +1420,27 @@ class MC6800:
             self.b = result & 0xFF
             self.update_nz(self.b)
 
+        elif opcode == 0xC9:  # ADCB #imm
+            val = self.addr_imm8()
+            carry_in = 1 if self.cc_c else 0
+            result = self.b + val + carry_in
+            self.cc_c = result > 0xFF
+            self.cc_v = bool((~(self.b ^ val) & (self.b ^ result)) & 0x80)
+            self.b = result & 0xFF
+            self.update_nz(self.b)
+
         elif opcode == 0xC0:  # SUBB #imm
             val = self.addr_imm8()
             result = self.b - val
+            self.cc_c = result < 0
+            self.cc_v = bool(((self.b ^ val) & (self.b ^ result)) & 0x80)
+            self.b = result & 0xFF
+            self.update_nz(self.b)
+
+        elif opcode == 0xC2:  # SBCB #imm
+            val = self.addr_imm8()
+            carry_in = 1 if self.cc_c else 0
+            result = self.b - val - carry_in
             self.cc_c = result < 0
             self.cc_v = bool(((self.b ^ val) & (self.b ^ result)) & 0x80)
             self.b = result & 0xFF
@@ -1575,6 +1712,36 @@ class MC6800:
             self.b = result & 0xFF
             self.update_nz(self.b)
 
+        elif opcode == 0xD9:  # ADCB direct
+            addr = self.addr_direct()
+            val = self.read(addr)
+            carry_in = 1 if self.cc_c else 0
+            result = self.b + val + carry_in
+            self.cc_c = result > 0xFF
+            self.cc_v = bool((~(self.b ^ val) & (self.b ^ result)) & 0x80)
+            self.b = result & 0xFF
+            self.update_nz(self.b)
+
+        elif opcode == 0xE9:  # ADCB indexed
+            addr = self.addr_indexed()
+            val = self.read(addr)
+            carry_in = 1 if self.cc_c else 0
+            result = self.b + val + carry_in
+            self.cc_c = result > 0xFF
+            self.cc_v = bool((~(self.b ^ val) & (self.b ^ result)) & 0x80)
+            self.b = result & 0xFF
+            self.update_nz(self.b)
+
+        elif opcode == 0xF9:  # ADCB extended
+            addr = self.addr_extended()
+            val = self.read(addr)
+            carry_in = 1 if self.cc_c else 0
+            result = self.b + val + carry_in
+            self.cc_c = result > 0xFF
+            self.cc_v = bool((~(self.b ^ val) & (self.b ^ result)) & 0x80)
+            self.b = result & 0xFF
+            self.update_nz(self.b)
+
         elif opcode == 0xD0:  # SUBB direct
             addr = self.addr_direct()
             val = self.read(addr)
@@ -1597,6 +1764,36 @@ class MC6800:
             addr = self.addr_extended()
             val = self.read(addr)
             result = self.b - val
+            self.cc_c = result < 0
+            self.cc_v = bool(((self.b ^ val) & (self.b ^ result)) & 0x80)
+            self.b = result & 0xFF
+            self.update_nz(self.b)
+
+        elif opcode == 0xD2:  # SBCB direct
+            addr = self.addr_direct()
+            val = self.read(addr)
+            carry_in = 1 if self.cc_c else 0
+            result = self.b - val - carry_in
+            self.cc_c = result < 0
+            self.cc_v = bool(((self.b ^ val) & (self.b ^ result)) & 0x80)
+            self.b = result & 0xFF
+            self.update_nz(self.b)
+
+        elif opcode == 0xE2:  # SBCB indexed
+            addr = self.addr_indexed()
+            val = self.read(addr)
+            carry_in = 1 if self.cc_c else 0
+            result = self.b - val - carry_in
+            self.cc_c = result < 0
+            self.cc_v = bool(((self.b ^ val) & (self.b ^ result)) & 0x80)
+            self.b = result & 0xFF
+            self.update_nz(self.b)
+
+        elif opcode == 0xF2:  # SBCB extended
+            addr = self.addr_extended()
+            val = self.read(addr)
+            carry_in = 1 if self.cc_c else 0
+            result = self.b - val - carry_in
             self.cc_c = result < 0
             self.cc_v = bool(((self.b ^ val) & (self.b ^ result)) & 0x80)
             self.b = result & 0xFF
@@ -1633,6 +1830,12 @@ def main():
     parser.add_argument("--max-cycles", type=int, default=100_000_000,
                         help="最大実行サイクル数（デフォルト: 100000000）")
     parser.add_argument("--sd", help="SD card image file attached to the temporary PIA SPI port")
+    parser.add_argument("--key-input",
+                        help="2nd ACIA keyboard input script file")
+    parser.add_argument("--dump-memory",
+                        help="終了時に指定範囲のメモリを16進ダンプする。例: A000-A03F")
+    parser.add_argument("--acia-tdre-stuck-low", action="store_true",
+                        help="1st ACIAの送信レディを常に0として扱う")
     args = parser.parse_args()
 
     # ROM ロード
@@ -1644,11 +1847,16 @@ def main():
     if args.input:
         with open(args.input, "rb") as f:
             input_data = list(f.read())
+    key_input_data = None
+    if args.key_input:
+        with open(args.key_input, "rb") as f:
+            key_input_data = list(f.read())
 
-    acia = ACIA(input_data=input_data)
+    acia = ACIA(input_data=input_data, tx_ready=not args.acia_tdre_stuck_low)
+    acia2 = ACIA(input_data=key_input_data or [], exit_on_eof=False)
     sdcard = SDCard.from_file(args.sd) if args.sd else None
     pia = PIA(sdcard) if sdcard is not None else None
-    cpu = MC6800(acia, pia=pia)
+    cpu = MC6800(acia, acia2=acia2, pia=pia)
     cpu.max_cycles = args.max_cycles
 
     # ROM のサイズに応じて配置を決定
@@ -1657,10 +1865,17 @@ def main():
     rom_start = ROM_END - rom_size + 1
     cpu.load_rom(rom_data, rom_start)
 
+    exit_code = 0
     try:
         cpu.run()
+    except SystemExit as exc:
+        exit_code = int(exc.code or 0) if isinstance(exc.code, int) else 1
     finally:
         acia.cleanup()
+    if args.dump_memory:
+        start, end = _parse_dump_range(args.dump_memory)
+        _print_memory_dump(cpu.mem, start, end)
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":
