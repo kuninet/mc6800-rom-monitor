@@ -189,10 +189,10 @@ def test_sdfs3_cmd_dispatch_parser_classifies_stub_commands() -> None:
         ("DIR", 0x03),
         (" dir ", 0x03),
         ("TYPE README.TXT", 0x03),
-        ("LoAd HELLO.S", 0x13),
-        ("RUN 1234", 0x14),
-        ("FOO.COM ARG", 0x15),
-        ("foo.com", 0x15),
+        ("LoAd HELLO.S", 0x05),
+        ("RUN MISSING.S", 0x06),
+        ("FOO.COM ARG", 0x07),
+        ("foo.com", 0x07),
         ("", 0x02),
         ("   ", 0x02),
         ("UNKNOWN", 0x02),
@@ -634,6 +634,98 @@ def test_sdfs3_cmd_dir_and_type_read_fat_files() -> None:
     print("[PASS] test_sdfs3_cmd_dir_and_type_read_fat_files")
 
 
+def test_sdfs3_cmd_load_run_and_com_read_fat_files() -> None:
+    profile = "sbcio_4000"
+    expected = EXPECTED[profile]
+    _run_make(profile, "bin")
+    _run_make(profile, "sdfs3sys")
+    _run_make(profile, "sdfs-tools")
+    suffix = expected["suffix"]
+    symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.lst",
+        "SD_INIT",
+        "SD_READ_SECTOR",
+        "SDFS3_FIND_API",
+        "SD_LBA0",
+        "SD_LBA1",
+        "SD_LBA2",
+        "SD_LBA3",
+        "SD_SECTOR_BUF",
+        "SDFS_LOAD_BASE",
+    )
+    sdfs3sys = (PROJECT_ROOT / "build" / f"SDFS3SYS{suffix}.BIN").read_bytes()
+    hello_com = (PROJECT_ROOT / "build" / "HELLO.COM").read_bytes()
+    args_com = (PROJECT_ROOT / "build" / "ARGS.COM").read_bytes()
+    run_program = bytes(
+        [
+            0xCE,
+            0x01,
+            0x07,
+            0xBD,
+            0xE0,
+            0x7E,
+            0x3F,
+            0x0D,
+            0x0A,
+            *b"HELLO, WORLD",
+            0x0D,
+            0x0A,
+            0x04,
+        ]
+    )
+    with _temporary_directory() as tmp:
+        harness = _assemble_fixed_lba_loader_harness(Path(tmp), symbols)
+    sd_image = _build_sdfs3sys_fat_sd_image(
+        sdfs3sys,
+        [
+            _file("HELLO.S", _srec_file(0x0200, b"S")),
+            _file("HELLO.HEX", _ihex_file(0x0201, b"I")),
+            _file("RUN.S", _srec_file(0x0100, run_program, entry_address=0x0100)),
+            _file("HELLO.COM", hello_com),
+            _file("ARGS.COM", args_com),
+            _file("EMPTY.COM", b""),
+            _file("BIG.COM", b"\x39" * 0x3F01),
+        ],
+    )
+    stdout, stderr, rc = _run_emu(
+        rom_path=PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
+        input_text=(
+            "M0110\r3F\r.\r"
+            f"M{SDFS3SYS_LOADER_HARNESS_ADDR:04X}\r{_hex_bytes(harness)}\r.\r"
+            f"G{SDFS3SYS_LOADER_HARNESS_ADDR:04X}\r"
+            "CMD LOAD HELLO.S\r"
+            "D0200-0200\r"
+            "CMD LOAD HELLO.HEX\r"
+            "D0201-0201\r"
+            "CMD RUN 0110\r"
+            "CMD HELLO.COM\r"
+            "CMD ARGS.COM AAA BBB\r"
+            "CMD NOFILE.COM\r"
+            "CMD EMPTY.COM\r"
+            "CMD BIG.COM\r"
+            "CMD RUN HELLO.HEX\r"
+            "CMD RUN RUN.S\r"
+            "\r"
+        ),
+        max_cycles=360_000_000,
+        sd_image=sd_image,
+        timeout=40,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, (
+        f"emulator failed for SDFS3 LOAD/RUN/.COM: rc={rc} stderr={stderr!r}"
+    )
+    assert stdout.count("OK") >= 2, f"CMD LOAD did not report success: {stdout!r}"
+    assert "0200 53" in stdout, f"CMD LOAD HELLO.S did not write S-record data: {stdout!r}"
+    assert "0201 49" in stdout, f"CMD LOAD HELLO.HEX did not write HEX data: {stdout!r}"
+    assert "BRK 0110" in stdout, f"CMD RUN addr did not jump to the requested address: {stdout!r}"
+    assert "HELLO COM" in stdout, f"CMD HELLO.COM did not execute: {stdout!r}"
+    assert "ARGS AAA BBB" in stdout, f"CMD ARGS.COM did not pass arguments: {stdout!r}"
+    assert stdout.count("\n?\n") == 4, f"bad .COM/RUN inputs were not rejected exactly once: {stdout!r}"
+    assert "HELLO, WORLD" in stdout, f"CMD RUN RUN.S did not execute S-record entry: {stdout!r}"
+    assert "BRK 0106" in stdout, f"RUN.S did not reach SWI through entry address: {stdout!r}"
+    print("[PASS] test_sdfs3_cmd_load_run_and_com_read_fat_files")
+
+
 def test_fixed_lba_loader_harness_rejects_bad_sdfs3sys() -> None:
     profile = "sbcio_4000"
     expected = EXPECTED[profile]
@@ -769,6 +861,43 @@ def _build_sdfs3sys_fat_sd_image(system_image: bytes, files: list[Fat32File]) ->
     start = SDFS3SYS_FIXED_LBA * SECTOR_SIZE
     mutable[start : start + len(system_image)] = system_image
     return bytes(mutable)
+
+
+def _file(name: str, data: bytes, path: tuple[str, ...] = ()) -> Fat32File:
+    stem, _dot, ext = name.partition(".")
+    name83 = stem.upper().encode("ascii").ljust(8, b" ")
+    name83 += ext.upper().encode("ascii").ljust(3, b" ")
+    path83 = tuple(part.upper().encode("ascii").ljust(8, b" ") + b"   " for part in path)
+    return Fat32File(name83, data, path=path83)
+
+
+def _srec_file(
+    address: int,
+    data: bytes,
+    trailing_newline: bool = True,
+    entry_address: int = 0,
+) -> bytes:
+    count = len(data) + 3
+    values = [count, (address >> 8) & 0xFF, address & 0xFF, *data]
+    checksum = (~sum(values)) & 0xFF
+    record = "S1" + "".join(f"{value:02X}" for value in [*values, checksum])
+    entry_values = [3, (entry_address >> 8) & 0xFF, entry_address & 0xFF]
+    entry_checksum = (~sum(entry_values)) & 0xFF
+    entry_record = "S9" + "".join(f"{value:02X}" for value in [*entry_values, entry_checksum])
+    text = record + "\r\n" + entry_record
+    if trailing_newline:
+        text += "\r\n"
+    return text.encode("ascii")
+
+
+def _ihex_file(address: int, data: bytes, trailing_newline: bool = True) -> bytes:
+    values = [len(data), (address >> 8) & 0xFF, address & 0xFF, 0x00, *data]
+    checksum = (-sum(values)) & 0xFF
+    record = ":" + "".join(f"{value:02X}" for value in [*values, checksum])
+    text = record + "\r\n:00000001FF"
+    if trailing_newline:
+        text += "\r\n"
+    return text.encode("ascii")
 
 
 def _break_resident_api_and_refresh_checksum(data: bytearray) -> None:
@@ -1411,6 +1540,7 @@ def main() -> None:
         test_rom_cmd_gateway_calls_resident_dispatch,
         test_fixed_lba_loader_harness_loads_sdfs3sys,
         test_sdfs3_cmd_dir_and_type_read_fat_files,
+        test_sdfs3_cmd_load_run_and_com_read_fat_files,
         test_fixed_lba_loader_harness_rejects_bad_sdfs3sys,
     ]
     passed = 0
