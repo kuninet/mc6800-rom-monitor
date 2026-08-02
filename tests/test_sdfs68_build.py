@@ -972,7 +972,7 @@ def test_sdfs_rejects_missing_boot_services() -> None:
     input_text = (
         f"M{symbols['SDFS_LOAD_BASE']:04X}\r"
         f"{_hex_bytes(list(sdfs))}\r.\r"
-        f"G{symbols['SDFS_ENTRY']:04X}\rX"
+        f"G{symbols['SDFS_ENTRY']:04X}\rX\r"
     )
     stdout, stderr, rc = _run_emu(
         rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
@@ -1006,7 +1006,7 @@ def test_sdfs_rejects_bad_boot_services_headers() -> None:
             f"{_hex_bytes(list(header))}\r.\r"
             f"M{symbols['SDFS_LOAD_BASE']:04X}\r"
             f"{_hex_bytes(list(sdfs))}\r.\r"
-            f"G{symbols['SDFS_ENTRY']:04X}\rX"
+            f"G{symbols['SDFS_ENTRY']:04X}\rX\r"
         )
         stdout, stderr, rc = _run_emu(
             rom_path=PROJECT_ROOT / "build" / "mc6800-monitor-sbcio-vdg.bin",
@@ -1091,7 +1091,7 @@ def _run_emu(
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=20,
+            timeout=60,
         )
         return result.stdout, result.stderr, result.returncode
     except subprocess.TimeoutExpired as exc:

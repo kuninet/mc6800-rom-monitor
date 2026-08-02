@@ -13,8 +13,12 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "tools"))
 EMU_PATH = PROJECT_ROOT / "emu" / "sbc6800_emu.py"
+SDFS3SYS_FIXED_LBA = 64
+SECTOR_SIZE = 512
+SDFS3SYS_LOADER_HARNESS_ADDR = 0x0300
 
 from mk_sdfs3sys import (  # noqa: E402
+    CHECKSUM_OFFSET,
     FLAG_CHECKSUM16,
     HEADER_SIZE,
     MAGIC,
@@ -457,6 +461,130 @@ def test_rom_cmd_gateway_calls_resident_dispatch() -> None:
     print("[PASS] test_rom_cmd_gateway_calls_resident_dispatch")
 
 
+def test_fixed_lba_loader_harness_loads_sdfs3sys() -> None:
+    profile = "sbcio_4000"
+    expected = EXPECTED[profile]
+    _run_make(profile, "bin")
+    _run_make(profile, "sdfs3sys")
+    suffix = expected["suffix"]
+    symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.lst",
+        "SD_INIT",
+        "SD_READ_SECTOR",
+        "SDFS3_FIND_API",
+        "SD_LBA0",
+        "SD_LBA1",
+        "SD_LBA2",
+        "SD_LBA3",
+        "SD_SECTOR_BUF",
+        "SDFS_LOAD_BASE",
+    )
+    sdfs3sys = (PROJECT_ROOT / "build" / f"SDFS3SYS{suffix}.BIN").read_bytes()
+    assert len(sdfs3sys) <= SECTOR_SIZE, "loader harness is intentionally single-sector"
+    payload = sdfs3sys[HEADER_SIZE:]
+    with tempfile.TemporaryDirectory() as tmp:
+        harness = _assemble_fixed_lba_loader_harness(Path(tmp), symbols)
+    stdout, stderr, rc = _run_emu(
+        rom_path=PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
+        input_text=(
+            f"M{SDFS3SYS_LOADER_HARNESS_ADDR:04X}\r{_hex_bytes(harness)}\r.\r"
+            f"G{SDFS3SYS_LOADER_HARNESS_ADDR:04X}\r"
+            "D0200-0202\r"
+            f"D{symbols['SDFS_LOAD_BASE']:04X}-{symbols['SDFS_LOAD_BASE'] + len(payload) - 1:04X}\r"
+            "\r"
+        ),
+        max_cycles=120_000_000,
+        dump_range=f"0200-{symbols['SDFS_LOAD_BASE'] + len(payload) - 1:04X}",
+        sd_image=_build_sdfs3sys_sd_image(sdfs3sys),
+        timeout=20,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, (
+        f"emulator failed for SDFS3SYS loader harness: rc={rc} stderr={stderr!r}"
+    )
+    status = _dump_bytes(stdout, 0x0200)
+    assert status[0] == 0x42, f"SDFS3SYS loader should report success: {status!r}\nstdout={stdout!r}"
+    assert status[1:3] == [
+        (symbols["SDFS_LOAD_BASE"] >> 8) & 0xFF,
+        symbols["SDFS_LOAD_BASE"] & 0xFF,
+    ], f"SDFS3_FIND_API should return resident base: {status!r}"
+    loaded = _dump_range_bytes(stdout, symbols["SDFS_LOAD_BASE"], len(payload))
+    assert bytes(loaded) == payload, f"resident payload was not fully loaded: {stdout!r}"
+    print("[PASS] test_fixed_lba_loader_harness_loads_sdfs3sys")
+
+
+def test_fixed_lba_loader_harness_rejects_bad_sdfs3sys() -> None:
+    profile = "sbcio_4000"
+    expected = EXPECTED[profile]
+    _run_make(profile, "bin")
+    _run_make(profile, "sdfs3sys")
+    suffix = expected["suffix"]
+    symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.lst",
+        "SD_INIT",
+        "SD_READ_SECTOR",
+        "SDFS3_FIND_API",
+        "SD_LBA0",
+        "SD_LBA1",
+        "SD_LBA2",
+        "SD_LBA3",
+        "SD_SECTOR_BUF",
+        "SDFS_LOAD_BASE",
+    )
+    image = (PROJECT_ROOT / "build" / f"SDFS3SYS{suffix}.BIN").read_bytes()
+    assert len(image) <= SECTOR_SIZE, "loader harness is intentionally single-sector"
+    with tempfile.TemporaryDirectory() as tmp:
+        harness = _assemble_fixed_lba_loader_harness(Path(tmp), symbols)
+
+    cases = [
+        ("bad magic", lambda data: data.__setitem__(0, ord("X")), 0xE1),
+        ("bad version", lambda data: data.__setitem__(0x08, 0x02), 0xE2),
+        ("bad load address", lambda data: data.__setitem__(0x0C, 0x40), 0xE3),
+        ("bad small size", lambda data: data.__setitem__(slice(0x0E, 0x10), b"\x00\x20"), 0xE4),
+        ("bad oversize", lambda data: data.__setitem__(slice(0x0E, 0x10), b"\x02\x01"), 0xE4),
+        ("bad checksum", lambda data: data.__setitem__(-1, data[-1] ^ 0x01), 0xE5),
+        ("bad resident api", _break_resident_api_and_refresh_checksum, 0xE7),
+    ]
+    for label, mutate, expected_status in cases:
+        bad_image = bytearray(image)
+        mutate(bad_image)
+        stdout, stderr, rc = _run_emu(
+            rom_path=PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
+            input_text=(
+                f"M{SDFS3SYS_LOADER_HARNESS_ADDR:04X}\r{_hex_bytes(harness)}\r.\r"
+                f"G{SDFS3SYS_LOADER_HARNESS_ADDR:04X}\rD0200-0200\r\r"
+            ),
+            max_cycles=120_000_000,
+            dump_range="0200-0200",
+            sd_image=_build_sdfs3sys_sd_image(bytes(bad_image)),
+            timeout=20,
+        )
+        assert rc == 0 and "[TIMEOUT]" not in stderr, (
+            f"emulator failed for {label}: rc={rc} stderr={stderr!r}"
+        )
+        status = _dump_bytes(stdout, 0x0200)
+        assert status[0] == expected_status, (
+            f"{label} status mismatch: {status!r}\nstdout={stdout!r}"
+        )
+
+    stdout, stderr, rc = _run_emu(
+        rom_path=PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
+        input_text=(
+            f"M{SDFS3SYS_LOADER_HARNESS_ADDR:04X}\r{_hex_bytes(harness)}\r.\r"
+            f"G{SDFS3SYS_LOADER_HARNESS_ADDR:04X}\rD0200-0200\r\r"
+        ),
+        max_cycles=120_000_000,
+        dump_range="0200-0200",
+        sd_image=bytes(SECTOR_SIZE * SDFS3SYS_FIXED_LBA),
+        timeout=20,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, (
+        f"emulator failed for read failure: rc={rc} stderr={stderr!r}"
+    )
+    status = _dump_bytes(stdout, 0x0200)
+    assert status[0] == 0xE6, f"SD read failure should be reported: {status!r}\nstdout={stdout!r}"
+    print("[PASS] test_fixed_lba_loader_harness_rejects_bad_sdfs3sys")
+
+
 def _word(data: bytes, offset: int) -> int:
     return (data[offset] << 8) | data[offset + 1]
 
@@ -498,6 +626,308 @@ def _mutated_header(load_base: int, offset: int, value: int) -> bytes:
     return bytes(data)
 
 
+def _build_sdfs3sys_sd_image(image: bytes) -> bytes:
+    assert len(image) <= SECTOR_SIZE, "loader harness is intentionally single-sector"
+    sectors = bytearray(SECTOR_SIZE * (SDFS3SYS_FIXED_LBA + 1))
+    start = SECTOR_SIZE * SDFS3SYS_FIXED_LBA
+    sectors[start : start + len(image)] = image
+    return bytes(sectors)
+
+
+def _break_resident_api_and_refresh_checksum(data: bytearray) -> None:
+    data[HEADER_SIZE] = ord("X")
+    data[CHECKSUM_OFFSET] = 0
+    data[CHECKSUM_OFFSET + 1] = 0
+    checksum = checksum16(bytes(data))
+    data[CHECKSUM_OFFSET] = (checksum >> 8) & 0xFF
+    data[CHECKSUM_OFFSET + 1] = checksum & 0xFF
+
+
+def _assemble_fixed_lba_loader_harness(tmp: Path, symbols: dict[str, int]) -> bytes:
+    source = tmp / "sdfs3sys_loader_harness.asm"
+    obj = tmp / "sdfs3sys_loader_harness.p"
+    bin_path = tmp / "sdfs3sys_loader_harness.bin"
+    lst = tmp / "sdfs3sys_loader_harness.lst"
+    source.write_text(_fixed_lba_loader_harness_source(symbols), encoding="ascii")
+    result = subprocess.run(
+        ["asl", "-q", "-L", "-olist", str(lst), "-o", str(obj), str(source)],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=10,
+    )
+    if result.returncode != 0:
+        raise AssertionError(f"assemble loader harness failed: {result.stdout!r} {result.stderr!r}")
+    result = subprocess.run(
+        ["p2bin", str(obj), str(bin_path), "-q"],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=10,
+    )
+    if result.returncode != 0:
+        raise AssertionError(f"p2bin loader harness failed: {result.stdout!r} {result.stderr!r}")
+    return bin_path.read_bytes()
+
+
+def _fixed_lba_loader_harness_source(symbols: dict[str, int]) -> str:
+    def equ(name: str) -> str:
+        return f"${symbols[name]:04X}"
+
+    load_base_hi = (symbols["SDFS_LOAD_BASE"] >> 8) & 0xFF
+    load_base_lo = symbols["SDFS_LOAD_BASE"] & 0xFF
+    return f"""        cpu     6800
+        org     ${SDFS3SYS_LOADER_HARNESS_ADDR:04X}
+
+STATUS          equ $0200
+RESULT_X        equ $0201
+EXPECTED_SUM    equ $0203
+COMPUTED_SUM    equ $0205
+REMAIN          equ $0207
+SRC_PTR         equ $0209
+DST_PTR         equ $020B
+
+SD_INIT         equ {equ("SD_INIT")}
+SD_READ_SECTOR  equ {equ("SD_READ_SECTOR")}
+SDFS3_FIND_API  equ {equ("SDFS3_FIND_API")}
+SD_LBA0         equ {equ("SD_LBA0")}
+SD_LBA1         equ {equ("SD_LBA1")}
+SD_LBA2         equ {equ("SD_LBA2")}
+SD_LBA3         equ {equ("SD_LBA3")}
+SD_SECTOR_BUF   equ {equ("SD_SECTOR_BUF")}
+SDFS_LOAD_BASE  equ {equ("SDFS_LOAD_BASE")}
+
+START:
+        jsr     SD_INIT
+        bcs     FAIL_SD
+        clr     SD_LBA0
+        clr     SD_LBA1
+        clr     SD_LBA2
+        ldaa    #${SDFS3SYS_FIXED_LBA:02X}
+        staa    SD_LBA3
+        ldx     #SD_SECTOR_BUF
+        jsr     SD_READ_SECTOR
+        bcs     FAIL_SD
+        jsr     CHECK_HEADER
+        bcs     FAIL
+        jsr     COPY_PAYLOAD
+        jsr     SDFS3_FIND_API
+        bcs     FAIL_API
+        stx     RESULT_X
+        ldaa    #$42
+        staa    STATUS
+        swi
+
+FAIL_API:
+        ldaa    #$E7
+        bra     FAIL
+FAIL_SD:
+        ldaa    #$E6
+FAIL:
+        staa    STATUS
+        swi
+
+CHECK_HEADER:
+        ldx     #SD_SECTOR_BUF
+        ldaa    0,x
+        cmpa    #'S'
+        beq     MAGIC0_OK
+        jmp     FAIL_MAGIC
+MAGIC0_OK:
+        ldaa    1,x
+        cmpa    #'D'
+        beq     MAGIC1_OK
+        jmp     FAIL_MAGIC
+MAGIC1_OK:
+        ldaa    2,x
+        cmpa    #'F'
+        beq     MAGIC2_OK
+        jmp     FAIL_MAGIC
+MAGIC2_OK:
+        ldaa    3,x
+        cmpa    #'S'
+        beq     MAGIC3_OK
+        jmp     FAIL_MAGIC
+MAGIC3_OK:
+        ldaa    4,x
+        cmpa    #'3'
+        beq     MAGIC4_OK
+        jmp     FAIL_MAGIC
+MAGIC4_OK:
+        ldaa    5,x
+        cmpa    #'S'
+        beq     MAGIC5_OK
+        jmp     FAIL_MAGIC
+MAGIC5_OK:
+        ldaa    6,x
+        cmpa    #'Y'
+        beq     MAGIC6_OK
+        jmp     FAIL_MAGIC
+MAGIC6_OK:
+        ldaa    7,x
+        cmpa    #'S'
+        beq     MAGIC7_OK
+        jmp     FAIL_MAGIC
+MAGIC7_OK:
+        ldaa    8,x
+        cmpa    #1
+        beq     VERSION_OK
+        jmp     FAIL_VERSION
+VERSION_OK:
+        ldaa    9,x
+        cmpa    #1
+        beq     ABI_MAJOR_OK
+        jmp     FAIL_VERSION
+ABI_MAJOR_OK:
+        ldaa    11,x
+        cmpa    #1
+        beq     FLAGS_OK
+        jmp     FAIL_VERSION
+FLAGS_OK:
+        ldaa    12,x
+        cmpa    #${load_base_hi:02X}
+        beq     LOAD_HI_OK
+        jmp     FAIL_LOAD
+LOAD_HI_OK:
+        ldaa    13,x
+        cmpa    #${load_base_lo:02X}
+        beq     LOAD_LO_OK
+        jmp     FAIL_LOAD
+LOAD_LO_OK:
+        ldaa    26,x
+        beq     HEADER_SIZE_HI_OK
+        jmp     FAIL_SIZE
+HEADER_SIZE_HI_OK:
+        ldaa    27,x
+        cmpa    #$20
+        beq     HEADER_SIZE_LO_OK
+        jmp     FAIL_SIZE
+HEADER_SIZE_LO_OK:
+        ldaa    14,x
+        cmpa    #2
+        bls     SIZE_HI_UNDER_MAX
+        jmp     FAIL_SIZE
+SIZE_HI_UNDER_MAX:
+        bne     SIZE_NOT_512
+        ldaa    15,x
+        beq     SIZE_OK
+        jmp     FAIL_SIZE
+SIZE_NOT_512:
+        ldaa    14,x
+        bne     SIZE_OK
+        ldaa    15,x
+        cmpa    #$21
+        bhs     SIZE_OK
+        jmp     FAIL_SIZE
+SIZE_OK:
+        ldaa    24,x
+        staa    EXPECTED_SUM
+        ldaa    25,x
+        staa    EXPECTED_SUM+1
+        clr     24,x
+        clr     25,x
+        clr     COMPUTED_SUM
+        clr     COMPUTED_SUM+1
+        ldaa    14,x
+        staa    REMAIN
+        ldaa    15,x
+        staa    REMAIN+1
+        ldx     #SD_SECTOR_BUF
+SUM_LOOP:
+        ldaa    REMAIN
+        oraa    REMAIN+1
+        beq     SUM_DONE
+        ldaa    0,x
+        jsr     ADD_SUM
+        inx
+        jsr     DEC_REMAIN
+        bra     SUM_LOOP
+SUM_DONE:
+        ldaa    COMPUTED_SUM
+        cmpa    EXPECTED_SUM
+        beq     SUM_HI_OK
+        jmp     FAIL_CHECKSUM
+SUM_HI_OK:
+        ldaa    COMPUTED_SUM+1
+        cmpa    EXPECTED_SUM+1
+        beq     SUM_LO_OK
+        jmp     FAIL_CHECKSUM
+SUM_LO_OK:
+        clc
+        rts
+
+COPY_PAYLOAD:
+        ldx     #SD_SECTOR_BUF
+        ldaa    14,x
+        staa    REMAIN
+        ldaa    15,x
+        suba    #$20
+        staa    REMAIN+1
+        bcc     COPY_SIZE_OK
+        dec     REMAIN
+COPY_SIZE_OK:
+        ldx     #SD_SECTOR_BUF+$20
+        stx     SRC_PTR
+        ldx     #SDFS_LOAD_BASE
+        stx     DST_PTR
+COPY_LOOP:
+        ldaa    REMAIN
+        oraa    REMAIN+1
+        beq     COPY_DONE
+        ldx     SRC_PTR
+        ldaa    0,x
+        inx
+        stx     SRC_PTR
+        ldx     DST_PTR
+        staa    0,x
+        inx
+        stx     DST_PTR
+        jsr     DEC_REMAIN
+        bra     COPY_LOOP
+COPY_DONE:
+        rts
+
+ADD_SUM:
+        adda    COMPUTED_SUM+1
+        staa    COMPUTED_SUM+1
+        bcc     ADD_SUM_DONE
+        inc     COMPUTED_SUM
+ADD_SUM_DONE:
+        rts
+
+DEC_REMAIN:
+        dec     REMAIN+1
+        ldaa    REMAIN+1
+        cmpa    #$FF
+        bne     DEC_REMAIN_DONE
+        dec     REMAIN
+DEC_REMAIN_DONE:
+        rts
+
+FAIL_MAGIC:
+        ldaa    #$E1
+        bra     CHECK_FAIL
+FAIL_VERSION:
+        ldaa    #$E2
+        bra     CHECK_FAIL
+FAIL_LOAD:
+        ldaa    #$E3
+        bra     CHECK_FAIL
+FAIL_SIZE:
+        ldaa    #$E4
+        bra     CHECK_FAIL
+FAIL_CHECKSUM:
+        ldaa    #$E5
+CHECK_FAIL:
+        sec
+        rts
+"""
+
+
 def _hex_bytes(data: bytes) -> str:
     return "\r".join(f"{value:02X}" for value in data)
 
@@ -508,10 +938,17 @@ def _run_emu(
     input_text: str,
     max_cycles: int,
     dump_range: str = "0200-0202",
+    sd_image: bytes | None = None,
+    timeout: int = 10,
 ) -> tuple[str, str, int]:
     with tempfile.NamedTemporaryFile("w", encoding="ascii", delete=False) as f:
         f.write(input_text)
         input_path = Path(f.name)
+    sd_path: Path | None = None
+    if sd_image is not None:
+        with tempfile.NamedTemporaryFile(suffix=".img", delete=False) as f:
+            f.write(sd_image)
+            sd_path = Path(f.name)
     try:
         cmd = [
             sys.executable,
@@ -524,6 +961,8 @@ def _run_emu(
             "--dump-memory",
             dump_range,
         ]
+        if sd_path is not None:
+            cmd.extend(["--sd", str(sd_path)])
         result = subprocess.run(
             cmd,
             cwd=PROJECT_ROOT,
@@ -531,10 +970,12 @@ def _run_emu(
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=10,
+            timeout=timeout,
         )
     finally:
         input_path.unlink(missing_ok=True)
+        if sd_path is not None:
+            sd_path.unlink(missing_ok=True)
     return result.stdout, result.stderr, result.returncode
 
 
@@ -544,6 +985,19 @@ def _dump_bytes(stdout: str, address: int) -> list[int]:
             parts = re.findall(r"\b[0-9A-Fa-f]{2}\b", line.split("  ", 1)[0])
             return [int(part, 16) for part in parts]
     raise AssertionError(f"missing dump line for {address:04X}: {stdout!r}")
+
+
+def _dump_range_bytes(stdout: str, address: int, length: int) -> list[int]:
+    result: list[int] = []
+    current = address
+    while len(result) < length:
+        line_values = _dump_bytes(stdout, current)
+        if not line_values:
+            raise AssertionError(f"empty dump line for {current:04X}: {stdout!r}")
+        take = min(len(line_values), length - len(result))
+        result.extend(line_values[:take])
+        current += len(line_values)
+    return result
 
 
 def _run_make(
@@ -601,6 +1055,8 @@ def main() -> None:
         test_sdfs3sys_cli_reports_bad_input,
         test_rom_detects_sdfs3_api_header,
         test_rom_cmd_gateway_calls_resident_dispatch,
+        test_fixed_lba_loader_harness_loads_sdfs3sys,
+        test_fixed_lba_loader_harness_rejects_bad_sdfs3sys,
     ]
     passed = 0
     failed = 0
