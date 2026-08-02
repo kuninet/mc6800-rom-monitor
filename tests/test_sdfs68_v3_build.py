@@ -7,7 +7,9 @@ import re
 import subprocess
 import sys
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
+from uuid import uuid4
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -16,6 +18,7 @@ EMU_PATH = PROJECT_ROOT / "emu" / "sbc6800_emu.py"
 SDFS3SYS_FIXED_LBA = 64
 SECTOR_SIZE = 512
 SDFS3SYS_LOADER_HARNESS_ADDR = 0x0300
+TEMP_ROOT = PROJECT_ROOT / "build" / "tmp"
 
 from mk_sdfs3sys import (  # noqa: E402
     CHECKSUM_OFFSET,
@@ -167,6 +170,62 @@ def test_sdfs3_memtop_and_caps_match_calling_convention() -> None:
     print("[PASS] test_sdfs3_memtop_and_caps_match_calling_convention")
 
 
+def test_sdfs3_cmd_dispatch_parser_classifies_stub_commands() -> None:
+    profile = "sbcio_4000"
+    expected = EXPECTED[profile]
+    _run_make(profile, "bin")
+    _run_make(profile, "sdfs3")
+    suffix = expected["suffix"]
+    resident = (PROJECT_ROOT / "build" / f"SDFS3{suffix}.BIN").read_bytes()
+    symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"SDFS3{suffix}.lst",
+        "SDFS_LOAD_BASE",
+        "SDFS3_CMD_DISPATCH",
+        "SDFS3_GET_ERROR",
+    )
+    cases = [
+        ("DIR", 0x11),
+        (" dir ", 0x11),
+        ("TYPE README.TXT", 0x12),
+        ("LoAd HELLO.S", 0x13),
+        ("RUN 1234", 0x14),
+        ("FOO.COM ARG", 0x15),
+        ("foo.com", 0x15),
+        ("", 0x02),
+        ("   ", 0x02),
+        ("UNKNOWN", 0x02),
+    ]
+    with _temporary_directory() as tmp:
+        harness = _assemble_cmd_dispatch_harness(Path(tmp), symbols, cases)
+    result_addr = 0x0200
+    stdout, stderr, rc = _run_emu(
+        rom_path=PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
+        input_text=(
+            f"M{symbols['SDFS_LOAD_BASE']:04X}\r"
+            f"{_hex_bytes(resident)}\r.\r"
+            "M0300\r"
+            f"{_hex_bytes(harness)}\r.\r"
+            "G0300\r"
+            f"D{result_addr:04X}-{result_addr + len(cases) * 2 - 1:04X}\r"
+            "\r"
+        ),
+        max_cycles=30_000_000,
+        dump_range=f"{result_addr:04X}-{result_addr + len(cases) * 2 - 1:04X}",
+        timeout=20,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, (
+        f"emulator failed for CMD_DISPATCH parser: rc={rc} stderr={stderr!r}"
+    )
+    values = _dump_range_bytes(stdout, result_addr, len(cases) * 2)
+    expected_values: list[int] = []
+    for _, error_code in cases:
+        expected_values.extend([1, error_code])
+    assert values == expected_values, (
+        f"CMD_DISPATCH parser classification mismatch: {values!r}\nstdout={stdout!r}"
+    )
+    print("[PASS] test_sdfs3_cmd_dispatch_parser_classifies_stub_commands")
+
+
 def test_sdfs3sys_profiles_build_and_match_header() -> None:
     for profile, expected in EXPECTED.items():
         _run_make(profile, "sdfs3sys")
@@ -249,7 +308,7 @@ def test_sdfs3sys_rejects_payload_outside_load_range() -> None:
 
 
 def test_sdfs3sys_cli_reports_bad_input() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
+    with _temporary_directory() as tmp:
         root = Path(tmp)
         payload = root / "SDFS3.BIN"
         listing = root / "SDFS3.lst"
@@ -482,7 +541,7 @@ def test_fixed_lba_loader_harness_loads_sdfs3sys() -> None:
     sdfs3sys = (PROJECT_ROOT / "build" / f"SDFS3SYS{suffix}.BIN").read_bytes()
     assert len(sdfs3sys) <= SECTOR_SIZE, "loader harness is intentionally single-sector"
     payload = sdfs3sys[HEADER_SIZE:]
-    with tempfile.TemporaryDirectory() as tmp:
+    with _temporary_directory() as tmp:
         harness = _assemble_fixed_lba_loader_harness(Path(tmp), symbols)
     stdout, stderr, rc = _run_emu(
         rom_path=PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
@@ -532,7 +591,7 @@ def test_fixed_lba_loader_harness_rejects_bad_sdfs3sys() -> None:
     )
     image = (PROJECT_ROOT / "build" / f"SDFS3SYS{suffix}.BIN").read_bytes()
     assert len(image) <= SECTOR_SIZE, "loader harness is intentionally single-sector"
-    with tempfile.TemporaryDirectory() as tmp:
+    with _temporary_directory() as tmp:
         harness = _assemble_fixed_lba_loader_harness(Path(tmp), symbols)
 
     cases = [
@@ -672,6 +731,87 @@ def _assemble_fixed_lba_loader_harness(tmp: Path, symbols: dict[str, int]) -> by
     if result.returncode != 0:
         raise AssertionError(f"p2bin loader harness failed: {result.stdout!r} {result.stderr!r}")
     return bin_path.read_bytes()
+
+
+def _assemble_cmd_dispatch_harness(
+    tmp: Path,
+    symbols: dict[str, int],
+    cases: list[tuple[str, int]],
+) -> bytes:
+    source = tmp / "sdfs3_cmd_dispatch_harness.asm"
+    obj = tmp / "sdfs3_cmd_dispatch_harness.p"
+    bin_path = tmp / "sdfs3_cmd_dispatch_harness.bin"
+    lst = tmp / "sdfs3_cmd_dispatch_harness.lst"
+    source.write_text(_cmd_dispatch_harness_source(symbols, cases), encoding="ascii")
+    result = subprocess.run(
+        ["asl", "-q", "-L", "-olist", str(lst), "-o", str(obj), str(source)],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=10,
+    )
+    if result.returncode != 0:
+        raise AssertionError(
+            f"assemble CMD_DISPATCH harness failed: {result.stdout!r} {result.stderr!r}"
+        )
+    result = subprocess.run(
+        ["p2bin", str(obj), str(bin_path), "-q"],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=10,
+    )
+    if result.returncode != 0:
+        raise AssertionError(
+            f"p2bin CMD_DISPATCH harness failed: {result.stdout!r} {result.stderr!r}"
+        )
+    return bin_path.read_bytes()
+
+
+def _cmd_dispatch_harness_source(
+    symbols: dict[str, int],
+    cases: list[tuple[str, int]],
+) -> str:
+    lines = [
+        "        cpu     6800",
+        "        org     $0300",
+        "",
+        "RESULTS         equ $0200",
+        f"SDFS3_CMD_DISPATCH equ ${symbols['SDFS3_CMD_DISPATCH']:04X}",
+        f"SDFS3_GET_ERROR equ ${symbols['SDFS3_GET_ERROR']:04X}",
+        "",
+        "START:",
+    ]
+    for index, (tail, _) in enumerate(cases):
+        lines.extend(
+            [
+                f"        ldx     #TAIL{index}",
+                f"        ldab    #{len(tail)}",
+                "        clra",
+                "        jsr     SDFS3_CMD_DISPATCH",
+                f"        bcs     CASE{index}_CARRY",
+                "        clra",
+                f"        bra     CASE{index}_STORE_STATUS",
+                f"CASE{index}_CARRY:",
+                "        ldaa    #1",
+                f"CASE{index}_STORE_STATUS:",
+                f"        staa    RESULTS+{index * 2}",
+                "        jsr     SDFS3_GET_ERROR",
+                f"        staa    RESULTS+{index * 2 + 1}",
+            ]
+        )
+    lines.extend(["        swi", ""])
+    for index, (tail, _) in enumerate(cases):
+        if tail:
+            escaped = tail.replace('"', '""')
+            lines.append(f'TAIL{index}:        fcc     "{escaped}"')
+        else:
+            lines.append(f"TAIL{index}:        fcb     0")
+    return "\n".join(lines) + "\n"
 
 
 def _fixed_lba_loader_harness_source(symbols: dict[str, int]) -> str:
@@ -932,6 +1072,14 @@ def _hex_bytes(data: bytes) -> str:
     return "\r".join(f"{value:02X}" for value in data)
 
 
+@contextmanager
+def _temporary_directory():
+    TEMP_ROOT.mkdir(parents=True, exist_ok=True)
+    path = TEMP_ROOT / f"codex-{uuid4().hex}"
+    path.mkdir()
+    yield str(path)
+
+
 def _run_emu(
     *,
     rom_path: Path,
@@ -941,12 +1089,13 @@ def _run_emu(
     sd_image: bytes | None = None,
     timeout: int = 10,
 ) -> tuple[str, str, int]:
-    with tempfile.NamedTemporaryFile("w", encoding="ascii", delete=False) as f:
+    TEMP_ROOT.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", encoding="ascii", delete=False, dir=TEMP_ROOT) as f:
         f.write(input_text)
         input_path = Path(f.name)
     sd_path: Path | None = None
     if sd_image is not None:
-        with tempfile.NamedTemporaryFile(suffix=".img", delete=False) as f:
+        with tempfile.NamedTemporaryFile(suffix=".img", delete=False, dir=TEMP_ROOT) as f:
             f.write(sd_image)
             sd_path = Path(f.name)
     try:
@@ -1005,8 +1154,11 @@ def _run_make(
     target: str,
     expect_success: bool = True,
 ) -> subprocess.CompletedProcess[str]:
+    make_args = ["make", target, f"MONITOR_PROFILE={profile}"]
+    if sys.platform == "win32":
+        make_args.extend(["PYTHON=python", "ASL_INCLUDE_ARG=build;include;src"])
     result = subprocess.run(
-        ["make", target, f"MONITOR_PROFILE={profile}"],
+        make_args,
         cwd=PROJECT_ROOT,
         capture_output=True,
         text=True,
@@ -1049,6 +1201,7 @@ def main() -> None:
         test_sdfs3_profiles_build_and_match_header,
         test_sdfs3_get_info_matches_calling_convention,
         test_sdfs3_memtop_and_caps_match_calling_convention,
+        test_sdfs3_cmd_dispatch_parser_classifies_stub_commands,
         test_sdfs3sys_profiles_build_and_match_header,
         test_sdfs3sys_rejects_bad_header_and_checksum,
         test_sdfs3sys_rejects_payload_outside_load_range,
