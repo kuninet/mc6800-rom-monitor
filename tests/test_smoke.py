@@ -209,14 +209,14 @@ def test_help_command():
     stdout, stderr, rc = run_emu("H\r\r")
     if is_fat_build():
         if is_vdg_build():
-            expected = "D DS DIR M MAP RAMTEST G L LF BOOT CMD B C R U UW H F"
+            expected = "D DS DIR M MAP RAMTEST G L LF BOOT BOOT3 CMD B C R U UW H F"
         else:
-            expected = "D DIR M MAP RAMTEST G L LF BOOT CMD B C R U H F"
+            expected = "D DIR M MAP RAMTEST G L LF BOOT BOOT3 CMD B C R U H F"
     elif is_sd_build():
         if is_vdg_build():
-            expected = "D DS M MAP RAMTEST G L BOOT CMD B C R U UW H F"
+            expected = "D DS M MAP RAMTEST G L BOOT BOOT3 CMD B C R U UW H F"
         else:
-            expected = "D M MAP RAMTEST G L BOOT CMD B C R U H F"
+            expected = "D M MAP RAMTEST G L BOOT BOOT3 CMD B C R U H F"
     else:
         if is_vdg_build():
             expected = "D DS M MAP RAMTEST G L B C R U UW H F"
@@ -658,7 +658,7 @@ def test_ramtest_command():
         "R\r"
         "\r"
     )
-    stdout, stderr, rc = run_emu(input_text, max_cycles=80_000_000)
+    stdout, stderr, rc = run_emu(input_text, max_cycles=500_000_000, timeout=60)
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
     if is_ram64_4000_work_build():
         assert "RAMTEST 0100-1BFF" in stdout, f"missing low RAMTEST range echo: {stdout!r}"

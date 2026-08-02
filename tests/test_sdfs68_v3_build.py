@@ -612,6 +612,77 @@ def test_fixed_lba_loader_harness_loads_sdfs3sys() -> None:
     print("[PASS] test_fixed_lba_loader_harness_loads_sdfs3sys")
 
 
+def test_rom_boot3_loads_sdfs3sys_and_enables_cmd() -> None:
+    profile = "k6802_vdg"
+    suffix = "-k6802-vdg-sdfs3-5000"
+    extra_args = [
+        "SDFS3_LOAD_BASE=0x5000",
+        "SDFS3_LOAD_LIMIT=0x7EFF",
+        "BUILD_CONFIG_NAME=k6802-vdg-sdfs3-5000",
+    ]
+    _run_make(profile, "bin", extra_args=extra_args)
+    _run_make(profile, "sdfs3sys", extra_args=extra_args)
+    symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.lst",
+        "SDFS3_LOAD_BASE",
+    )
+    sdfs3sys = (PROJECT_ROOT / "build" / f"SDFS3SYS{suffix}.BIN").read_bytes()
+    payload = sdfs3sys[HEADER_SIZE:]
+    sd_image = _build_sdfs3sys_fat_sd_image(
+        sdfs3sys,
+        [
+            Fat32File(b"HELLO   S  ", b"S9030000FC\r\n"),
+            Fat32File(b"README  TXT", b"HELLO FROM BOOT3\r\n"),
+        ],
+    )
+    stdout, stderr, rc = _run_emu(
+        rom_path=PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
+        input_text=(
+            "BOOT3\r"
+            "CMD DIR\r"
+            "\r"
+        ),
+        max_cycles=260_000_000,
+        sd_image=sd_image,
+        dump_range=f"{symbols['SDFS3_LOAD_BASE']:04X}-{symbols['SDFS3_LOAD_BASE'] + 0x3F:04X}",
+        timeout=40,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, (
+        f"emulator failed for ROM BOOT3: rc={rc} stderr={stderr!r}"
+    )
+    assert "OK" in stdout, f"BOOT3 should report OK after loading resident: {stdout!r}"
+    assert "HELLO.S A " in stdout, f"CMD DIR did not use resident after BOOT3: {stdout!r}"
+    loaded = _dump_range_bytes(stdout, symbols["SDFS3_LOAD_BASE"], 0x40)
+    assert bytes(loaded) == payload[:0x40], f"BOOT3 did not load SDFS3SYS header/code: {stdout!r}"
+    print("[PASS] test_rom_boot3_loads_sdfs3sys_and_enables_cmd")
+
+
+def test_rom_boot3_rejects_bad_sdfs3sys() -> None:
+    profile = "k6802_vdg"
+    suffix = "-k6802-vdg-sdfs3-5000"
+    extra_args = [
+        "SDFS3_LOAD_BASE=0x5000",
+        "SDFS3_LOAD_LIMIT=0x7EFF",
+        "BUILD_CONFIG_NAME=k6802-vdg-sdfs3-5000",
+    ]
+    _run_make(profile, "bin", extra_args=extra_args)
+    _run_make(profile, "sdfs3sys", extra_args=extra_args)
+    sdfs3sys = bytearray((PROJECT_ROOT / "build" / f"SDFS3SYS{suffix}.BIN").read_bytes())
+    sdfs3sys[0] = ord("X")
+    stdout, stderr, rc = _run_emu(
+        rom_path=PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
+        input_text="BOOT3\rCMD DIR\r\r",
+        max_cycles=160_000_000,
+        sd_image=_build_sdfs3sys_sd_image(bytes(sdfs3sys)),
+        timeout=30,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, (
+        f"emulator failed for bad ROM BOOT3 image: rc={rc} stderr={stderr!r}"
+    )
+    assert stdout.count("\n?\n") >= 2, f"BOOT3 and unloaded CMD should both fail: {stdout!r}"
+    print("[PASS] test_rom_boot3_rejects_bad_sdfs3sys")
+
+
 def test_sdfs3_cmd_dir_and_type_read_fat_files() -> None:
     profile = "sbcio_4000"
     expected = EXPECTED[profile]
@@ -1499,8 +1570,9 @@ def _run_emu(
 
 def _dump_bytes(stdout: str, address: int) -> list[int]:
     for line in stdout.splitlines():
-        if line.startswith(f"{address:04X} "):
-            parts = re.findall(r"\b[0-9A-Fa-f]{2}\b", line.split("  ", 1)[0])
+        stripped = line.lstrip("] ")
+        if stripped.startswith(f"{address:04X} "):
+            parts = re.findall(r"\b[0-9A-Fa-f]{2}\b", stripped.split("  ", 1)[0])
             return [int(part, 16) for part in parts]
     raise AssertionError(f"missing dump line for {address:04X}: {stdout!r}")
 
@@ -1582,9 +1654,11 @@ def main() -> None:
         test_rom_detects_sdfs3_api_header,
         test_rom_cmd_gateway_calls_resident_dispatch,
         test_fixed_lba_loader_harness_loads_sdfs3sys,
+        test_rom_boot3_loads_sdfs3sys_and_enables_cmd,
         test_sdfs3_cmd_dir_and_type_read_fat_files,
         test_sdfs3_cmd_load_run_and_com_read_fat_files,
         test_fixed_lba_loader_harness_rejects_bad_sdfs3sys,
+        test_rom_boot3_rejects_bad_sdfs3sys,
     ]
     passed = 0
     failed = 0

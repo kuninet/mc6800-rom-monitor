@@ -4,13 +4,16 @@
 ここに書く `DIR`、`TYPE`、`RUN`、`LOAD`、`L`、`EXIT` は、ROMモニタの `] ` プロンプトで使うコマンドではなく、SDFS/68起動後の `SDFS> ` プロンプトで使うコマンドである。
 
 SDFS/68 は、ROM モニタの `BOOT` から起動する第2段システムである。ROM は固定LBAからstage1 loaderを読み、stage1がFAT root の `SDFS.BIN` を読み込む。
+SDFS/68 v3 resident は `BOOT3` でも起動できる。`BOOT3` は fixed LBA `64` の `SDFS3SYS` をROMが直接読み、resident payloadを `SDFS3_LOAD_BASE` へロードしてからROM monitorへ戻る。
 ROM単体ではメモリ変更、メモリダンプ、指定アドレス実行、マシン語デバッグを行い、通常のSDファイル操作はSDFS/68へ寄せる。
 
 ```mermaid
 flowchart TD
     NORMAL["通常運用"]
     BOOT["] BOOT"]
+    BOOT3["] BOOT3"]
     SDFS["SDFS>"]
+    CMD["] CMD DIR"]
     DIR["DIR"]
     RUN["RUN addr"]
     DEBUG["デバッグ運用"]
@@ -18,8 +21,10 @@ flowchart TD
     ROM["] M / D / U / B / R"]
 
     NORMAL --> BOOT --> SDFS --> DIR --> RUN
+    NORMAL --> BOOT3 --> CMD
     DEBUG --> EXIT --> ROM
     ROM --> BOOT
+    ROM --> BOOT3
 ```
 
 ## 基本方針
@@ -38,7 +43,9 @@ flowchart TD
 | --- | --- | --- |
 | ROMモニタ起動、`D` / `M` / `G` / `L` / `B` / `C` / `R` / `U` | 不要 | ROMモニタ |
 | ROM `BOOT` でSDFS/68へ移行 | 必要 | ROM入口 + stage1 |
+| ROM `BOOT3` でv3 residentをロード | 必要 | ROM入口 + fixed `SDFS3SYS` |
 | SDFS/68の `DIR` / `TYPE` / `RUN` / `LOAD` / `EXIT` | 必要 | SDFS/68 |
+| ROM `CMD <tail>` でv3 residentを呼ぶ | `BOOT3` または別手段でresidentロード済みなら必要 | ROM入口 + v3 resident |
 | 直接指定ROMのROM常駐FAT `DIR` / `LF` | SDFS/68用system SDは不要。ただしFAT32 SDカードは必要 | ROM互換FAT |
 
 ROM常駐FATは `FEATURE_SD=1 FEATURE_FAT=1` を直接指定したときだけ使う互換機能であり、SDFS/68本線ではない。
@@ -78,7 +85,9 @@ python tools\mk_sdfs_image.py --stage1 STAGE1.BIN --sdfs SDFS.BIN --output sdfs.
 
 - FAT32 形式の SDイメージファイル。
 - partition開始前の physical LBA `16` 以降にstage1 loaderを配置する。
-- FAT32 partition は既定で physical LBA `32` から開始する。
+- v3 `BOOT3` 用に physical LBA `64` 以降へ `SDFS3SYS` を配置する。
+- v2/stage1だけのSDではFAT32 partitionを physical LBA `32` から開始できる。
+- `BOOT3` 用の `SDFS3SYS` を同居させるv3 system SDでは、system領域と重ならないようにFAT32 partitionを physical LBA `128` 以降から開始する。
 - 既定出力はホストOSがFAT32として扱えるクラスタ数を持つ。
 - root directory に `SDFS.BIN` を配置し、相対パス付きの指定ファイルは対応するサブディレクトリに配置する。
 - テスト用には小さい決定的イメージを生成できるようにする。

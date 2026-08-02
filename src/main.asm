@@ -117,7 +117,11 @@ CHK_CMD_BREAK:
  if MONITOR_FEATURE_SD
  if S1_SUPPORTED
         jsr     IS_CMD_BOOT
+        bcc     MAIN_DISPATCH_BOOT
+        jsr     IS_CMD_BOOT3
         bcs     MAIN_DISPATCH_BREAK
+        jmp     CMD_BOOT3
+MAIN_DISPATCH_BOOT:
         jmp     CMD_BOOT
 MAIN_DISPATCH_BREAK:
  endif
@@ -283,6 +287,28 @@ IS_CMD_BOOT:
         clc
         rts
 IS_CMD_BOOT_FAIL:
+        sec
+        rts
+
+IS_CMD_BOOT3:
+        ldab    LINE_LEN
+        cmpb    #5
+        bne     IS_CMD_BOOT3_FAIL
+        ldaa    LINE_BUF+1
+        cmpa    #'O'
+        bne     IS_CMD_BOOT3_FAIL
+        ldaa    LINE_BUF+2
+        cmpa    #'O'
+        bne     IS_CMD_BOOT3_FAIL
+        ldaa    LINE_BUF+3
+        cmpa    #'T'
+        bne     IS_CMD_BOOT3_FAIL
+        ldaa    LINE_BUF+4
+        cmpa    #'3'
+        bne     IS_CMD_BOOT3_FAIL
+        clc
+        rts
+IS_CMD_BOOT3_FAIL:
         sec
         rts
 
@@ -1757,6 +1783,307 @@ BOOT_FAIL_A:
         sec
         rts
 
+SDFS3SYS_FIXED_LBA equ 64
+SDFS3SYS_HEADER_SIZE equ $20
+SDFS3SYS_MAX_HI equ $40
+SDFS3SYS_MAX_LO equ $00
+SDFS3SYS_MIN_LO equ SDFS3SYS_HEADER_SIZE+1
+
+BOOT3_EXPECTED_SUM equ FAT_VOLUME_LBA0
+BOOT3_COMPUTED_SUM equ FAT_VOLUME_LBA2
+BOOT3_REMAIN       equ FAT_FAT_LBA0
+BOOT3_PAYLOAD      equ FAT_FAT_LBA2
+BOOT3_COUNT        equ FAT_DATA_LBA0
+BOOT3_SRC_PTR      equ FAT_DATA_LBA2
+BOOT3_DST_PTR      equ FAT_ROOT_CLUS0
+
+CMD_BOOT3:
+        jsr     SD_INIT
+        bcs     CMD_BOOT3_ERROR
+        jsr     BOOT3_SET_LBA
+        jsr     BOOT3_READ_SECTOR
+        bcs     CMD_BOOT3_ERROR
+        jsr     BOOT3_CHECK_HEADER
+        bcs     CMD_BOOT3_ERROR
+        jsr     BOOT3_COPY_PAYLOAD
+        bcs     CMD_BOOT3_ERROR
+        jsr     SDFS3_FIND_API
+        bcs     CMD_BOOT3_ERROR
+        ldx     #TXT_OK
+        jsr     PDATA1
+        jmp     MAIN_LOOP
+CMD_BOOT3_ERROR:
+        jmp     MAIN_LOOP_ERROR
+
+BOOT3_CHECK_HEADER:
+        ldx     #SD_SECTOR_BUF
+        ldaa    0,x
+        cmpa    #'S'
+        bne     BOOT3_HEADER_FAIL_SIG
+        ldaa    1,x
+        cmpa    #'D'
+        bne     BOOT3_HEADER_FAIL_SIG
+        ldaa    2,x
+        cmpa    #'F'
+        bne     BOOT3_HEADER_FAIL_SIG
+        ldaa    3,x
+        cmpa    #'S'
+        bne     BOOT3_HEADER_FAIL_SIG
+        ldaa    4,x
+        cmpa    #'3'
+        bne     BOOT3_HEADER_FAIL_SIG
+        ldaa    5,x
+        cmpa    #'S'
+        bne     BOOT3_HEADER_FAIL_SIG
+        ldaa    6,x
+        cmpa    #'Y'
+        bne     BOOT3_HEADER_FAIL_SIG
+        ldaa    7,x
+        cmpa    #'S'
+        bne     BOOT3_HEADER_FAIL_SIG
+        ldaa    8,x
+        cmpa    #1
+        bne     BOOT3_HEADER_FAIL_SIG
+        ldaa    9,x
+        cmpa    #SDFS3_API_MAJOR
+        bne     BOOT3_HEADER_FAIL_SIG
+        ldaa    11,x
+        cmpa    #1
+        bne     BOOT3_HEADER_FAIL_SIG
+        ldaa    12,x
+        cmpa    #SDFS3_LOAD_BASE/$0100
+        bne     BOOT3_HEADER_FAIL_SIZE
+        ldaa    13,x
+        cmpa    #SDFS3_LOAD_BASE&$00FF
+        bne     BOOT3_HEADER_FAIL_SIZE
+        ldaa    26,x
+        bne     BOOT3_HEADER_FAIL_SIZE
+        ldaa    27,x
+        cmpa    #SDFS3SYS_HEADER_SIZE
+        bne     BOOT3_HEADER_FAIL_SIZE
+        ldaa    14,x
+        cmpa    #SDFS3SYS_MAX_HI
+        bhi     BOOT3_HEADER_FAIL_SIZE
+        blo     BOOT3_CHECK_MIN
+        ldaa    15,x
+        cmpa    #SDFS3SYS_MAX_LO
+        bhi     BOOT3_HEADER_FAIL_SIZE
+BOOT3_CHECK_MIN:
+        ldaa    14,x
+        bne     BOOT3_CHECKSUM_PREP
+        ldaa    15,x
+        cmpa    #SDFS3SYS_MIN_LO
+        blo     BOOT3_HEADER_FAIL_SIZE
+        bra     BOOT3_CHECKSUM_PREP
+BOOT3_HEADER_FAIL_SIG:
+        jmp     BOOT3_FAIL_SIG
+BOOT3_HEADER_FAIL_SIZE:
+        jmp     BOOT3_FAIL_SIZE
+BOOT3_CHECKSUM_PREP:
+        ldaa    24,x
+        staa    BOOT3_EXPECTED_SUM
+        ldaa    25,x
+        staa    BOOT3_EXPECTED_SUM+1
+        clr     24,x
+        clr     25,x
+        clr     BOOT3_COMPUTED_SUM
+        clr     BOOT3_COMPUTED_SUM+1
+        ldaa    14,x
+        staa    BOOT3_REMAIN
+        ldaa    15,x
+        staa    BOOT3_REMAIN+1
+        jsr     BOOT3_SUM_CURRENT
+BOOT3_SUM_LOOP:
+        ldaa    BOOT3_REMAIN
+        oraa    BOOT3_REMAIN+1
+        beq     BOOT3_SUM_DONE
+        jsr     BOOT_INC_SD_LBA
+        jsr     BOOT3_READ_SECTOR
+        bcs     BOOT3_SUM_FAIL_SD
+        jsr     BOOT3_SUM_CURRENT
+        bra     BOOT3_SUM_LOOP
+BOOT3_SUM_DONE:
+        ldaa    BOOT3_COMPUTED_SUM
+        cmpa    BOOT3_EXPECTED_SUM
+        bne     BOOT3_SUM_FAIL_SUM
+        ldaa    BOOT3_COMPUTED_SUM+1
+        cmpa    BOOT3_EXPECTED_SUM+1
+        bne     BOOT3_SUM_FAIL_SUM
+        clc
+        rts
+BOOT3_SUM_FAIL_SD:
+        jmp     BOOT3_FAIL_SD
+BOOT3_SUM_FAIL_SUM:
+        jmp     BOOT3_FAIL_SUM
+
+BOOT3_COPY_PAYLOAD:
+        jsr     BOOT3_SET_LBA
+        jsr     BOOT3_READ_SECTOR
+        bcs     BOOT3_COPY_FAIL_SD
+        ldx     #SD_SECTOR_BUF
+        ldaa    14,x
+        staa    BOOT3_PAYLOAD
+        ldaa    15,x
+        suba    #SDFS3SYS_HEADER_SIZE
+        staa    BOOT3_PAYLOAD+1
+        bcc     BOOT3_COPY_SIZE_OK
+        dec     BOOT3_PAYLOAD
+BOOT3_COPY_SIZE_OK:
+        ldx     #SD_SECTOR_BUF+SDFS3SYS_HEADER_SIZE
+        stx     BOOT3_SRC_PTR
+        ldx     #SDFS3_LOAD_BASE
+        stx     BOOT3_DST_PTR
+        jsr     BOOT3_SET_COUNT_480
+        jsr     BOOT3_COPY_CURRENT
+BOOT3_COPY_LOOP:
+        ldaa    BOOT3_PAYLOAD
+        oraa    BOOT3_PAYLOAD+1
+        beq     BOOT3_COPY_DONE
+        jsr     BOOT_INC_SD_LBA
+        jsr     BOOT3_READ_SECTOR
+        bcs     BOOT3_COPY_FAIL_SD
+        ldx     #SD_SECTOR_BUF
+        stx     BOOT3_SRC_PTR
+        jsr     BOOT3_SET_PAYLOAD_COUNT_512
+        jsr     BOOT3_COPY_CURRENT
+        bra     BOOT3_COPY_LOOP
+BOOT3_COPY_DONE:
+        clc
+        rts
+BOOT3_COPY_FAIL_SD:
+        jmp     BOOT3_FAIL_SD
+
+BOOT3_SUM_CURRENT:
+        jsr     BOOT3_SET_REMAIN_COUNT_512
+        ldx     #SD_SECTOR_BUF
+BOOT3_SUM_BYTE:
+        ldaa    BOOT3_COUNT
+        oraa    BOOT3_COUNT+1
+        beq     BOOT3_SUM_CURRENT_DONE
+        ldaa    0,x
+        adda    BOOT3_COMPUTED_SUM+1
+        staa    BOOT3_COMPUTED_SUM+1
+        bcc     BOOT3_SUM_NO_CARRY
+        inc     BOOT3_COMPUTED_SUM
+BOOT3_SUM_NO_CARRY:
+        inx
+        jsr     BOOT3_DEC_COUNT_REMAIN
+        bra     BOOT3_SUM_BYTE
+BOOT3_SUM_CURRENT_DONE:
+        rts
+
+BOOT3_COPY_CURRENT:
+        ldaa    BOOT3_COUNT
+        oraa    BOOT3_COUNT+1
+        beq     BOOT3_COPY_CURRENT_DONE
+        ldx     BOOT3_SRC_PTR
+        ldaa    0,x
+        inx
+        stx     BOOT3_SRC_PTR
+        ldx     BOOT3_DST_PTR
+        staa    0,x
+        inx
+        stx     BOOT3_DST_PTR
+        jsr     BOOT3_DEC_COUNT_PAYLOAD
+        bra     BOOT3_COPY_CURRENT
+BOOT3_COPY_CURRENT_DONE:
+        rts
+
+BOOT3_SET_REMAIN_COUNT_512:
+        ldaa    BOOT3_REMAIN
+        cmpa    #2
+        bhs     BOOT3_SET_COUNT_512
+        staa    BOOT3_COUNT
+        ldaa    BOOT3_REMAIN+1
+        staa    BOOT3_COUNT+1
+        rts
+BOOT3_SET_PAYLOAD_COUNT_512:
+        ldaa    BOOT3_PAYLOAD
+        cmpa    #2
+        bhs     BOOT3_SET_COUNT_512
+        staa    BOOT3_COUNT
+        ldaa    BOOT3_PAYLOAD+1
+        staa    BOOT3_COUNT+1
+        rts
+BOOT3_SET_COUNT_512:
+        ldaa    #2
+        staa    BOOT3_COUNT
+        clr     BOOT3_COUNT+1
+        rts
+BOOT3_SET_COUNT_480:
+        ldaa    BOOT3_PAYLOAD
+        cmpa    #1
+        bhi     BOOT3_COUNT_480
+        bne     BOOT3_COUNT_PAYLOAD
+        ldaa    BOOT3_PAYLOAD+1
+        cmpa    #$E0
+        bhs     BOOT3_COUNT_480
+BOOT3_COUNT_PAYLOAD:
+        ldaa    BOOT3_PAYLOAD
+        staa    BOOT3_COUNT
+        ldaa    BOOT3_PAYLOAD+1
+        staa    BOOT3_COUNT+1
+        rts
+BOOT3_COUNT_480:
+        ldaa    #1
+        staa    BOOT3_COUNT
+        ldaa    #$E0
+        staa    BOOT3_COUNT+1
+        rts
+
+BOOT3_DEC_COUNT_REMAIN:
+        jsr     BOOT3_DEC_COUNT
+        dec     BOOT3_REMAIN+1
+        ldaa    BOOT3_REMAIN+1
+        cmpa    #$FF
+        bne     BOOT3_DEC_REMAIN_DONE
+        dec     BOOT3_REMAIN
+BOOT3_DEC_REMAIN_DONE:
+        rts
+BOOT3_DEC_COUNT_PAYLOAD:
+        jsr     BOOT3_DEC_COUNT
+        dec     BOOT3_PAYLOAD+1
+        ldaa    BOOT3_PAYLOAD+1
+        cmpa    #$FF
+        bne     BOOT3_DEC_PAYLOAD_DONE
+        dec     BOOT3_PAYLOAD
+BOOT3_DEC_PAYLOAD_DONE:
+        rts
+BOOT3_DEC_COUNT:
+        dec     BOOT3_COUNT+1
+        ldaa    BOOT3_COUNT+1
+        cmpa    #$FF
+        bne     BOOT3_DEC_COUNT_DONE
+        dec     BOOT3_COUNT
+BOOT3_DEC_COUNT_DONE:
+        rts
+
+BOOT3_SET_LBA:
+        clr     SD_LBA0
+        clr     SD_LBA1
+        clr     SD_LBA2
+        ldaa    #SDFS3SYS_FIXED_LBA
+        staa    SD_LBA3
+        rts
+BOOT3_READ_SECTOR:
+        ldx     #SD_SECTOR_BUF
+        jmp     SD_READ_SECTOR
+BOOT3_FAIL_SIG:
+        ldaa    #FAT_ERR_SIG
+        bra     BOOT3_FAIL_A
+BOOT3_FAIL_SIZE:
+        ldaa    #FAT_ERR_SIZE
+        bra     BOOT3_FAIL_A
+BOOT3_FAIL_SUM:
+        ldaa    #FAT_ERR_CHECKSUM
+        bra     BOOT3_FAIL_A
+BOOT3_FAIL_SD:
+        ldaa    SD_ERROR
+BOOT3_FAIL_A:
+        staa    FAT_ERROR
+        sec
+        rts
+
 SDFS3_API_MAJOR    equ 1
 SDFS3_API_MIN_COUNT equ 9
 
@@ -2620,17 +2947,17 @@ TXT_WELCOME:    fcc     "MC6800 MONITOR"
 TXT_HELP:
  if MONITOR_FEATURE_FAT
  if MONITOR_FEATURE_VDG
-                fcc     "D DS DIR M MAP RAMTEST G L LF BOOT CMD B C R U UW H F"
+                fcc     "D DS DIR M MAP RAMTEST G L LF BOOT BOOT3 CMD B C R U UW H F"
  else
-                fcc     "D DIR M MAP RAMTEST G L LF BOOT CMD B C R U H F"
+                fcc     "D DIR M MAP RAMTEST G L LF BOOT BOOT3 CMD B C R U H F"
  endif
  else
  if MONITOR_FEATURE_SD
  if S1_SUPPORTED
  if MONITOR_FEATURE_VDG
-                fcc     "D DS M MAP RAMTEST G L BOOT CMD B C R U UW H F"
+                fcc     "D DS M MAP RAMTEST G L BOOT BOOT3 CMD B C R U UW H F"
  else
-                fcc     "D M MAP RAMTEST G L BOOT CMD B C R U H F"
+                fcc     "D M MAP RAMTEST G L BOOT BOOT3 CMD B C R U H F"
  endif
  else
  if MONITOR_FEATURE_VDG
