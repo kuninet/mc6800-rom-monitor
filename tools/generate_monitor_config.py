@@ -104,6 +104,21 @@ def feature(value: str) -> int:
     return int(value)
 
 
+def optional_address(value: str) -> str | None:
+    if value == "":
+        return None
+    try:
+        if value.startswith("$"):
+            parsed = int(value[1:], 16)
+        else:
+            parsed = int(value, 0)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"invalid address: {value}") from exc
+    if not 0 <= parsed <= 0xFFFF:
+        raise argparse.ArgumentTypeError(f"address out of range: {value}")
+    return f"${parsed:04X}"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True)
@@ -116,12 +131,18 @@ def main() -> None:
     parser.add_argument("--feature-keyboard", type=feature, required=True)
     parser.add_argument("--feature-i2c", type=feature, required=True)
     parser.add_argument("--vdg-vram-config", choices=VDG_VRAM, required=True)
+    parser.add_argument("--sdfs3-load-base", type=optional_address, default=None)
+    parser.add_argument("--sdfs3-load-limit", type=optional_address, default=None)
     args = parser.parse_args()
     feature_fat = args.feature_sd if args.feature_fat is None else args.feature_fat
     if feature_fat and not args.feature_sd:
         raise SystemExit("FEATURE_FAT=1 requires FEATURE_SD=1")
+    if (args.sdfs3_load_base is None) != (args.sdfs3_load_limit is None):
+        raise SystemExit("SDFS3_LOAD_BASE and SDFS3_LOAD_LIMIT must be specified together")
 
     memory = MEMORY_CONFIGS[args.memory_config]
+    sdfs3_load_base = args.sdfs3_load_base or memory["SDFS_LOAD_BASE"]
+    sdfs3_load_limit = args.sdfs3_load_limit or memory["SDFS_LOAD_LIMIT"]
     is_base = args.memory_config == "base8k" and args.board_io == "none"
     is_sbcio = args.board_io == "sbcio"
     is_k6802_vdg = (
@@ -173,6 +194,8 @@ def main() -> None:
         f"S1_LIMIT        equ {memory['S1_LIMIT']}",
         f"SDFS_LOAD_BASE  equ {memory['SDFS_LOAD_BASE']}",
         f"SDFS_LOAD_LIMIT equ {memory['SDFS_LOAD_LIMIT']}",
+        f"SDFS3_LOAD_BASE equ {sdfs3_load_base}",
+        f"SDFS3_LOAD_LIMIT equ {sdfs3_load_limit}",
         "STACK_TOP        equ MIKBUG_STACK_TOP",
         "",
     ])

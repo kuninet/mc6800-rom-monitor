@@ -36,14 +36,14 @@ from fat32_image import Fat32File, build_fat32_image_from_files  # noqa: E402
 EXPECTED = {
     "sbcio_4000": {
         "suffix": "-sbcio-4000",
-        "SDFS_LOAD_BASE": 0x5000,
-        "SDFS_LOAD_LIMIT": 0x7EFF,
+        "SDFS3_LOAD_BASE": 0x5000,
+        "SDFS3_LOAD_LIMIT": 0x7EFF,
         "USER_RAM_END": 0x3FFF,
     },
     "k6802_4000": {
         "suffix": "-k6802-4000",
-        "SDFS_LOAD_BASE": 0x5000,
-        "SDFS_LOAD_LIMIT": 0x7EFF,
+        "SDFS3_LOAD_BASE": 0x5000,
+        "SDFS3_LOAD_LIMIT": 0x7EFF,
         "USER_RAM_END": 0x3FFF,
     },
 }
@@ -58,8 +58,8 @@ def test_sdfs3_profiles_build_and_match_header() -> None:
         data = bin_path.read_bytes()
         symbols = _load_symbols(
             lst_path,
-            "SDFS_LOAD_BASE",
-            "SDFS_LOAD_LIMIT",
+            "SDFS3_LOAD_BASE",
+            "SDFS3_LOAD_LIMIT",
             "USER_RAM_END",
             "SDFS3_API_HEADER",
             "SDFS3_JUMP_TABLE",
@@ -74,24 +74,24 @@ def test_sdfs3_profiles_build_and_match_header() -> None:
             "SDFS3_GET_CAPS",
             "SDFS3_END",
         )
-        assert symbols["SDFS_LOAD_BASE"] == expected["SDFS_LOAD_BASE"]
-        assert symbols["SDFS_LOAD_LIMIT"] == expected["SDFS_LOAD_LIMIT"]
+        assert symbols["SDFS3_LOAD_BASE"] == expected["SDFS3_LOAD_BASE"]
+        assert symbols["SDFS3_LOAD_LIMIT"] == expected["SDFS3_LOAD_LIMIT"]
         assert symbols["USER_RAM_END"] == expected["USER_RAM_END"]
-        assert symbols["SDFS3_API_HEADER"] == symbols["SDFS_LOAD_BASE"]
-        assert len(data) <= symbols["SDFS_LOAD_LIMIT"] - symbols["SDFS_LOAD_BASE"] + 1
-        assert len(data) == symbols["SDFS3_END"] - symbols["SDFS_LOAD_BASE"]
+        assert symbols["SDFS3_API_HEADER"] == symbols["SDFS3_LOAD_BASE"]
+        assert len(data) <= symbols["SDFS3_LOAD_LIMIT"] - symbols["SDFS3_LOAD_BASE"] + 1
+        assert len(data) == symbols["SDFS3_END"] - symbols["SDFS3_LOAD_BASE"]
         assert data[0:8] == b"SDFS3API"
         assert data[8] == 1, "SDFS3 api major mismatch"
         assert data[9] == 0, "SDFS3 api minor mismatch"
         assert data[10] == 9, "SDFS3 api count mismatch"
         assert data[11] == 0, "SDFS3 flags should be zero in stub"
         assert _word(data, 0x0C) == symbols["SDFS3_JUMP_TABLE"]
-        assert _word(data, 0x0E) == symbols["SDFS_LOAD_BASE"]
+        assert _word(data, 0x0E) == symbols["SDFS3_LOAD_BASE"]
         assert _word(data, 0x10) == symbols["SDFS3_END"] - 1
         assert _word(data, 0x12) == expected["USER_RAM_END"]
         assert _word(data, 0x14) == 0
         assert _word(data, 0x16) == 0
-        jump_table = symbols["SDFS3_JUMP_TABLE"] - symbols["SDFS_LOAD_BASE"]
+        jump_table = symbols["SDFS3_JUMP_TABLE"] - symbols["SDFS3_LOAD_BASE"]
         assert _word(data, jump_table) == symbols["SDFS3_GET_INFO"]
         assert _word(data, jump_table + 2) == symbols["SDFS3_CMD_DISPATCH"]
         assert _word(data, jump_table + 4) == symbols["SDFS3_LOAD_PATH"]
@@ -101,7 +101,7 @@ def test_sdfs3_profiles_build_and_match_header() -> None:
         assert _word(data, jump_table + 12) == symbols["SDFS3_GET_ERROR"]
         assert _word(data, jump_table + 14) == symbols["SDFS3_GET_MEMTOP"]
         assert _word(data, jump_table + 16) == symbols["SDFS3_GET_CAPS"]
-        get_error = symbols["SDFS3_GET_ERROR"] - symbols["SDFS_LOAD_BASE"]
+        get_error = symbols["SDFS3_GET_ERROR"] - symbols["SDFS3_LOAD_BASE"]
         assert data[get_error + 3 : get_error + 5] == bytes([0x0C, 0x39])
     print("[PASS] test_sdfs3_profiles_build_and_match_header")
 
@@ -114,11 +114,11 @@ def test_sdfs3_get_info_matches_calling_convention() -> None:
     data = (PROJECT_ROOT / "build" / f"SDFS3{suffix}.BIN").read_bytes()
     symbols = _load_symbols(
         PROJECT_ROOT / "build" / f"SDFS3{suffix}.lst",
-        "SDFS_LOAD_BASE",
+        "SDFS3_LOAD_BASE",
         "SDFS3_GET_INFO",
         "SDFS3_API_HEADER",
     )
-    get_info = symbols["SDFS3_GET_INFO"] - symbols["SDFS_LOAD_BASE"]
+    get_info = symbols["SDFS3_GET_INFO"] - symbols["SDFS3_LOAD_BASE"]
     header = symbols["SDFS3_API_HEADER"]
     assert data[get_info : get_info + 8] == bytes(
         [
@@ -143,18 +143,18 @@ def test_sdfs3_memtop_and_caps_match_calling_convention() -> None:
         data = (PROJECT_ROOT / "build" / f"SDFS3{suffix}.BIN").read_bytes()
         symbols = _load_symbols(
             PROJECT_ROOT / "build" / f"SDFS3{suffix}.lst",
-            "SDFS_LOAD_BASE",
+            "SDFS3_LOAD_BASE",
             "SDFS3_API_HEADER",
             "SDFS3_GET_MEMTOP",
             "SDFS3_GET_CAPS",
         )
-        get_memtop = symbols["SDFS3_GET_MEMTOP"] - symbols["SDFS_LOAD_BASE"]
+        get_memtop = symbols["SDFS3_GET_MEMTOP"] - symbols["SDFS3_LOAD_BASE"]
         memtop = expected["USER_RAM_END"]
         assert data[get_memtop : get_memtop + 5] == bytes(
             [0xCE, (memtop >> 8) & 0xFF, memtop & 0xFF, 0x0C, 0x39]
         )
 
-        get_caps = symbols["SDFS3_GET_CAPS"] - symbols["SDFS_LOAD_BASE"]
+        get_caps = symbols["SDFS3_GET_CAPS"] - symbols["SDFS3_LOAD_BASE"]
         header = symbols["SDFS3_API_HEADER"]
         assert data[get_caps : get_caps + 9] == bytes(
             [
@@ -181,7 +181,7 @@ def test_sdfs3_cmd_dispatch_parser_classifies_stub_commands() -> None:
     resident = (PROJECT_ROOT / "build" / f"SDFS3{suffix}.BIN").read_bytes()
     symbols = _load_symbols(
         PROJECT_ROOT / "build" / f"SDFS3{suffix}.lst",
-        "SDFS_LOAD_BASE",
+        "SDFS3_LOAD_BASE",
         "SDFS3_CMD_DISPATCH",
         "SDFS3_GET_ERROR",
     )
@@ -203,7 +203,7 @@ def test_sdfs3_cmd_dispatch_parser_classifies_stub_commands() -> None:
     stdout, stderr, rc = _run_emu(
         rom_path=PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
         input_text=(
-            f"M{symbols['SDFS_LOAD_BASE']:04X}\r"
+            f"M{symbols['SDFS3_LOAD_BASE']:04X}\r"
             f"{_hex_bytes(resident)}\r.\r"
             "M0300\r"
             f"{_hex_bytes(harness)}\r.\r"
@@ -239,8 +239,8 @@ def test_sdfs3sys_profiles_build_and_match_header() -> None:
         payload = bin_path.read_bytes()
         symbols = _load_symbols(
             lst_path,
-            "SDFS_LOAD_BASE",
-            "SDFS_LOAD_LIMIT",
+            "SDFS3_LOAD_BASE",
+            "SDFS3_LOAD_LIMIT",
             "SDFS3_JUMP_TABLE",
             "SDFS3_GET_INFO",
         )
@@ -250,18 +250,57 @@ def test_sdfs3sys_profiles_build_and_match_header() -> None:
         assert header.abi_major == 1
         assert header.abi_minor == 0
         assert header.flags == FLAG_CHECKSUM16
-        assert header.load_address == expected["SDFS_LOAD_BASE"]
-        assert header.load_address == symbols["SDFS_LOAD_BASE"]
-        assert len(payload) <= symbols["SDFS_LOAD_LIMIT"] - symbols["SDFS_LOAD_BASE"] + 1
+        assert header.load_address == expected["SDFS3_LOAD_BASE"]
+        assert header.load_address == symbols["SDFS3_LOAD_BASE"]
+        assert len(payload) <= symbols["SDFS3_LOAD_LIMIT"] - symbols["SDFS3_LOAD_BASE"] + 1
         assert header.image_size == HEADER_SIZE + len(payload)
-        assert header.entry_offset == symbols["SDFS3_GET_INFO"] - symbols["SDFS_LOAD_BASE"]
-        assert header.api_table_offset == symbols["SDFS3_JUMP_TABLE"] - symbols["SDFS_LOAD_BASE"]
+        assert header.entry_offset == symbols["SDFS3_GET_INFO"] - symbols["SDFS3_LOAD_BASE"]
+        assert header.api_table_offset == symbols["SDFS3_JUMP_TABLE"] - symbols["SDFS3_LOAD_BASE"]
         assert header.work_min == 0
         assert header.bank_window_hint == 0
         assert header.header_size == HEADER_SIZE
         assert header.checksum == checksum16(image)
         assert image[HEADER_SIZE:] == payload
     print("[PASS] test_sdfs3sys_profiles_build_and_match_header")
+
+
+def test_sdfs3_load_base_can_differ_from_v2_sdfs_load_base() -> None:
+    profile = "k6802_vdg"
+    suffix = "-k6802-vdg-sdfs3-5000"
+    extra_args = [
+        "SDFS3_LOAD_BASE=0x5000",
+        "SDFS3_LOAD_LIMIT=0x7EFF",
+        "BUILD_CONFIG_NAME=k6802-vdg-sdfs3-5000",
+    ]
+    _run_make(profile, "bin", extra_args=extra_args)
+    _run_make(profile, "sdfs3", extra_args=extra_args)
+
+    rom_symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.lst",
+        "SDFS_LOAD_BASE",
+        "SDFS3_LOAD_BASE",
+    )
+    resident_symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"SDFS3{suffix}.lst",
+        "SDFS_LOAD_BASE",
+        "SDFS_LOAD_LIMIT",
+        "SDFS3_LOAD_BASE",
+        "SDFS3_LOAD_LIMIT",
+        "SDFS3_API_HEADER",
+        "SDFS3_END",
+    )
+    data = (PROJECT_ROOT / "build" / f"SDFS3{suffix}.BIN").read_bytes()
+
+    assert rom_symbols["SDFS_LOAD_BASE"] == 0xB000
+    assert rom_symbols["SDFS3_LOAD_BASE"] == 0x5000
+    assert resident_symbols["SDFS_LOAD_BASE"] == 0xB000
+    assert resident_symbols["SDFS_LOAD_LIMIT"] == 0xBEFF
+    assert resident_symbols["SDFS3_LOAD_BASE"] == 0x5000
+    assert resident_symbols["SDFS3_LOAD_LIMIT"] == 0x7EFF
+    assert resident_symbols["SDFS3_API_HEADER"] == 0x5000
+    assert len(data) == resident_symbols["SDFS3_END"] - resident_symbols["SDFS3_LOAD_BASE"]
+    assert _word(data, 0x0E) == 0x5000
+    print("[PASS] test_sdfs3_load_base_can_differ_from_v2_sdfs_load_base")
 
 
 def test_sdfs3sys_rejects_bad_header_and_checksum() -> None:
@@ -355,7 +394,7 @@ def test_rom_detects_sdfs3_api_header() -> None:
     symbols = _load_symbols(
         PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.lst",
         "SDFS3_FIND_API",
-        "SDFS_LOAD_BASE",
+        "SDFS3_LOAD_BASE",
     )
     status_addr = 0x0200
     result_addr = 0x0201
@@ -387,17 +426,17 @@ def test_rom_detects_sdfs3_api_header() -> None:
     )
 
     cases = [
-        ("valid", _sdfs3_header(symbols["SDFS_LOAD_BASE"]), 0x42),
-        ("bad magic", b"XDFS3API" + _sdfs3_header(symbols["SDFS_LOAD_BASE"])[8:], 0xE1),
-        ("bad major", _mutated_header(symbols["SDFS_LOAD_BASE"], 8, 0x02), 0xE1),
-        ("legacy api count 7", _mutated_header(symbols["SDFS_LOAD_BASE"], 10, 0x07), 0xE1),
-        ("short api count 8", _mutated_header(symbols["SDFS_LOAD_BASE"], 10, 0x08), 0xE1),
+        ("valid", _sdfs3_header(symbols["SDFS3_LOAD_BASE"]), 0x42),
+        ("bad magic", b"XDFS3API" + _sdfs3_header(symbols["SDFS3_LOAD_BASE"])[8:], 0xE1),
+        ("bad major", _mutated_header(symbols["SDFS3_LOAD_BASE"], 8, 0x02), 0xE1),
+        ("legacy api count 7", _mutated_header(symbols["SDFS3_LOAD_BASE"], 10, 0x07), 0xE1),
+        ("short api count 8", _mutated_header(symbols["SDFS3_LOAD_BASE"], 10, 0x08), 0xE1),
     ]
     for label, header, expected_status in cases:
         stdout, stderr, rc = _run_emu(
             rom_path=PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
             input_text=(
-                f"M{symbols['SDFS_LOAD_BASE']:04X}\r"
+                f"M{symbols['SDFS3_LOAD_BASE']:04X}\r"
                 f"{_hex_bytes(header)}\r.\r"
                 f"M{harness_addr:04X}\r"
                 f"{_hex_bytes(harness)}\r.\r"
@@ -416,8 +455,8 @@ def test_rom_detects_sdfs3_api_header() -> None:
         )
         if expected_status == 0x42:
             assert values[1:3] == [
-                (symbols["SDFS_LOAD_BASE"] >> 8) & 0xFF,
-                symbols["SDFS_LOAD_BASE"] & 0xFF,
+                (symbols["SDFS3_LOAD_BASE"] >> 8) & 0xFF,
+                symbols["SDFS3_LOAD_BASE"] & 0xFF,
             ], f"{label} returned header address mismatch: {values!r}"
     print("[PASS] test_rom_detects_sdfs3_api_header")
 
@@ -430,12 +469,12 @@ def test_rom_cmd_gateway_calls_resident_dispatch() -> None:
     symbols = _load_symbols(
         PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.lst",
         "LINE_BUF",
-        "SDFS_LOAD_BASE",
+        "SDFS3_LOAD_BASE",
     )
     status_addr = 0x0200
     b_addr = 0x0201
     x_addr = 0x0202
-    load_base = symbols["SDFS_LOAD_BASE"]
+    load_base = symbols["SDFS3_LOAD_BASE"]
     jump_table = load_base + 0x18
     dispatch = jump_table + 0x12
     header = _sdfs3_header(load_base, jump_table=jump_table, work_end=dispatch + 13)
@@ -538,7 +577,7 @@ def test_fixed_lba_loader_harness_loads_sdfs3sys() -> None:
         "SD_LBA2",
         "SD_LBA3",
         "SD_SECTOR_BUF",
-        "SDFS_LOAD_BASE",
+        "SDFS3_LOAD_BASE",
     )
     sdfs3sys = (PROJECT_ROOT / "build" / f"SDFS3SYS{suffix}.BIN").read_bytes()
     assert len(sdfs3sys) <= 16 * 1024, "SDFS3SYS harness keeps the phase 1 image under 16KB"
@@ -551,11 +590,11 @@ def test_fixed_lba_loader_harness_loads_sdfs3sys() -> None:
             f"M{SDFS3SYS_LOADER_HARNESS_ADDR:04X}\r{_hex_bytes(harness)}\r.\r"
             f"G{SDFS3SYS_LOADER_HARNESS_ADDR:04X}\r"
             "D0200-0202\r"
-            f"D{symbols['SDFS_LOAD_BASE']:04X}-{symbols['SDFS_LOAD_BASE'] + len(payload) - 1:04X}\r"
+            f"D{symbols['SDFS3_LOAD_BASE']:04X}-{symbols['SDFS3_LOAD_BASE'] + len(payload) - 1:04X}\r"
             "\r"
         ),
         max_cycles=120_000_000,
-        dump_range=f"0200-{symbols['SDFS_LOAD_BASE'] + len(payload) - 1:04X}",
+        dump_range=f"0200-{symbols['SDFS3_LOAD_BASE'] + len(payload) - 1:04X}",
         sd_image=_build_sdfs3sys_sd_image(sdfs3sys),
         timeout=20,
     )
@@ -565,10 +604,10 @@ def test_fixed_lba_loader_harness_loads_sdfs3sys() -> None:
     status = _dump_bytes(stdout, 0x0200)
     assert status[0] == 0x42, f"SDFS3SYS loader should report success: {status!r}\nstdout={stdout!r}"
     assert status[1:3] == [
-        (symbols["SDFS_LOAD_BASE"] >> 8) & 0xFF,
-        symbols["SDFS_LOAD_BASE"] & 0xFF,
+        (symbols["SDFS3_LOAD_BASE"] >> 8) & 0xFF,
+        symbols["SDFS3_LOAD_BASE"] & 0xFF,
     ], f"SDFS3_FIND_API should return resident base: {status!r}"
-    loaded = _dump_range_bytes(stdout, symbols["SDFS_LOAD_BASE"], len(payload))
+    loaded = _dump_range_bytes(stdout, symbols["SDFS3_LOAD_BASE"], len(payload))
     assert bytes(loaded) == payload, f"resident payload was not fully loaded: {stdout!r}"
     print("[PASS] test_fixed_lba_loader_harness_loads_sdfs3sys")
 
@@ -589,7 +628,7 @@ def test_sdfs3_cmd_dir_and_type_read_fat_files() -> None:
         "SD_LBA2",
         "SD_LBA3",
         "SD_SECTOR_BUF",
-        "SDFS_LOAD_BASE",
+        "SDFS3_LOAD_BASE",
     )
     sdfs3sys = (PROJECT_ROOT / "build" / f"SDFS3SYS{suffix}.BIN").read_bytes()
     with _temporary_directory() as tmp:
@@ -651,7 +690,7 @@ def test_sdfs3_cmd_load_run_and_com_read_fat_files() -> None:
         "SD_LBA2",
         "SD_LBA3",
         "SD_SECTOR_BUF",
-        "SDFS_LOAD_BASE",
+        "SDFS3_LOAD_BASE",
     )
     sdfs3sys = (PROJECT_ROOT / "build" / f"SDFS3SYS{suffix}.BIN").read_bytes()
     hello_com = (PROJECT_ROOT / "build" / "HELLO.COM").read_bytes()
@@ -742,7 +781,7 @@ def test_fixed_lba_loader_harness_rejects_bad_sdfs3sys() -> None:
         "SD_LBA2",
         "SD_LBA3",
         "SD_SECTOR_BUF",
-        "SDFS_LOAD_BASE",
+        "SDFS3_LOAD_BASE",
     )
     image = (PROJECT_ROOT / "build" / f"SDFS3SYS{suffix}.BIN").read_bytes()
     assert len(image) <= 16 * 1024, "SDFS3SYS harness keeps the phase 1 image under 16KB"
@@ -1025,8 +1064,8 @@ def _fixed_lba_loader_harness_source(symbols: dict[str, int]) -> str:
     def equ(name: str) -> str:
         return f"${symbols[name]:04X}"
 
-    load_base_hi = (symbols["SDFS_LOAD_BASE"] >> 8) & 0xFF
-    load_base_lo = symbols["SDFS_LOAD_BASE"] & 0xFF
+    load_base_hi = (symbols["SDFS3_LOAD_BASE"] >> 8) & 0xFF
+    load_base_lo = symbols["SDFS3_LOAD_BASE"] & 0xFF
     return f"""        cpu     6800
         org     ${SDFS3SYS_LOADER_HARNESS_ADDR:04X}
 
@@ -1048,7 +1087,7 @@ SD_LBA1         equ {equ("SD_LBA1")}
 SD_LBA2         equ {equ("SD_LBA2")}
 SD_LBA3         equ {equ("SD_LBA3")}
 SD_SECTOR_BUF   equ {equ("SD_SECTOR_BUF")}
-SDFS_LOAD_BASE  equ {equ("SDFS_LOAD_BASE")}
+SDFS3_LOAD_BASE  equ {equ("SDFS3_LOAD_BASE")}
 
 START:
         jsr     SD_INIT
@@ -1235,7 +1274,7 @@ COPY_PAYLOAD:
 COPY_SIZE_OK:
         ldx     #SD_SECTOR_BUF+$20
         stx     SRC_PTR
-        ldx     #SDFS_LOAD_BASE
+        ldx     #SDFS3_LOAD_BASE
         stx     DST_PTR
         jsr     SET_COUNT_MIN_480
         jsr     COPY_CURRENT_BUFFER
@@ -1483,8 +1522,11 @@ def _run_make(
     profile: str,
     target: str,
     expect_success: bool = True,
+    extra_args: list[str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     make_args = ["make", target, f"MONITOR_PROFILE={profile}"]
+    if extra_args:
+        make_args.extend(extra_args)
     if sys.platform == "win32":
         make_args.extend(["PYTHON=python", "ASL_INCLUDE_ARG=build;include;src"])
     result = subprocess.run(
@@ -1533,6 +1575,7 @@ def main() -> None:
         test_sdfs3_memtop_and_caps_match_calling_convention,
         test_sdfs3_cmd_dispatch_parser_classifies_stub_commands,
         test_sdfs3sys_profiles_build_and_match_header,
+        test_sdfs3_load_base_can_differ_from_v2_sdfs_load_base,
         test_sdfs3sys_rejects_bad_header_and_checksum,
         test_sdfs3sys_rejects_payload_outside_load_range,
         test_sdfs3sys_cli_reports_bad_input,

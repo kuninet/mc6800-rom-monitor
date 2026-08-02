@@ -94,6 +94,12 @@ endif
 ifneq ($(filter command line environment environment override,$(origin VDG_VRAM_CONFIG)),)
 AXIS_OVERRIDE := 1
 endif
+ifneq ($(filter command line environment environment override,$(origin SDFS3_LOAD_BASE)),)
+AXIS_OVERRIDE := 1
+endif
+ifneq ($(filter command line environment environment override,$(origin SDFS3_LOAD_LIMIT)),)
+AXIS_OVERRIDE := 1
+endif
 
 MEMORY_CONFIG ?= $(PROFILE_MEMORY_CONFIG)
 BOARD_IO ?= $(PROFILE_BOARD_IO)
@@ -103,6 +109,8 @@ FEATURE_VDG ?= $(PROFILE_FEATURE_VDG)
 FEATURE_KEYBOARD ?= $(PROFILE_FEATURE_KEYBOARD)
 FEATURE_I2C ?= $(PROFILE_FEATURE_I2C)
 VDG_VRAM_CONFIG ?= $(PROFILE_VDG_VRAM_CONFIG)
+SDFS3_LOAD_BASE ?=
+SDFS3_LOAD_LIMIT ?=
 
 VALID_MEMORY_CONFIGS := base8k ram64_c000_work ram64_a000_work ram64_4000_work
 VALID_BOARD_IO := none sbcio
@@ -265,7 +273,7 @@ $(OUTDIR):
 	$(MKDIR_P)
 
 $(CONFIG_INC): FORCE tools/generate_monitor_config.py | $(OUTDIR)
-	"$(PYTHON)" tools/generate_monitor_config.py --output "$(CONFIG_INC)" --monitor-profile "$(MONITOR_PROFILE)" --memory-config "$(MEMORY_CONFIG)" --board-io "$(BOARD_IO)" --feature-sd "$(FEATURE_SD)" --feature-fat "$(FEATURE_FAT)" --feature-vdg "$(FEATURE_VDG)" --feature-keyboard "$(FEATURE_KEYBOARD)" --feature-i2c "$(FEATURE_I2C)" --vdg-vram-config "$(VDG_VRAM_CONFIG)"
+	"$(PYTHON)" tools/generate_monitor_config.py --output "$(CONFIG_INC)" --monitor-profile "$(MONITOR_PROFILE)" --memory-config "$(MEMORY_CONFIG)" --board-io "$(BOARD_IO)" --feature-sd "$(FEATURE_SD)" --feature-fat "$(FEATURE_FAT)" --feature-vdg "$(FEATURE_VDG)" --feature-keyboard "$(FEATURE_KEYBOARD)" --feature-i2c "$(FEATURE_I2C)" --vdg-vram-config "$(VDG_VRAM_CONFIG)" --sdfs3-load-base "$(SDFS3_LOAD_BASE)" --sdfs3-load-limit "$(SDFS3_LOAD_LIMIT)"
 
 $(OBJ): FORCE $(TOPSRC) include/hardware.inc include/mikbug.inc $(CONFIG_INC) src/acia6850.asm src/sdcard.asm src/fat32.asm | $(OUTDIR)
 	"$(ASL)" -q -L -olist $(LST) -o $(OBJ) -i $(ASL_INCLUDE_ARG) $(TOPSRC)

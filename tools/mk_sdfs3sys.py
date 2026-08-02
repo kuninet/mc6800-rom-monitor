@@ -157,15 +157,15 @@ def main(argv: list[str] | None = None) -> int:
     try:
         symbols = load_symbols(
             args.listing,
-            "SDFS_LOAD_BASE",
-            "SDFS_LOAD_LIMIT",
+            "SDFS3_LOAD_BASE",
+            "SDFS3_LOAD_LIMIT",
             "SDFS3_GET_INFO",
             "SDFS3_JUMP_TABLE",
         )
         image = build_sdfs3sys_image(
             resident_data=args.input.read_bytes(),
-            load_address=symbols["SDFS_LOAD_BASE"],
-            load_limit=symbols["SDFS_LOAD_LIMIT"],
+            load_address=symbols["SDFS3_LOAD_BASE"],
+            load_limit=symbols["SDFS3_LOAD_LIMIT"],
             entry_address=symbols["SDFS3_GET_INFO"],
             api_table_address=symbols["SDFS3_JUMP_TABLE"],
         )
