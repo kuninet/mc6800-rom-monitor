@@ -26,7 +26,7 @@ SDFS3_COM_MAX_LO equ SDFS3_COM_MAX_SIZE-SDFS3_COM_MAX_HI*256
         error   "SDFS/68 v3 resident is not supported for this memory configuration"
         endif
 
-        org     SDFS_LOAD_BASE
+        org     SDFS3_LOAD_BASE
 
 SDFS3_API_HEADER:
         fcc     "SDFS3API"
@@ -35,7 +35,7 @@ SDFS3_API_HEADER:
         fcb     SDFS3_API_COUNT
         fcb     SDFS3_FLAG_NONE
         fdb     SDFS3_JUMP_TABLE
-        fdb     SDFS_LOAD_BASE
+        fdb     SDFS3_LOAD_BASE
         fdb     SDFS3_END-1
         fdb     USER_RAM_END
         fdb     0
@@ -1583,4 +1583,7 @@ FAT32_INCLUDE_FILE_API equ 1
         include "fat32.asm"
 
 SDFS3_END:
+        if SDFS3_END-1 > SDFS3_LOAD_LIMIT
+        error   "SDFS/68 v3 resident exceeds configured load area"
+        endif
         end

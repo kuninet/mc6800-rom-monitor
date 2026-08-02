@@ -1761,7 +1761,7 @@ SDFS3_API_MAJOR    equ 1
 SDFS3_API_MIN_COUNT equ 9
 
 SDFS3_FIND_API:
-        ldx     #SDFS_LOAD_BASE
+        ldx     #SDFS3_LOAD_BASE
         ldaa    0,x
         cmpa    #'S'
         bne     SDFS3_FIND_API_FAIL
@@ -1792,7 +1792,7 @@ SDFS3_FIND_API:
         ldaa    10,x
         cmpa    #SDFS3_API_MIN_COUNT
         blo     SDFS3_FIND_API_FAIL
-        ldx     #SDFS_LOAD_BASE
+        ldx     #SDFS3_LOAD_BASE
         clc
         rts
 SDFS3_FIND_API_FAIL:
