@@ -16,6 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "tools"))
 EMU_PATH = PROJECT_ROOT / "emu" / "sbc6800_emu.py"
 SDFS3SYS_FIXED_LBA = 64
+SDFS3SYS_FAT_PARTITION_LBA = 128
 SECTOR_SIZE = 512
 SDFS3SYS_LOADER_HARNESS_ADDR = 0x0300
 TEMP_ROOT = PROJECT_ROOT / "build" / "tmp"
@@ -29,6 +30,7 @@ from mk_sdfs3sys import (  # noqa: E402
     checksum16,
     parse_sdfs3sys_header,
 )
+from fat32_image import Fat32File, build_fat32_image_from_files  # noqa: E402
 
 
 EXPECTED = {
@@ -184,9 +186,9 @@ def test_sdfs3_cmd_dispatch_parser_classifies_stub_commands() -> None:
         "SDFS3_GET_ERROR",
     )
     cases = [
-        ("DIR", 0x11),
-        (" dir ", 0x11),
-        ("TYPE README.TXT", 0x12),
+        ("DIR", 0x03),
+        (" dir ", 0x03),
+        ("TYPE README.TXT", 0x03),
         ("LoAd HELLO.S", 0x13),
         ("RUN 1234", 0x14),
         ("FOO.COM ARG", 0x15),
@@ -539,7 +541,7 @@ def test_fixed_lba_loader_harness_loads_sdfs3sys() -> None:
         "SDFS_LOAD_BASE",
     )
     sdfs3sys = (PROJECT_ROOT / "build" / f"SDFS3SYS{suffix}.BIN").read_bytes()
-    assert len(sdfs3sys) <= SECTOR_SIZE, "loader harness is intentionally single-sector"
+    assert len(sdfs3sys) <= 16 * 1024, "SDFS3SYS harness keeps the phase 1 image under 16KB"
     payload = sdfs3sys[HEADER_SIZE:]
     with _temporary_directory() as tmp:
         harness = _assemble_fixed_lba_loader_harness(Path(tmp), symbols)
@@ -571,6 +573,67 @@ def test_fixed_lba_loader_harness_loads_sdfs3sys() -> None:
     print("[PASS] test_fixed_lba_loader_harness_loads_sdfs3sys")
 
 
+def test_sdfs3_cmd_dir_and_type_read_fat_files() -> None:
+    profile = "sbcio_4000"
+    expected = EXPECTED[profile]
+    _run_make(profile, "bin")
+    _run_make(profile, "sdfs3sys")
+    suffix = expected["suffix"]
+    symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.lst",
+        "SD_INIT",
+        "SD_READ_SECTOR",
+        "SDFS3_FIND_API",
+        "SD_LBA0",
+        "SD_LBA1",
+        "SD_LBA2",
+        "SD_LBA3",
+        "SD_SECTOR_BUF",
+        "SDFS_LOAD_BASE",
+    )
+    sdfs3sys = (PROJECT_ROOT / "build" / f"SDFS3SYS{suffix}.BIN").read_bytes()
+    with _temporary_directory() as tmp:
+        harness = _assemble_fixed_lba_loader_harness(Path(tmp), symbols)
+    sd_image = _build_sdfs3sys_fat_sd_image(
+        sdfs3sys,
+        [
+            Fat32File(b"HELLO   S  ", b"S9030000FC\r\n"),
+            Fat32File(b"README  TXT", b"HELLO FROM README\r\n"),
+            Fat32File(b"NOTE    TXT", b"HELLO FROM DOCS\r\n", path=(b"DOCS       ",)),
+        ],
+    )
+    stdout, stderr, rc = _run_emu(
+        rom_path=PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
+        input_text=(
+            f"M{SDFS3SYS_LOADER_HARNESS_ADDR:04X}\r{_hex_bytes(harness)}\r.\r"
+            f"G{SDFS3SYS_LOADER_HARNESS_ADDR:04X}\r"
+            "CMD DIR\r"
+            "CMD DIR DOCS\r"
+            "CMD DIR MISSING\r"
+            "CMD TYPE README.TXT\r"
+            "CMD TYPE DOCS/NOTE.TXT\r"
+            "CMD TYPE MISSING.TXT\r"
+            "\r"
+        ),
+        max_cycles=220_000_000,
+        sd_image=sd_image,
+        timeout=30,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, (
+        f"emulator failed for SDFS3 DIR/TYPE: rc={rc} stderr={stderr!r}"
+    )
+    assert "HELLO.S A " in stdout, f"CMD DIR did not list HELLO.S: {stdout!r}"
+    assert "README.TXT A 00000013" in stdout, f"CMD DIR did not list README.TXT: {stdout!r}"
+    assert "DOCS D 00000000" in stdout, f"CMD DIR did not list DOCS directory: {stdout!r}"
+    assert "NOTE.TXT A 00000011" in stdout, f"CMD DIR DOCS did not list NOTE.TXT: {stdout!r}"
+    assert "HELLO FROM README" in stdout, f"CMD TYPE README.TXT did not print file: {stdout!r}"
+    assert "HELLO FROM DOCS" in stdout, f"CMD TYPE DOCS/NOTE.TXT did not print file: {stdout!r}"
+    assert stdout.count("\n?\n") == 2, (
+        f"missing DIR/TYPE did not return exactly two monitor errors: {stdout!r}"
+    )
+    print("[PASS] test_sdfs3_cmd_dir_and_type_read_fat_files")
+
+
 def test_fixed_lba_loader_harness_rejects_bad_sdfs3sys() -> None:
     profile = "sbcio_4000"
     expected = EXPECTED[profile]
@@ -590,7 +653,7 @@ def test_fixed_lba_loader_harness_rejects_bad_sdfs3sys() -> None:
         "SDFS_LOAD_BASE",
     )
     image = (PROJECT_ROOT / "build" / f"SDFS3SYS{suffix}.BIN").read_bytes()
-    assert len(image) <= SECTOR_SIZE, "loader harness is intentionally single-sector"
+    assert len(image) <= 16 * 1024, "SDFS3SYS harness keeps the phase 1 image under 16KB"
     with _temporary_directory() as tmp:
         harness = _assemble_fixed_lba_loader_harness(Path(tmp), symbols)
 
@@ -599,7 +662,7 @@ def test_fixed_lba_loader_harness_rejects_bad_sdfs3sys() -> None:
         ("bad version", lambda data: data.__setitem__(0x08, 0x02), 0xE2),
         ("bad load address", lambda data: data.__setitem__(0x0C, 0x40), 0xE3),
         ("bad small size", lambda data: data.__setitem__(slice(0x0E, 0x10), b"\x00\x20"), 0xE4),
-        ("bad oversize", lambda data: data.__setitem__(slice(0x0E, 0x10), b"\x02\x01"), 0xE4),
+        ("bad oversize", lambda data: data.__setitem__(slice(0x0E, 0x10), b"\x40\x01"), 0xE4),
         ("bad checksum", lambda data: data.__setitem__(-1, data[-1] ^ 0x01), 0xE5),
         ("bad resident api", _break_resident_api_and_refresh_checksum, 0xE7),
     ]
@@ -686,11 +749,26 @@ def _mutated_header(load_base: int, offset: int, value: int) -> bytes:
 
 
 def _build_sdfs3sys_sd_image(image: bytes) -> bytes:
-    assert len(image) <= SECTOR_SIZE, "loader harness is intentionally single-sector"
-    sectors = bytearray(SECTOR_SIZE * (SDFS3SYS_FIXED_LBA + 1))
+    image_sectors = (len(image) + SECTOR_SIZE - 1) // SECTOR_SIZE
+    sectors = bytearray(SECTOR_SIZE * (SDFS3SYS_FIXED_LBA + image_sectors))
     start = SECTOR_SIZE * SDFS3SYS_FIXED_LBA
     sectors[start : start + len(image)] = image
     return bytes(sectors)
+
+
+def _build_sdfs3sys_fat_sd_image(system_image: bytes, files: list[Fat32File]) -> bytes:
+    fat_image, _layout = build_fat32_image_from_files(
+        files,
+        with_mbr=True,
+        partition_start_lba=SDFS3SYS_FAT_PARTITION_LBA,
+        total_volume_sectors=256,
+    )
+    system_end = (SDFS3SYS_FIXED_LBA * SECTOR_SIZE) + len(system_image)
+    mutable = bytearray(max(len(fat_image), system_end))
+    mutable[: len(fat_image)] = fat_image
+    start = SDFS3SYS_FIXED_LBA * SECTOR_SIZE
+    mutable[start : start + len(system_image)] = system_image
+    return bytes(mutable)
 
 
 def _break_resident_api_and_refresh_checksum(data: bytearray) -> None:
@@ -830,6 +908,8 @@ COMPUTED_SUM    equ $0205
 REMAIN          equ $0207
 SRC_PTR         equ $0209
 DST_PTR         equ $020B
+PAYLOAD_REMAIN equ $020D
+COUNT           equ $020F
 
 SD_INIT         equ {equ("SD_INIT")}
 SD_READ_SECTOR  equ {equ("SD_READ_SECTOR")}
@@ -844,13 +924,8 @@ SDFS_LOAD_BASE  equ {equ("SDFS_LOAD_BASE")}
 START:
         jsr     SD_INIT
         bcs     FAIL_SD
-        clr     SD_LBA0
-        clr     SD_LBA1
-        clr     SD_LBA2
-        ldaa    #${SDFS3SYS_FIXED_LBA:02X}
-        staa    SD_LBA3
-        ldx     #SD_SECTOR_BUF
-        jsr     SD_READ_SECTOR
+        jsr     SET_FIXED_LBA
+        jsr     READ_CURRENT_SECTOR
         bcs     FAIL_SD
         jsr     CHECK_HEADER
         bcs     FAIL
@@ -948,15 +1023,14 @@ HEADER_SIZE_HI_OK:
         jmp     FAIL_SIZE
 HEADER_SIZE_LO_OK:
         ldaa    14,x
-        cmpa    #2
-        bls     SIZE_HI_UNDER_MAX
-        jmp     FAIL_SIZE
-SIZE_HI_UNDER_MAX:
-        bne     SIZE_NOT_512
+        cmpa    #$40
+        blo     SIZE_UNDER_MAX
+        bne     FAIL_SIZE_JMP
         ldaa    15,x
-        beq     SIZE_OK
+        beq     SIZE_UNDER_MAX
+FAIL_SIZE_JMP:
         jmp     FAIL_SIZE
-SIZE_NOT_512:
+SIZE_UNDER_MAX:
         ldaa    14,x
         bne     SIZE_OK
         ldaa    15,x
@@ -976,16 +1050,18 @@ SIZE_OK:
         staa    REMAIN
         ldaa    15,x
         staa    REMAIN+1
-        ldx     #SD_SECTOR_BUF
-SUM_LOOP:
+        jsr     SUM_CURRENT_BUFFER
+SUM_SECTOR_LOOP:
         ldaa    REMAIN
         oraa    REMAIN+1
         beq     SUM_DONE
-        ldaa    0,x
-        jsr     ADD_SUM
-        inx
-        jsr     DEC_REMAIN
-        bra     SUM_LOOP
+        jsr     INC_LBA
+        jsr     READ_CURRENT_SECTOR
+        bcs     SUM_READ_FAIL
+        jsr     SUM_CURRENT_BUFFER
+        bra     SUM_SECTOR_LOOP
+SUM_READ_FAIL:
+        jmp     FAIL_SD
 SUM_DONE:
         ldaa    COMPUTED_SUM
         cmpa    EXPECTED_SUM
@@ -1000,24 +1076,62 @@ SUM_LO_OK:
         clc
         rts
 
+SUM_CURRENT_BUFFER:
+        jsr     SET_COUNT_MIN_512
+        ldx     #SD_SECTOR_BUF
+SUM_LOOP:
+        ldaa    COUNT
+        oraa    COUNT+1
+        beq     SUM_CURRENT_DONE
+        ldaa    0,x
+        jsr     ADD_SUM
+        inx
+        jsr     DEC_COUNT_AND_REMAIN
+        bra     SUM_LOOP
+SUM_CURRENT_DONE:
+        rts
+
 COPY_PAYLOAD:
+        jsr     SET_FIXED_LBA
+        jsr     READ_CURRENT_SECTOR
+        bcs     COPY_FAIL_SD
         ldx     #SD_SECTOR_BUF
         ldaa    14,x
-        staa    REMAIN
+        staa    PAYLOAD_REMAIN
         ldaa    15,x
         suba    #$20
-        staa    REMAIN+1
+        staa    PAYLOAD_REMAIN+1
         bcc     COPY_SIZE_OK
-        dec     REMAIN
+        dec     PAYLOAD_REMAIN
 COPY_SIZE_OK:
         ldx     #SD_SECTOR_BUF+$20
         stx     SRC_PTR
         ldx     #SDFS_LOAD_BASE
         stx     DST_PTR
-COPY_LOOP:
-        ldaa    REMAIN
-        oraa    REMAIN+1
+        jsr     SET_COUNT_MIN_480
+        jsr     COPY_CURRENT_BUFFER
+COPY_SECTOR_LOOP:
+        ldaa    PAYLOAD_REMAIN
+        oraa    PAYLOAD_REMAIN+1
         beq     COPY_DONE
+        jsr     INC_LBA
+        jsr     READ_CURRENT_SECTOR
+        bcs     COPY_FAIL_SD
+        ldx     #SD_SECTOR_BUF
+        stx     SRC_PTR
+        jsr     SET_PAYLOAD_COUNT_MIN_512
+        jsr     COPY_CURRENT_BUFFER
+        bra     COPY_SECTOR_LOOP
+COPY_DONE:
+        rts
+COPY_FAIL_SD:
+        jmp     FAIL_SD
+
+COPY_CURRENT_BUFFER:
+COPY_LOOP:
+        ldaa    COUNT
+        oraa    COUNT+1
+        beq     COPY_CURRENT_DONE
         ldx     SRC_PTR
         ldaa    0,x
         inx
@@ -1026,9 +1140,76 @@ COPY_LOOP:
         staa    0,x
         inx
         stx     DST_PTR
-        jsr     DEC_REMAIN
+        jsr     DEC_COUNT_AND_PAYLOAD
         bra     COPY_LOOP
-COPY_DONE:
+COPY_CURRENT_DONE:
+        rts
+
+SET_FIXED_LBA:
+        clr     SD_LBA0
+        clr     SD_LBA1
+        clr     SD_LBA2
+        ldaa    #${SDFS3SYS_FIXED_LBA:02X}
+        staa    SD_LBA3
+        rts
+
+READ_CURRENT_SECTOR:
+        ldx     #SD_SECTOR_BUF
+        jmp     SD_READ_SECTOR
+
+INC_LBA:
+        inc     SD_LBA3
+        bne     INC_LBA_DONE
+        inc     SD_LBA2
+        bne     INC_LBA_DONE
+        inc     SD_LBA1
+        bne     INC_LBA_DONE
+        inc     SD_LBA0
+INC_LBA_DONE:
+        rts
+
+SET_COUNT_MIN_512:
+        ldaa    REMAIN
+        cmpa    #2
+        bhs     SET_COUNT_512
+        staa    COUNT
+        ldaa    REMAIN+1
+        staa    COUNT+1
+        rts
+SET_COUNT_512:
+        ldaa    #2
+        staa    COUNT
+        clr     COUNT+1
+        rts
+
+SET_PAYLOAD_COUNT_MIN_512:
+        ldaa    PAYLOAD_REMAIN
+        cmpa    #2
+        bhs     SET_COUNT_512
+        staa    COUNT
+        ldaa    PAYLOAD_REMAIN+1
+        staa    COUNT+1
+        rts
+
+SET_COUNT_MIN_480:
+        ldaa    PAYLOAD_REMAIN
+        cmpa    #1
+        bhi     SET_COUNT_480
+        bne     SET_COUNT_PAYLOAD_REMAIN
+        ldaa    PAYLOAD_REMAIN+1
+        cmpa    #$E0
+        bhs     SET_COUNT_480
+SET_COUNT_PAYLOAD_REMAIN:
+        ldaa    PAYLOAD_REMAIN
+        staa    COUNT
+        ldaa    PAYLOAD_REMAIN+1
+        staa    COUNT+1
+        rts
+SET_COUNT_480:
+        ldaa    #1
+        staa    COUNT
+        ldaa    #$E0
+        staa    COUNT+1
         rts
 
 ADD_SUM:
@@ -1039,13 +1220,33 @@ ADD_SUM:
 ADD_SUM_DONE:
         rts
 
-DEC_REMAIN:
+DEC_COUNT_AND_REMAIN:
+        jsr     DEC_COUNT
         dec     REMAIN+1
         ldaa    REMAIN+1
         cmpa    #$FF
         bne     DEC_REMAIN_DONE
         dec     REMAIN
 DEC_REMAIN_DONE:
+        rts
+
+DEC_COUNT_AND_PAYLOAD:
+        jsr     DEC_COUNT
+        dec     PAYLOAD_REMAIN+1
+        ldaa    PAYLOAD_REMAIN+1
+        cmpa    #$FF
+        bne     DEC_PAYLOAD_DONE
+        dec     PAYLOAD_REMAIN
+DEC_PAYLOAD_DONE:
+        rts
+
+DEC_COUNT:
+        dec     COUNT+1
+        ldaa    COUNT+1
+        cmpa    #$FF
+        bne     DEC_COUNT_DONE
+        dec     COUNT
+DEC_COUNT_DONE:
         rts
 
 FAIL_MAGIC:
@@ -1209,6 +1410,7 @@ def main() -> None:
         test_rom_detects_sdfs3_api_header,
         test_rom_cmd_gateway_calls_resident_dispatch,
         test_fixed_lba_loader_harness_loads_sdfs3sys,
+        test_sdfs3_cmd_dir_and_type_read_fat_files,
         test_fixed_lba_loader_harness_rejects_bad_sdfs3sys,
     ]
     passed = 0
