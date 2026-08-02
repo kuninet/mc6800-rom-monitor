@@ -13,9 +13,14 @@ SDFS3_ERR_NOT_IMPL equ 1
 SDFS3_ERR_BAD_CMD  equ 2
 SDFS3_ERR_IO       equ 3
 SDFS3_ERR_NOT_FOUND equ 4
-SDFS3_ERR_LOAD_IMPL equ $13
-SDFS3_ERR_RUN_IMPL equ $14
-SDFS3_ERR_COM_IMPL equ $15
+SDFS3_ERR_LOAD    equ 5
+SDFS3_ERR_RUN     equ 6
+SDFS3_ERR_COM     equ 7
+
+SDFS3_COM_LOAD_BASE equ $0100
+SDFS3_COM_MAX_SIZE equ USER_RAM_END-SDFS3_COM_LOAD_BASE+1
+SDFS3_COM_MAX_HI equ SDFS3_COM_MAX_SIZE/256
+SDFS3_COM_MAX_LO equ SDFS3_COM_MAX_SIZE-SDFS3_COM_MAX_HI*256
 
         if S1_SUPPORTED = 0
         error   "SDFS/68 v3 resident is not supported for this memory configuration"
@@ -110,14 +115,11 @@ SDFS3_CMD_DIR_STUB:
 SDFS3_CMD_TYPE_STUB:
         jmp     SDFS3_CMD_TYPE
 SDFS3_CMD_LOAD_STUB:
-        ldaa    #SDFS3_ERR_LOAD_IMPL
-        bra     SDFS3_NOT_IMPLEMENTED_A
+        jmp     SDFS3_CMD_LOAD
 SDFS3_CMD_RUN_STUB:
-        ldaa    #SDFS3_ERR_RUN_IMPL
-        bra     SDFS3_NOT_IMPLEMENTED_A
+        jmp     SDFS3_CMD_RUN
 SDFS3_CMD_COM_STUB:
-        ldaa    #SDFS3_ERR_COM_IMPL
-        bra     SDFS3_NOT_IMPLEMENTED_A
+        jmp     SDFS3_CMD_COM
 SDFS3_BAD_COMMAND:
         ldaa    #SDFS3_ERR_BAD_CMD
         staa    SDFS3_LAST_ERROR
@@ -338,6 +340,148 @@ SDFS3_CMD_TYPE_NOT_FOUND:
         jmp     SDFS3_NOT_FOUND
 SDFS3_CMD_TYPE_FAT_FAIL:
         jmp     SDFS3_FAT_FAIL
+
+SDFS3_CMD_LOAD:
+        ldx     SDFS3_PARSE_PTR
+        ldab    SDFS3_PARSE_LEN
+        jsr     SDFS3_LOAD_FILE
+        bcs     SDFS3_CMD_LOAD_FAIL
+        ldx     #SDFS3_TXT_OK
+        jsr     SDFS3_PRINT
+        clr     SDFS3_LAST_ERROR
+        clc
+        rts
+SDFS3_CMD_LOAD_FAIL:
+        ldaa    #SDFS3_ERR_LOAD
+        jmp     SDFS3_FAIL_A
+
+SDFS3_LOAD_FILE:
+        clr     LOADER_MODE
+        clr     LOADER_STAGE
+        clr     SDFS_RUN_ENTRY_SET
+        stx     PATH_PTR
+        stab    PATH_LEN
+        jsr     FAT32_MOUNT
+        bcs     SDFS3_LOAD_FILE_FAIL
+        jsr     SDFS3_RESOLVE_FILE_SAVED
+        bcs     SDFS3_LOAD_FILE_FAIL
+        jsr     FAT32_STREAM_OPEN
+        bcs     SDFS3_LOAD_FILE_FAIL
+SDFS3_LOAD_LOOP:
+        jsr     SDFS3_READ_LOADER_RECORD
+        bcs     SDFS3_LOAD_FILE_FAIL
+        cmpa    #1
+        beq     SDFS3_LOAD_FILE_DONE
+        bra     SDFS3_LOAD_LOOP
+SDFS3_LOAD_FILE_DONE:
+        clc
+        rts
+SDFS3_LOAD_FILE_FAIL:
+        sec
+        rts
+
+SDFS3_CMD_RUN:
+        ldx     SDFS3_PARSE_PTR
+        ldab    SDFS3_PARSE_LEN
+        jsr     SDFS3_PARSE_HEX16
+        bcs     SDFS3_CMD_RUN_FILE
+        lds     #STACK_TOP
+        ldx     HEX_VALUE_HI
+        jmp     0,x
+SDFS3_CMD_RUN_FILE:
+        ldx     SDFS3_PARSE_PTR
+        ldab    SDFS3_PARSE_LEN
+        jsr     SDFS3_LOAD_FILE
+        bcs     SDFS3_CMD_RUN_FAIL
+        ldaa    LOADER_MODE
+        cmpa    #LOAD_MODE_SREC
+        bne     SDFS3_CMD_RUN_FAIL
+        ldaa    SDFS_RUN_ENTRY_SET
+        beq     SDFS3_CMD_RUN_FAIL
+        lds     #STACK_TOP
+        ldx     SDFS_RUN_ENTRY
+        jmp     0,x
+SDFS3_CMD_RUN_FAIL:
+        ldaa    #SDFS3_ERR_RUN
+        jmp     SDFS3_FAIL_A
+
+SDFS3_CMD_COM:
+        ldx     SDFS3_TOKEN_PTR
+        ldab    SDFS3_TOKEN_LEN
+        addb    SDFS3_PARSE_LEN
+        jsr     SDFS3_PARSE_COM_PATH_COMMAND
+        bcs     SDFS3_CMD_COM_FAIL
+        jsr     FAT32_MOUNT
+        bcs     SDFS3_CMD_COM_FAIL
+        jsr     SDFS3_RESOLVE_FILE_SAVED
+        bcs     SDFS3_CMD_COM_FAIL
+        jsr     SDFS3_PARSE_COM_CHECK_EXT
+        bcs     SDFS3_CMD_COM_FAIL
+        jsr     SDFS3_COM_CHECK_SIZE
+        bcs     SDFS3_CMD_COM_FAIL
+        jsr     FAT32_STREAM_OPEN
+        bcs     SDFS3_CMD_COM_FAIL
+        jsr     SDFS3_COM_LOAD_RAW
+        bcs     SDFS3_CMD_COM_FAIL
+        jsr     SDFS3_COM_RESTORE_ARGS
+        ldx     ARG2_PTR
+        ldab    ARG2_LEN
+        clra
+        jsr     SDFS3_COM_LOAD_BASE
+        clr     SDFS3_LAST_ERROR
+        clc
+        rts
+SDFS3_CMD_COM_FAIL:
+        ldaa    #SDFS3_ERR_COM
+        jmp     SDFS3_FAIL_A
+
+SDFS3_COM_CHECK_SIZE:
+        ldaa    FAT_FILE_SIZE0
+        oraa    FAT_FILE_SIZE1
+        bne     SDFS3_COM_CHECK_FAIL
+        ldaa    FAT_FILE_SIZE2
+        oraa    FAT_FILE_SIZE3
+        beq     SDFS3_COM_CHECK_FAIL
+        ldaa    FAT_FILE_SIZE2
+        cmpa    #SDFS3_COM_MAX_HI
+        bhi     SDFS3_COM_CHECK_FAIL
+        blo     SDFS3_COM_CHECK_OK
+        ldaa    FAT_FILE_SIZE3
+        cmpa    #SDFS3_COM_MAX_LO
+        bhi     SDFS3_COM_CHECK_FAIL
+SDFS3_COM_CHECK_OK:
+        clc
+        rts
+SDFS3_COM_CHECK_FAIL:
+        sec
+        rts
+
+SDFS3_COM_LOAD_RAW:
+        ldx     #SDFS3_COM_LOAD_BASE
+        stx     FAT_READ_PTR
+SDFS3_COM_LOAD_LOOP:
+        jsr     FAT_BYTES_REMAIN
+        bcc     SDFS3_COM_LOAD_DONE
+        jsr     FAT32_STREAM_GETC
+        bcs     SDFS3_COM_LOAD_FAIL
+        ldx     FAT_READ_PTR
+        staa    0,x
+        inx
+        stx     FAT_READ_PTR
+        bra     SDFS3_COM_LOAD_LOOP
+SDFS3_COM_LOAD_DONE:
+        clc
+        rts
+SDFS3_COM_LOAD_FAIL:
+        sec
+        rts
+
+SDFS3_COM_RESTORE_ARGS:
+        ldx     PATH_ARG_PTR
+        stx     ARG2_PTR
+        ldaa    PATH_ARG_LEN
+        staa    ARG2_LEN
+        rts
 
 SDFS3_DIR_PATH:
         jsr     SDFS3_RESOLVE_DIR_SAVED
@@ -740,6 +884,525 @@ SDFS3_CLEAR_FIND_NAME_LOOP:
         bne     SDFS3_CLEAR_FIND_NAME_LOOP
         rts
 
+SDFS3_PARSE_COM_PATH_COMMAND:
+        stx     ARG_PTR
+        stab    ARG_LEN
+SDFS3_PARSE_COM_PATH_SKIP_HEAD:
+        tst     ARG_LEN
+        beq     SDFS3_PARSE_COM_PATH_FAIL
+        ldx     ARG_PTR
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        bne     SDFS3_PARSE_COM_PATH_START
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+        bra     SDFS3_PARSE_COM_PATH_SKIP_HEAD
+SDFS3_PARSE_COM_PATH_START:
+        ldx     ARG_PTR
+        stx     PATH_PTR
+        clr     PATH_LEN
+SDFS3_PARSE_COM_PATH_TOKEN:
+        tst     ARG_LEN
+        beq     SDFS3_PARSE_COM_PATH_NO_ARGS
+        ldx     ARG_PTR
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        beq     SDFS3_PARSE_COM_PATH_ARG_SKIP
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+        inc     PATH_LEN
+        bra     SDFS3_PARSE_COM_PATH_TOKEN
+SDFS3_PARSE_COM_PATH_ARG_SKIP:
+        ldaa    PATH_LEN
+        beq     SDFS3_PARSE_COM_PATH_FAIL
+        ldx     ARG_PTR
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+SDFS3_PARSE_COM_PATH_ARG_SKIP_LOOP:
+        tst     ARG_LEN
+        beq     SDFS3_PARSE_COM_PATH_NO_ARGS
+        ldx     ARG_PTR
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        bne     SDFS3_PARSE_COM_PATH_ARGS
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+        bra     SDFS3_PARSE_COM_PATH_ARG_SKIP_LOOP
+SDFS3_PARSE_COM_PATH_ARGS:
+        ldx     ARG_PTR
+        stx     PATH_ARG_PTR
+        ldaa    ARG_LEN
+        staa    PATH_ARG_LEN
+        clc
+        rts
+SDFS3_PARSE_COM_PATH_NO_ARGS:
+        ldaa    PATH_LEN
+        beq     SDFS3_PARSE_COM_PATH_FAIL
+        ldx     ARG_PTR
+        stx     PATH_ARG_PTR
+        clr     PATH_ARG_LEN
+        clc
+        rts
+SDFS3_PARSE_COM_PATH_FAIL:
+        sec
+        rts
+
+SDFS3_PARSE_COM_CHECK_EXT:
+        ldaa    FAT_FIND_NAME8
+        cmpa    #'C'
+        bne     SDFS3_PARSE_COM_CHECK_FAIL
+        ldaa    FAT_FIND_NAME9
+        cmpa    #'O'
+        bne     SDFS3_PARSE_COM_CHECK_FAIL
+        ldaa    FAT_FIND_NAME10
+        cmpa    #'M'
+        bne     SDFS3_PARSE_COM_CHECK_FAIL
+        clc
+        rts
+SDFS3_PARSE_COM_CHECK_FAIL:
+        sec
+        rts
+
+SDFS3_PARSE_HEX16:
+        stx     ARG_PTR
+        stab    ARG_LEN
+        clr     HEX_VALUE_HI
+        clr     HEX_VALUE_LO
+        clr     ARG2_LEN
+SDFS3_PARSE_HEX16_SKIP:
+        tst     ARG_LEN
+        bne     SDFS3_PARSE_HEX16_SKIP_HAS
+        jmp     SDFS3_PARSE_HEX16_FAIL
+SDFS3_PARSE_HEX16_SKIP_HAS:
+        ldx     ARG_PTR
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        bne     SDFS3_PARSE_HEX16_LOOP
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+        bra     SDFS3_PARSE_HEX16_SKIP
+SDFS3_PARSE_HEX16_LOOP:
+        tst     ARG_LEN
+        beq     SDFS3_PARSE_HEX16_DONE
+        ldx     ARG_PTR
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        beq     SDFS3_PARSE_HEX16_TRAILING
+        jsr     SDFS3_HEX_TO_NIBBLE
+        bcs     SDFS3_PARSE_HEX16_FAIL
+        ldab    ARG2_LEN
+        cmpb    #4
+        bhs     SDFS3_PARSE_HEX16_FAIL
+        tstb
+        beq     SDFS3_PARSE_HEX16_HI_H
+        cmpb    #1
+        beq     SDFS3_PARSE_HEX16_HI_L
+        cmpb    #2
+        beq     SDFS3_PARSE_HEX16_LO_H
+        oraa    HEX_VALUE_LO
+        staa    HEX_VALUE_LO
+        bra     SDFS3_PARSE_HEX16_ADVANCE
+SDFS3_PARSE_HEX16_HI_H:
+        lsla
+        lsla
+        lsla
+        lsla
+        staa    HEX_VALUE_HI
+        bra     SDFS3_PARSE_HEX16_ADVANCE
+SDFS3_PARSE_HEX16_HI_L:
+        oraa    HEX_VALUE_HI
+        staa    HEX_VALUE_HI
+        bra     SDFS3_PARSE_HEX16_ADVANCE
+SDFS3_PARSE_HEX16_LO_H:
+        lsla
+        lsla
+        lsla
+        lsla
+        staa    HEX_VALUE_LO
+SDFS3_PARSE_HEX16_ADVANCE:
+        ldx     ARG_PTR
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+        inc     ARG2_LEN
+        bra     SDFS3_PARSE_HEX16_LOOP
+SDFS3_PARSE_HEX16_TRAILING:
+        ldx     ARG_PTR
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+SDFS3_PARSE_HEX16_TRAILING_LOOP:
+        tst     ARG_LEN
+        beq     SDFS3_PARSE_HEX16_DONE
+        ldx     ARG_PTR
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        bne     SDFS3_PARSE_HEX16_FAIL
+        inx
+        stx     ARG_PTR
+        dec     ARG_LEN
+        bra     SDFS3_PARSE_HEX16_TRAILING_LOOP
+SDFS3_PARSE_HEX16_DONE:
+        ldaa    ARG2_LEN
+        cmpa    #4
+        bne     SDFS3_PARSE_HEX16_FAIL
+        clc
+        rts
+SDFS3_PARSE_HEX16_FAIL:
+        sec
+        rts
+
+SDFS3_READ_LOADER_RECORD:
+        jsr     SDFS3_READ_RECORD_HEAD
+        bcs     SDFS3_READ_LOADER_RECORD_FAIL
+        ldaa    LOADER_MODE
+        bne     SDFS3_READ_LOADER_RECORD_MODE_SET
+        ldaa    HEX_NIBBLE
+        cmpa    #'S'
+        beq     SDFS3_READ_LOADER_RECORD_SET_SREC
+        cmpa    #':'
+        beq     SDFS3_READ_LOADER_RECORD_SET_IHEX
+        sec
+        rts
+SDFS3_READ_LOADER_RECORD_SET_SREC:
+        ldaa    #LOAD_MODE_SREC
+        staa    LOADER_MODE
+        bra     SDFS3_READ_LOADER_RECORD_MODE_SET
+SDFS3_READ_LOADER_RECORD_SET_IHEX:
+        ldaa    #LOAD_MODE_IHEX
+        staa    LOADER_MODE
+SDFS3_READ_LOADER_RECORD_MODE_SET:
+        ldaa    LOADER_MODE
+        cmpa    #LOAD_MODE_SREC
+        beq     SDFS3_READ_SREC_RECORD
+        cmpa    #LOAD_MODE_IHEX
+        bne     SDFS3_READ_LOADER_RECORD_FAIL
+        jmp     SDFS3_READ_IHEX_RECORD
+SDFS3_READ_LOADER_RECORD_FAIL:
+        sec
+        rts
+
+SDFS3_READ_RECORD_HEAD:
+        jsr     FAT32_STREAM_GETC
+        bcs     SDFS3_READ_RECORD_HEAD_FAIL
+        cmpa    #CHR_LF
+        beq     SDFS3_READ_RECORD_HEAD
+        cmpa    #CHR_CR
+        beq     SDFS3_READ_RECORD_HEAD
+        cmpa    #CHR_SPACE
+        blo     SDFS3_READ_RECORD_HEAD
+        staa    HEX_NIBBLE
+        clc
+        rts
+SDFS3_READ_RECORD_HEAD_FAIL:
+        sec
+        rts
+
+SDFS3_READ_RECORD_TRAILER:
+        jsr     FAT32_STREAM_GETC
+        bcs     SDFS3_READ_RECORD_TRAILER_EOF_OR_FAIL
+        cmpa    #CHR_LF
+        beq     SDFS3_READ_RECORD_TRAILER_OK
+        cmpa    #CHR_CR
+        beq     SDFS3_READ_RECORD_TRAILER_OK
+SDFS3_READ_RECORD_TRAILER_FAIL:
+        sec
+        rts
+SDFS3_READ_RECORD_TRAILER_EOF_OR_FAIL:
+        jsr     FAT_BYTES_REMAIN
+        bcs     SDFS3_READ_RECORD_TRAILER_FAIL
+SDFS3_READ_RECORD_TRAILER_OK:
+        clc
+        rts
+
+SDFS3_READ_HEXBYTE_INPUT:
+        pshb
+        jsr     FAT32_STREAM_GETC
+        bcs     SDFS3_READ_HEXBYTE_INPUT_FAIL
+        jsr     SDFS3_HEX_TO_NIBBLE
+        bcs     SDFS3_READ_HEXBYTE_INPUT_FAIL
+        lsla
+        lsla
+        lsla
+        lsla
+        tab
+        jsr     FAT32_STREAM_GETC
+        bcs     SDFS3_READ_HEXBYTE_INPUT_FAIL
+        jsr     SDFS3_HEX_TO_NIBBLE
+        bcs     SDFS3_READ_HEXBYTE_INPUT_FAIL
+        aba
+        pulb
+        clc
+        rts
+SDFS3_READ_HEXBYTE_INPUT_FAIL:
+        pulb
+        sec
+        rts
+
+SDFS3_READ_SREC_RECORD:
+        ldaa    HEX_NIBBLE
+        cmpa    #'S'
+        beq     SDFS3_READ_SREC_HEAD_OK
+        jmp     SDFS3_READ_SREC_FAIL
+SDFS3_READ_SREC_HEAD_OK:
+        ldaa    #1
+        staa    LOADER_STAGE
+        jsr     FAT32_STREAM_GETC
+        bcs     SDFS3_READ_SREC_FAIL_NEAR0
+        staa    LOADER_TYPE
+        cmpa    #'0'
+        beq     SDFS3_READ_SREC_TYPE_OK
+        cmpa    #'1'
+        beq     SDFS3_READ_SREC_TYPE_OK
+        cmpa    #'2'
+        beq     SDFS3_READ_SREC_TYPE_OK
+        cmpa    #'5'
+        beq     SDFS3_READ_SREC_TYPE_OK
+        cmpa    #'8'
+        beq     SDFS3_READ_SREC_TYPE_OK
+        cmpa    #'9'
+        beq     SDFS3_READ_SREC_TYPE_OK
+        jmp     SDFS3_READ_SREC_FAIL
+SDFS3_READ_SREC_FAIL_NEAR0:
+        jmp     SDFS3_READ_SREC_FAIL
+SDFS3_READ_SREC_TYPE_OK:
+        ldaa    #2
+        staa    LOADER_STAGE
+        jsr     SDFS3_READ_HEXBYTE_INPUT
+        bcs     SDFS3_READ_SREC_FAIL_NEAR1
+        staa    LOADER_COUNT
+        staa    LOADER_SUM
+        ldaa    LOADER_TYPE
+        cmpa    #'2'
+        beq     SDFS3_READ_SREC_ADDR24
+        cmpa    #'8'
+        beq     SDFS3_READ_SREC_ADDR24
+        ldaa    LOADER_COUNT
+        cmpa    #3
+        blo     SDFS3_READ_SREC_FAIL_NEAR1
+        ldaa    #3
+        staa    LOADER_STAGE
+        jsr     SDFS3_READ_HEXBYTE_INPUT
+        bcs     SDFS3_READ_SREC_FAIL_NEAR1
+        staa    LOADER_ADDR
+        jsr     SDFS3_ADD_TO_LOADER_SUM
+        jsr     SDFS3_READ_HEXBYTE_INPUT
+        bcs     SDFS3_READ_SREC_FAIL_NEAR1
+        staa    LOADER_ADDR+1
+        jsr     SDFS3_ADD_TO_LOADER_SUM
+        ldab    LOADER_COUNT
+        subb    #3
+        bra     SDFS3_READ_SREC_DATA_LOOP
+SDFS3_READ_SREC_FAIL_NEAR1:
+        jmp     SDFS3_READ_SREC_FAIL
+SDFS3_READ_SREC_ADDR24:
+        ldaa    LOADER_COUNT
+        cmpa    #4
+        blo     SDFS3_READ_SREC_FAIL_NEAR2
+        ldaa    #3
+        staa    LOADER_STAGE
+        jsr     SDFS3_READ_HEXBYTE_INPUT
+        bcs     SDFS3_READ_SREC_FAIL_NEAR2
+        staa    HEX_NIBBLE
+        jsr     SDFS3_ADD_TO_LOADER_SUM
+        ldaa    HEX_NIBBLE
+        bne     SDFS3_READ_SREC_FAIL_NEAR2
+        jsr     SDFS3_READ_HEXBYTE_INPUT
+        bcs     SDFS3_READ_SREC_FAIL_NEAR2
+        staa    LOADER_ADDR
+        jsr     SDFS3_ADD_TO_LOADER_SUM
+        jsr     SDFS3_READ_HEXBYTE_INPUT
+        bcs     SDFS3_READ_SREC_FAIL_NEAR2
+        staa    LOADER_ADDR+1
+        jsr     SDFS3_ADD_TO_LOADER_SUM
+        ldab    LOADER_COUNT
+        subb    #4
+        bra     SDFS3_READ_SREC_DATA_LOOP
+SDFS3_READ_SREC_FAIL_NEAR2:
+        jmp     SDFS3_READ_SREC_FAIL
+SDFS3_READ_SREC_DATA_LOOP:
+        ldaa    #4
+        staa    LOADER_STAGE
+        tstb
+        beq     SDFS3_READ_SREC_CHECKSUM
+        jsr     SDFS3_READ_HEXBYTE_INPUT
+        bcs     SDFS3_READ_SREC_FAIL
+        staa    HEX_NIBBLE
+        jsr     SDFS3_ADD_TO_LOADER_SUM
+        ldaa    LOADER_TYPE
+        cmpa    #'1'
+        beq     SDFS3_READ_SREC_STORE
+        cmpa    #'2'
+        bne     SDFS3_READ_SREC_SKIP_STORE
+SDFS3_READ_SREC_STORE:
+        ldaa    HEX_NIBBLE
+        pshb
+        ldx     LOADER_ADDR
+        staa    0,x
+        inx
+        stx     LOADER_ADDR
+        pulb
+SDFS3_READ_SREC_SKIP_STORE:
+        decb
+        bra     SDFS3_READ_SREC_DATA_LOOP
+SDFS3_READ_SREC_CHECKSUM:
+        ldaa    #5
+        staa    LOADER_STAGE
+        jsr     SDFS3_READ_HEXBYTE_INPUT
+        bcs     SDFS3_READ_SREC_FAIL
+        jsr     SDFS3_ADD_TO_LOADER_SUM
+        cmpa    #$FF
+        bne     SDFS3_READ_SREC_FAIL
+        jsr     SDFS3_READ_RECORD_TRAILER
+        bcs     SDFS3_READ_SREC_FAIL
+        ldaa    LOADER_TYPE
+        cmpa    #'8'
+        beq     SDFS3_READ_SREC_EOF
+        cmpa    #'9'
+        beq     SDFS3_READ_SREC_EOF
+        ldaa    #0
+        clc
+        rts
+SDFS3_READ_SREC_EOF:
+        ldaa    LOADER_ADDR
+        staa    SDFS_RUN_ENTRY
+        ldaa    LOADER_ADDR+1
+        staa    SDFS_RUN_ENTRY+1
+        ldaa    #1
+        staa    SDFS_RUN_ENTRY_SET
+        ldaa    #1
+        clc
+        rts
+SDFS3_READ_SREC_FAIL:
+        sec
+        rts
+
+SDFS3_READ_IHEX_RECORD:
+        ldaa    HEX_NIBBLE
+        cmpa    #':'
+        beq     SDFS3_READ_IHEX_HEAD_OK
+        jmp     SDFS3_READ_IHEX_FAIL
+SDFS3_READ_IHEX_HEAD_OK:
+        ldaa    #1
+        staa    LOADER_STAGE
+        ldaa    #2
+        staa    LOADER_STAGE
+        jsr     SDFS3_READ_HEXBYTE_INPUT
+        bcs     SDFS3_READ_IHEX_FAIL_NEAR1
+        staa    LOADER_COUNT
+        staa    LOADER_SUM
+        ldaa    #3
+        staa    LOADER_STAGE
+        jsr     SDFS3_READ_HEXBYTE_INPUT
+        bcs     SDFS3_READ_IHEX_FAIL_NEAR1
+        staa    LOADER_ADDR
+        jsr     SDFS3_ADD_TO_LOADER_SUM
+        jsr     SDFS3_READ_HEXBYTE_INPUT
+        bcs     SDFS3_READ_IHEX_FAIL_NEAR1
+        staa    LOADER_ADDR+1
+        jsr     SDFS3_ADD_TO_LOADER_SUM
+        jsr     SDFS3_READ_HEXBYTE_INPUT
+        bcs     SDFS3_READ_IHEX_FAIL_NEAR1
+        staa    LOADER_TYPE
+        jsr     SDFS3_ADD_TO_LOADER_SUM
+        ldaa    LOADER_TYPE
+        cmpa    #$00
+        beq     SDFS3_READ_IHEX_DATA
+        cmpa    #$01
+        bne     SDFS3_READ_IHEX_FAIL
+        ldaa    LOADER_COUNT
+        bne     SDFS3_READ_IHEX_FAIL
+        bra     SDFS3_READ_IHEX_DATA
+SDFS3_READ_IHEX_FAIL_NEAR1:
+        jmp     SDFS3_READ_IHEX_FAIL
+SDFS3_READ_IHEX_DATA:
+        ldaa    #4
+        staa    LOADER_STAGE
+        ldab    LOADER_COUNT
+SDFS3_READ_IHEX_DATA_LOOP:
+        tstb
+        beq     SDFS3_READ_IHEX_CHECKSUM
+        jsr     SDFS3_READ_HEXBYTE_INPUT
+        bcs     SDFS3_READ_IHEX_FAIL
+        staa    HEX_NIBBLE
+        jsr     SDFS3_ADD_TO_LOADER_SUM
+        ldaa    LOADER_TYPE
+        cmpa    #$00
+        bne     SDFS3_READ_IHEX_SKIP_STORE
+        ldaa    HEX_NIBBLE
+        pshb
+        ldx     LOADER_ADDR
+        staa    0,x
+        inx
+        stx     LOADER_ADDR
+        pulb
+SDFS3_READ_IHEX_SKIP_STORE:
+        decb
+        bra     SDFS3_READ_IHEX_DATA_LOOP
+SDFS3_READ_IHEX_CHECKSUM:
+        ldaa    #5
+        staa    LOADER_STAGE
+        jsr     SDFS3_READ_HEXBYTE_INPUT
+        bcs     SDFS3_READ_IHEX_FAIL
+        jsr     SDFS3_ADD_TO_LOADER_SUM
+        cmpa    #$00
+        bne     SDFS3_READ_IHEX_FAIL
+        jsr     SDFS3_READ_RECORD_TRAILER
+        bcs     SDFS3_READ_IHEX_FAIL
+        ldaa    LOADER_TYPE
+        cmpa    #$01
+        beq     SDFS3_READ_IHEX_EOF
+        ldaa    #0
+        clc
+        rts
+SDFS3_READ_IHEX_EOF:
+        ldaa    #1
+        clc
+        rts
+SDFS3_READ_IHEX_FAIL:
+        sec
+        rts
+
+SDFS3_HEX_TO_NIBBLE:
+        cmpa    #'0'
+        blo     SDFS3_HEX_TO_NIBBLE_FAIL
+        cmpa    #'9'
+        bhi     SDFS3_HEX_ALPHA
+        suba    #'0'
+        clc
+        rts
+SDFS3_HEX_ALPHA:
+        cmpa    #'A'
+        blo     SDFS3_HEX_LOWER
+        cmpa    #'F'
+        bhi     SDFS3_HEX_LOWER
+        suba    #'A'
+        adda    #10
+        clc
+        rts
+SDFS3_HEX_LOWER:
+        cmpa    #'a'
+        blo     SDFS3_HEX_TO_NIBBLE_FAIL
+        cmpa    #'f'
+        bhi     SDFS3_HEX_TO_NIBBLE_FAIL
+        suba    #'a'
+        adda    #10
+        clc
+        rts
+SDFS3_HEX_TO_NIBBLE_FAIL:
+        sec
+        rts
+
+SDFS3_ADD_TO_LOADER_SUM:
+        adda    LOADER_SUM
+        staa    LOADER_SUM
+        rts
+
 SDFS3_PRINT_DIR_ENTRY:
         ldx     FAT_ENTRY_PTR
         ldab    #8
@@ -869,6 +1532,15 @@ SDFS3_PRINT_NIBBLE:
 SDFS3_PRINT_NIBBLE_OUT:
         jmp     SDFS3_PUTC
 
+SDFS3_PRINT:
+        ldaa    0,x
+        beq     SDFS3_PRINT_DONE
+        jsr     SDFS3_PUTC
+        inx
+        bra     SDFS3_PRINT
+SDFS3_PRINT_DONE:
+        rts
+
 SDFS3_PUTC:
         psha
         jsr     MIKBUG_OUTCH
@@ -900,6 +1572,9 @@ SDFS3_TOKEN_PTR:
         fdb     0
 SDFS3_TOKEN_LEN:
         fcb     0
+SDFS3_TXT_OK:
+        fcc     "OK"
+        fcb     CHR_CR,0
 
 FAT32_INCLUDE_FIND_API equ 1
 FAT32_INCLUDE_FILE_API equ 1
