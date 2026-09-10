@@ -3,8 +3,8 @@
         include "hardware.inc"
 
 SDFS3_API_MAJOR    equ 1
-SDFS3_API_MINOR    equ 0
-SDFS3_API_COUNT    equ 9
+SDFS3_API_MINOR    equ 1
+SDFS3_API_COUNT    equ 14
 SDFS3_API_HDR_SIZE equ $18
 SDFS3_FLAG_NONE    equ 0
 SDFS3_CAPS_NONE    equ 0
@@ -51,6 +51,11 @@ SDFS3_JUMP_TABLE:
         fdb     SDFS3_GET_ERROR
         fdb     SDFS3_GET_MEMTOP
         fdb     SDFS3_GET_CAPS
+        fdb     SDFS3_NOT_IMPLEMENTED
+        fdb     SDFS3_NOT_IMPLEMENTED
+        fdb     SDFS3_NOT_IMPLEMENTED
+        fdb     SDFS3_NOT_IMPLEMENTED
+        fdb     SDFS3_INIT
 
 SDFS3_GET_INFO:
         ldaa    #SDFS3_API_MAJOR
@@ -151,6 +156,34 @@ SDFS3_GET_CAPS:
         ldaa    #SDFS3_CAPS_NONE
         ldab    #SDFS3_CAPS_NONE
         ldx     #SDFS3_API_HEADER
+        clc
+        rts
+
+SDFS3_INIT:
+        ldx     #SDFS3_TXT_WELCOME
+        jsr     SDFS3_PRINT
+        ldaa    #SDFS3_API_MAJOR
+        jsr     SDFS3_PRINT_HEX8
+        ldaa    #'.'
+        jsr     SDFS3_PUTC
+        ldaa    #SDFS3_API_MINOR
+        jsr     SDFS3_PRINT_HEX8
+        ldaa    #CHR_CR
+        jsr     SDFS3_PUTC
+        ldx     #SDFS3_TXT_BASE
+        jsr     SDFS3_PRINT
+        ldaa    #SDFS3_LOAD_BASE/$0100
+        jsr     SDFS3_PRINT_HEX8
+        ldaa    #SDFS3_LOAD_BASE&$00FF
+        jsr     SDFS3_PRINT_HEX8
+        ldx     #SDFS3_TXT_END
+        jsr     SDFS3_PRINT
+        ldaa    #(SDFS3_END-1)/$0100
+        jsr     SDFS3_PRINT_HEX8
+        ldaa    #(SDFS3_END-1)&$00FF
+        jsr     SDFS3_PRINT_HEX8
+        ldaa    #CHR_CR
+        jsr     SDFS3_PUTC
         clc
         rts
 
@@ -1567,6 +1600,15 @@ SDFS3_TOKEN_LEN:
 SDFS3_TXT_OK:
         fcc     "OK"
         fcb     CHR_CR,0
+SDFS3_TXT_WELCOME:
+        fcc     "SDFS/68 V3 "
+        fcb     0
+SDFS3_TXT_BASE:
+        fcc     "BASE="
+        fcb     0
+SDFS3_TXT_END:
+        fcc     " END="
+        fcb     0
 
 FAT32_INCLUDE_FIND_API equ 1
 FAT32_INCLUDE_FILE_API equ 1

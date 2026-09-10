@@ -34,3 +34,4 @@ v3 は、現行の `BOOT -> stage1 -> SDFS.BIN -> SDFS> ` 方式を単純に拡�
 | #278 | [issue-278_sdfs3sys_image.md](issue-278_sdfs3sys_image.md) | SDFS3SYS system image生成 |
 | #277 | [issue-277_fixed_lba_loader.md](issue-277_fixed_lba_loader.md) | 固定LBA loader harness |
 | #291 | [issue-291_sdfs3_load_base.md](issue-291_sdfs3_load_base.md) | v2 SDFSロード先とv3 resident検出先の分離 |
+| #298 | [issue-298_init_welcome.md](issue-298_init_welcome.md) | resident INIT API と Welcome 表示 |
