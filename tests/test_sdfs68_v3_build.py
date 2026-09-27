@@ -72,6 +72,8 @@ def test_sdfs3_profiles_build_and_match_header() -> None:
             "SDFS3_GET_ERROR",
             "SDFS3_GET_MEMTOP",
             "SDFS3_GET_CAPS",
+            "SDFS3_NOT_IMPLEMENTED",
+            "SDFS3_INIT",
             "SDFS3_END",
         )
         assert symbols["SDFS3_LOAD_BASE"] == expected["SDFS3_LOAD_BASE"]
@@ -82,8 +84,8 @@ def test_sdfs3_profiles_build_and_match_header() -> None:
         assert len(data) == symbols["SDFS3_END"] - symbols["SDFS3_LOAD_BASE"]
         assert data[0:8] == b"SDFS3API"
         assert data[8] == 1, "SDFS3 api major mismatch"
-        assert data[9] == 0, "SDFS3 api minor mismatch"
-        assert data[10] == 9, "SDFS3 api count mismatch"
+        assert data[9] == 1, "SDFS3 api minor mismatch"
+        assert data[10] == 14, "SDFS3 api count mismatch"
         assert data[11] == 0, "SDFS3 flags should be zero in stub"
         assert _word(data, 0x0C) == symbols["SDFS3_JUMP_TABLE"]
         assert _word(data, 0x0E) == symbols["SDFS3_LOAD_BASE"]
@@ -101,8 +103,14 @@ def test_sdfs3_profiles_build_and_match_header() -> None:
         assert _word(data, jump_table + 12) == symbols["SDFS3_GET_ERROR"]
         assert _word(data, jump_table + 14) == symbols["SDFS3_GET_MEMTOP"]
         assert _word(data, jump_table + 16) == symbols["SDFS3_GET_CAPS"]
+        assert _word(data, jump_table + 18) == symbols["SDFS3_NOT_IMPLEMENTED"]
+        assert _word(data, jump_table + 20) == symbols["SDFS3_NOT_IMPLEMENTED"]
+        assert _word(data, jump_table + 22) == symbols["SDFS3_NOT_IMPLEMENTED"]
+        assert _word(data, jump_table + 24) == symbols["SDFS3_NOT_IMPLEMENTED"]
+        assert _word(data, jump_table + 26) == symbols["SDFS3_INIT"]
         get_error = symbols["SDFS3_GET_ERROR"] - symbols["SDFS3_LOAD_BASE"]
         assert data[get_error + 3 : get_error + 5] == bytes([0x0C, 0x39])
+        assert b"SDFS/68 V3 " in data, "welcome string missing from resident binary"
     print("[PASS] test_sdfs3_profiles_build_and_match_header")
 
 
@@ -431,6 +439,8 @@ def test_rom_detects_sdfs3_api_header() -> None:
         ("bad major", _mutated_header(symbols["SDFS3_LOAD_BASE"], 8, 0x02), 0xE1),
         ("legacy api count 7", _mutated_header(symbols["SDFS3_LOAD_BASE"], 10, 0x07), 0xE1),
         ("short api count 8", _mutated_header(symbols["SDFS3_LOAD_BASE"], 10, 0x08), 0xE1),
+        ("legacy api count 9", _mutated_header(symbols["SDFS3_LOAD_BASE"], 10, 0x09), 0xE1),
+        ("legacy api count 13", _mutated_header(symbols["SDFS3_LOAD_BASE"], 10, 0x0D), 0xE1),
     ]
     for label, header, expected_status in cases:
         stdout, stderr, rc = _run_emu(
@@ -476,7 +486,7 @@ def test_rom_cmd_gateway_calls_resident_dispatch() -> None:
     x_addr = 0x0202
     load_base = symbols["SDFS3_LOAD_BASE"]
     jump_table = load_base + 0x18
-    dispatch = jump_table + 0x12
+    dispatch = jump_table + 0x1C
     header = _sdfs3_header(load_base, jump_table=jump_table, work_end=dispatch + 13)
     jump_table_data = bytes(
         [
@@ -484,7 +494,7 @@ def test_rom_cmd_gateway_calls_resident_dispatch() -> None:
             0x00,
             (dispatch >> 8) & 0xFF,
             dispatch & 0xFF,
-            *([0x00, 0x00] * 7),
+            *([0x00, 0x00] * 12),
         ]
     )
     dispatch_stub = bytes(
@@ -626,6 +636,11 @@ def test_rom_boot3_loads_sdfs3sys_and_enables_cmd() -> None:
         PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.lst",
         "SDFS3_LOAD_BASE",
     )
+    resident_symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"SDFS3{suffix}.lst",
+        "SDFS3_LOAD_BASE",
+        "SDFS3_END",
+    )
     sdfs3sys = (PROJECT_ROOT / "build" / f"SDFS3SYS{suffix}.BIN").read_bytes()
     payload = sdfs3sys[HEADER_SIZE:]
     sd_image = _build_sdfs3sys_fat_sd_image(
@@ -651,9 +666,20 @@ def test_rom_boot3_loads_sdfs3sys_and_enables_cmd() -> None:
         f"emulator failed for ROM BOOT3: rc={rc} stderr={stderr!r}"
     )
     assert "OK" in stdout, f"BOOT3 should report OK after loading resident: {stdout!r}"
+    banner = "SDFS/68 V3 01.01"
+    base_end = (
+        f"BASE={symbols['SDFS3_LOAD_BASE']:04X} "
+        f"END={resident_symbols['SDFS3_END'] - 1:04X}"
+    )
+    assert banner in stdout, f"welcome banner missing: {stdout!r}"
+    assert base_end in stdout, f"welcome base/end line missing: {stdout!r}"
+    banner_index = stdout.index(banner)
+    assert banner_index < stdout.index("OK"), f"welcome should print before OK: {stdout!r}"
     assert "HELLO.S A " in stdout, f"CMD DIR did not use resident after BOOT3: {stdout!r}"
     loaded = _dump_range_bytes(stdout, symbols["SDFS3_LOAD_BASE"], 0x40)
     assert bytes(loaded) == payload[:0x40], f"BOOT3 did not load SDFS3SYS header/code: {stdout!r}"
+    rom_bin = (PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin").read_bytes()
+    assert b"SDFS/68 V3 " not in rom_bin, "welcome string must not leak into ROM binary"
     print("[PASS] test_rom_boot3_loads_sdfs3sys_and_enables_cmd")
 
 
@@ -925,8 +951,8 @@ def _sdfs3_header(
         [
             *b"SDFS3API",
             0x01,
-            0x00,
-            0x09,
+            0x01,
+            0x0E,
             0x00,
             (jump_table >> 8) & 0xFF,
             jump_table & 0xFF,
