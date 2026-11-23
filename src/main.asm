@@ -1809,6 +1809,10 @@ CMD_BOOT3:
         bcs     CMD_BOOT3_ERROR
         jsr     SDFS3_FIND_API
         bcs     CMD_BOOT3_ERROR
+        ldx     12,x
+        ldx     26,x
+        jsr     0,x
+        bcs     CMD_BOOT3_ERROR
         ldx     #TXT_OK
         jsr     PDATA1
         jmp     MAIN_LOOP
@@ -2085,7 +2089,7 @@ BOOT3_FAIL_A:
         rts
 
 SDFS3_API_MAJOR    equ 1
-SDFS3_API_MIN_COUNT equ 9
+SDFS3_API_MIN_COUNT equ 14
 
 SDFS3_FIND_API:
         ldx     #SDFS3_LOAD_BASE

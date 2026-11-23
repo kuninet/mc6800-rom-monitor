@@ -110,6 +110,7 @@ resident APIは、外部に見せるAPIとresident内部APIを分ける。
 | 10 | `SDFS3_WRITE_OPEN` | BASIC SAVE候補 | 後続 | FAT write / SAVEが固まるまで保留 |
 | 11 | `SDFS3_WRITE_DATA` | BASIC SAVE候補 | 後続 | 同上 |
 | 12 | `SDFS3_WRITE_CLOSE` | BASIC SAVE候補 | 後続 | 同上 |
+| 13 | `SDFS3_INIT` | ROM (`CMD_BOOT3`) | 採用 (#298) | ロード完了直後の初期化・Welcome表示。slot 9-12の予約を保つため末尾ではなくslot 13に採番 |
 
 phase 1で必須にするのは、`GET_INFO`、`CMD_DISPATCH`、`GET_ERROR` を最小とする。
 `LOAD_PATH`、`GET_MEMTOP`、`GET_CAPS` は早期に欲しいが、最初のstubでは未実装を返してよい。
