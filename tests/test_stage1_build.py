@@ -781,7 +781,10 @@ def _run_emu_with_sd(
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=20,
+            # 実時間の安全弁。エミュは約 0.7M 命令/秒で、BIGSREC.S の読み出しは
+            # 14.4M 命令 / 約 21 秒かかる(#320)。20 秒では足りないため 120 秒とする。
+            # ハングは max_cycles でも検出される。
+            timeout=120,
         )
         return result.stdout, result.stderr, result.returncode
     except subprocess.TimeoutExpired as exc:
