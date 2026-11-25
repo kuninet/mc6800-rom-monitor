@@ -168,6 +168,52 @@ PATH_ARG_LEN     equ PATH_ARG_PTR+2
 SDFS3_DISPATCH   equ PATH_ARG_LEN+1
 SDFS3_RETURN     equ SDFS3_DISPATCH+2
 SDFS3_WORK_BASE  equ MIKBUG_VAR_BASE+$20
+
+; 案 B の BIOS 入口表（#310 の 1-6）。MIKBUG の隙間 $E0E6 から 3 バイトの jmp を 16 本並べる。
+; 番地・並び・規約は ROM の ABI なので、変えると焼き直しになる。
+BIOS_WBOOT       equ $E0E6
+BIOS_INFO        equ $E0E9
+BIOS_GET_API     equ $E0EC
+BIOS_EXEC        equ $E0EF
+BIOS_READ_LINE   equ $E0F2
+BIOS_MONITOR     equ $E0F5
+BIOS_SD_INIT     equ $E0F8
+BIOS_SD_READ     equ $E0FB
+BIOS_SD_SELECT   equ $E0FE
+BIOS_SD_DESELECT equ $E101
+BIOS_SD_SEND_CMD equ $E104
+BIOS_SD_XFER     equ $E107
+BIOS_SD_WAIT_R1  equ $E10A
+BIOS_SD_WRITE    equ $E10D
+BIOS_RSV14       equ $E110
+BIOS_RSV15       equ $E113
+BIOS_TABLE_END   equ $E116
+BIOS_ENTRY_COUNT equ 16
+BIOS_VERSION     equ 1
+
+; BIOS_EXEC と G で起動したプログラムのスタック(W+$1F7F から。決定 16)。
+BIOS_PROG_STACK  equ MIKBUG_STACK_TOP-$80
+
+; resident を置いてよい範囲の下限(#310 の 1-7)。上限は USER_RAM_END。
+SDFS3_RAM_FLOOR  equ $4000
+
+; BIOS 区画(W+$0300-$031F、ROM だけが書く。#310 の 1-3)。
+BIOS_BLOCK       equ MIKBUG_VAR_BASE
+BB_MAGIC         equ BIOS_BLOCK+$00
+BB_IMG_BASE      equ BIOS_BLOCK+$02
+BB_CORE_BASE     equ BIOS_BLOCK+$04
+BB_IMG_LAST      equ BIOS_BLOCK+$06
+BB_SUM_CCP       equ BIOS_BLOCK+$08
+BB_SUM_CORE      equ BIOS_BLOCK+$0A
+BB_CCP_VEC       equ BIOS_BLOCK+$0C
+BB_SLOT_LBA      equ BIOS_BLOCK+$0E
+BB_IMG_SUM       equ BIOS_BLOCK+$10
+BB_STATE         equ BIOS_BLOCK+$12
+BB_CHECK         equ BIOS_BLOCK+$13
+BB_WORK          equ BIOS_BLOCK+$14
+BB_CHECK_LEN     equ $14
+BB_MAGIC_HI      equ $B3
+BB_MAGIC_LO      equ $4C
  endif
 RAMTEST_CMP_SAFE equ $00F0
 RAMTEST_END_SAFE equ $00F2

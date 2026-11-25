@@ -28,6 +28,104 @@ PDATA1_DONE:
 CONTRL:
         jmp     MONITOR_ENTRY
 
+ if MONITOR_FEATURE_SD
+; 案 B の BIOS 入口表(#310 の 1-6)。番地は hardware.inc の BIOS_* と一致させる。
+BIOS_JMP macro   addr,target
+ if * <> addr
+        error   "BIOS entry table is misaligned"
+ endif
+        jmp     target
+        endm
+
+        org     BIOS_WBOOT
+
+        BIOS_JMP BIOS_WBOOT,BIOS_WBOOT_IMPL
+        BIOS_JMP BIOS_INFO,BIOS_INFO_IMPL
+        BIOS_JMP BIOS_GET_API,SDFS3_FIND_API
+        BIOS_JMP BIOS_EXEC,BIOS_EXEC_IMPL
+        BIOS_JMP BIOS_READ_LINE,BIOS_READ_LINE_IMPL
+        BIOS_JMP BIOS_MONITOR,BIOS_MONITOR_IMPL
+        BIOS_JMP BIOS_SD_INIT,SD_INIT
+        BIOS_JMP BIOS_SD_READ,SD_READ_SECTOR
+        BIOS_JMP BIOS_SD_SELECT,SD_SELECT
+        BIOS_JMP BIOS_SD_DESELECT,SD_DESELECT
+        BIOS_JMP BIOS_SD_SEND_CMD,SD_SEND_CMD
+        BIOS_JMP BIOS_SD_XFER,SD_SPI_XFER
+        BIOS_JMP BIOS_SD_WAIT_R1,SD_WAIT_R1
+        BIOS_JMP BIOS_SD_WRITE,BIOS_UNIMPL
+        BIOS_JMP BIOS_RSV14,BIOS_UNIMPL
+        BIOS_JMP BIOS_RSV15,BIOS_UNIMPL
+ if * <> BIOS_TABLE_END
+        error   "BIOS entry table size mismatch"
+ endif
+
+; #312 では「?」を出してモニタへ戻るだけ。DOS への warm 入口は #313 で作る。
+BIOS_WBOOT_IMPL:
+        lds     #STACK_TOP
+        jmp     MAIN_LOOP_ERROR
+
+BIOS_INFO_IMPL:
+        ldaa    #BIOS_VERSION
+        ldab    #BIOS_ENTRY_COUNT
+        rts
+
+; X -> {entry(2), argptr(2)}、B = 引数長。ブロックはスタックを切り替える前に読む
+; (呼び手のブロックが新しいスタックの位置と重なっても壊さないため)。
+; entry に着いた時点で SP = BIOS_PROG_STACK-2、スタックの一番上は BIOS_WBOOT。
+BIOS_EXEC_IMPL:
+        ldaa    1,x
+        psha
+        ldaa    0,x
+        psha
+        ldx     2,x
+        pula
+        staa    BIOS_PROG_STACK-3
+        pula
+        staa    BIOS_PROG_STACK-2
+        lds     #BIOS_PROG_STACK-4
+        ldaa    #BIOS_WBOOT/$0100
+        staa    BIOS_PROG_STACK-1
+        ldaa    #BIOS_WBOOT&$00FF
+        staa    BIOS_PROG_STACK
+        clra
+        rts
+
+BIOS_READ_LINE_IMPL:
+        jsr     READ_LINE
+        ldx     #LINE_BUF
+        ldab    LINE_LEN
+        rts
+
+; $E20D は #314 でモニタの門へ飛ぶ命令に変わる。
+BIOS_MONITOR_IMPL:
+        lds     #STACK_TOP
+        jmp     MONITOR_REENTRY
+
+BIOS_UNIMPL:
+        sec
+        rts
+
+; RAM の 16bit 加算和。入力 X = 開始番地、BB_WORK = 終端(最後のバイトの次の番地)。
+; 出力 A:B = [X, 終端) の和、X = 終端。1 バイト 20 サイクル。
+BIOS_RAM_SUM:
+        clra
+        clrb
+        cpx     BB_WORK
+        beq     BIOS_RAM_SUM_DONE
+BIOS_RAM_SUM_LOOP:
+        addb    0,x
+        adca    #0
+        inx
+        cpx     BB_WORK
+        bne     BIOS_RAM_SUM_LOOP
+BIOS_RAM_SUM_DONE:
+        rts
+BIOS_GAP_END:
+ if BIOS_GAP_END > MIKBUG_INEEE
+        error   "BIOS code overflows the MIKBUG gap"
+ endif
+ endif
+
         org     MIKBUG_INEEE
 
 INEEE:
@@ -48,6 +146,12 @@ MONITOR_ENTRY:
         beq     MONITOR_ENTRY_NO_KEYBOARD
         jsr     ACIA2_INIT
 MONITOR_ENTRY_NO_KEYBOARD:
+ endif
+MONITOR_REENTRY_AT:
+ if MONITOR_FEATURE_SD
+ if MONITOR_REENTRY_AT <> MONITOR_REENTRY
+        error   "MONITOR_REENTRY_AT must be MONITOR_BASE+$0D"
+ endif
  endif
         jmp     MAIN_LOOP
 
@@ -1798,6 +1902,7 @@ BOOT3_SRC_PTR      equ FAT_DATA_LBA2
 BOOT3_DST_PTR      equ FAT_ROOT_CLUS0
 
 CMD_BOOT3:
+        clr     BB_MAGIC
         jsr     SD_INIT
         bcs     CMD_BOOT3_ERROR
         jsr     BOOT3_SET_LBA
@@ -1807,12 +1912,18 @@ CMD_BOOT3:
         bcs     CMD_BOOT3_ERROR
         jsr     BOOT3_COPY_PAYLOAD
         bcs     CMD_BOOT3_ERROR
+        ldx     BOOT3_DST_PTR
+        stx     BB_WORK
+        ldx     BOOT3_EXPECTED_SUM
+        stx     BB_IMG_SUM
         jsr     SDFS3_FIND_API
         bcs     CMD_BOOT3_ERROR
+        stx     BB_CORE_BASE
         ldx     12,x
         ldx     26,x
         jsr     0,x
         bcs     CMD_BOOT3_ERROR
+        jsr     BB_STORE
         ldx     #TXT_OK
         jsr     PDATA1
         jmp     MAIN_LOOP
@@ -2127,6 +2238,93 @@ SDFS3_FIND_API:
         clc
         rts
 SDFS3_FIND_API_FAIL:
+        sec
+        rts
+
+; BIOS 区画を書く(BOOT3 の成功時)。BB_WORK にイメージの終端(最後の次)、
+; BB_IMG_SUM にヘッダ +$18、BB_CORE_BASE に SDFS3API ヘッダの番地が入っていること。
+; 今の resident は API ヘッダが先頭にあり CCP の区切りが ROM から見えないので、
+; 和は SUM_CORE の 1 本だけ、SUM_CCP は 0、CCP_VEC は IMG_BASE にする(#313 で 2 本に分ける)。
+BB_STORE:
+        ldx     #SDFS3_LOAD_BASE
+        stx     BB_IMG_BASE
+        stx     BB_CCP_VEC
+        jsr     BIOS_RAM_SUM
+        staa    BB_SUM_CORE
+        stab    BB_SUM_CORE+1
+        dex
+        stx     BB_IMG_LAST
+        clr     BB_SUM_CCP
+        clr     BB_SUM_CCP+1
+        ldx     #SDFS3SYS_FIXED_LBA
+        stx     BB_SLOT_LBA
+        clr     BB_STATE
+        ldaa    #BB_MAGIC_HI
+        staa    BB_MAGIC
+        ldaa    #BB_MAGIC_LO
+        staa    BB_MAGIC+1
+        jsr     BB_SUM8
+        nega
+        staa    BB_CHECK
+        rts
+
+; 区画の +$00..+$12 の 8bit 和を A に返す。X を壊す。
+BB_SUM8:
+        ldx     #BIOS_BLOCK
+        clra
+BB_SUM8_LOOP:
+        adda    0,x
+        inx
+        cpx     #BB_CHECK
+        bne     BB_SUM8_LOOP
+        rts
+
+; 区画の自己検査。C=0 有効、C=1 未ロード。区画にもほかの RAM にも書かない。A・X を壊す。
+; #312 では CCP が無いので IMG_BASE <= CORE_BASE、IMG_BASE <= CCP_VEC <= CORE_BASE で見る
+; (#313 で仕様 1-3 どおり < にする)。
+BB_CHECK_VALID:
+        ldaa    BB_MAGIC
+        cmpa    #BB_MAGIC_HI
+        bne     BB_INVALID
+        ldaa    BB_MAGIC+1
+        cmpa    #BB_MAGIC_LO
+        bne     BB_INVALID
+        jsr     BB_SUM8
+        adda    BB_CHECK
+        bne     BB_INVALID
+        ldaa    BB_IMG_BASE+1          ; SDFS3_RAM_FLOOR <= IMG_BASE
+        suba    #SDFS3_RAM_FLOOR&$00FF
+        ldaa    BB_IMG_BASE
+        sbca    #SDFS3_RAM_FLOOR/$0100
+        bcs     BB_INVALID
+        ldaa    BB_CORE_BASE+1         ; IMG_BASE <= CORE_BASE
+        suba    BB_IMG_BASE+1
+        ldaa    BB_CORE_BASE
+        sbca    BB_IMG_BASE
+        bcs     BB_INVALID
+        ldaa    BB_IMG_LAST+1          ; CORE_BASE <= IMG_LAST
+        suba    BB_CORE_BASE+1
+        ldaa    BB_IMG_LAST
+        sbca    BB_CORE_BASE
+        bcs     BB_INVALID
+        ldaa    #USER_RAM_END&$00FF    ; IMG_LAST <= USER_RAM_END
+        suba    BB_IMG_LAST+1
+        ldaa    #USER_RAM_END/$0100
+        sbca    BB_IMG_LAST
+        bcs     BB_INVALID
+        ldaa    BB_CCP_VEC+1           ; IMG_BASE <= CCP_VEC
+        suba    BB_IMG_BASE+1
+        ldaa    BB_CCP_VEC
+        sbca    BB_IMG_BASE
+        bcs     BB_INVALID
+        ldaa    BB_CORE_BASE+1         ; CCP_VEC <= CORE_BASE
+        suba    BB_CCP_VEC+1
+        ldaa    BB_CORE_BASE
+        sbca    BB_CCP_VEC
+        bcs     BB_INVALID
+        clc
+        rts
+BB_INVALID:
         sec
         rts
 
