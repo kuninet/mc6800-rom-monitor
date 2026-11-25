@@ -1066,6 +1066,13 @@ def test_boot3_error_codes_name_each_slot() -> None:
         bad_api_a = bytearray(slot_a)
         bad_api_a[0x09] = 0x01
         _refresh_checksum(bad_api_a)
+        core = HEADER_SIZE + V3_CORE_OFFSET
+        bad_core_sig_a = bytearray(slot_a)  # 核の SDFS3API の署名(BB_STORE の BB_CHECK_API)
+        bad_core_sig_a[core] = ord("X")
+        _refresh_checksum(bad_core_sig_a)
+        bad_entry_a = bytearray(slot_a)  # CCP 入口表が核の位置(BB_STORE の BB_CHECK_VALID)
+        bad_entry_a[0x10:0x12] = bytes([V3_CORE_OFFSET >> 8, V3_CORE_OFFSET & 0xFF])
+        _refresh_checksum(bad_entry_a)
         bad_magic_b = bytearray(_slot_image(config, 2))
         bad_magic_b[0] = ord("X")
         good_card = _slots_sd_image(config, slot_a, None, None)
@@ -1080,6 +1087,8 @@ def test_boot3_error_codes_name_each_slot() -> None:
              {"fail_cmd0_after": 4}, "31", [SDFS3MRK_LBA, SLOT_A_LBA, SLOT_B_LBA, SLOT_A_LBA]),
             ("A bad sum, B empty", _slots_sd_image(config, bytes(bad_sum_a), None, None), {}, "53", None),
             ("A old API major, B empty", _slots_sd_image(config, bytes(bad_api_a), None, None), {}, "43", None),
+            ("A bad core API, B empty", _slots_sd_image(config, bytes(bad_core_sig_a), None, None), {}, "43", None),
+            ("A entry table in core, B empty", _slots_sd_image(config, bytes(bad_entry_a), None, None), {}, "33", None),
             (
                 "active B bad header, A bad sum",
                 _slots_sd_image(config, bytes(bad_sum_a), bytes(bad_magic_b), _marker(1)),
