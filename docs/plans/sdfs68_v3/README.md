@@ -42,3 +42,4 @@ v3 は、現行の `BOOT -> stage1 -> SDFS.BIN -> SDFS> ` 方式を単純に拡�
 | #312 | [issue-312_rom_bios_entries.md](issue-312_rom_bios_entries.md) | ROM に BIOS 入口表・RAM の和のルーチン・BIOS 区画を追加する |
 | #313 | [issue-313_plan_b_layout.md](issue-313_plan_b_layout.md) | v3 を案 B の配置へ切り替え、CCP を DOS のプロンプトとして独立させる |
 | #314 | [issue-314_wboot_reload.md](issue-314_wboot_reload.md) | 戻り口の検査と静かな再ロードを ROM に入れ、BOOT3 を 1 回読みにする |
+| #301 | [issue-301_boot3_slots.md](issue-301_boot3_slots.md) | BOOT3 を system slot A/B と active marker 対応ローダへ拡張する |

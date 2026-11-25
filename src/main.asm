@@ -1910,21 +1910,48 @@ BB_STATE_CORE      equ $02
         error   "SD_SECTOR_BUF must be 512-byte aligned (BB_READ_RANGE)"
  endif
 
-; BOOT3(cold)。SDFS3SYS を 1 回読みで検証してヘッダの load へ置き、BIOS 区画を書いて
-; CCP の +0 へ入る。ヘッダの 32B は SD のバッファで、ペイロードはコピーした RAM で和を取り、
-; 足してヘッダ +$18 と照合する。ROM は resident のスロットを呼ばない。
-; 失敗したら区画を無効にして「?」でモニタへ戻る(和が合わないときは RAM の resident の
-; 区画だけが新旧混ざるが、区画を無効にするので使われない)。
+; system slot A/B と active marker(#300・#301)。LBA は下位 8bit だけが違う(64/96)。
+SDFS3MRK_LBA       equ 48
+SDFS3SYS_SLOT_B_LBA equ 96
+SDFS3SYS_SLOT_MAX  equ 32                  ; slot あたりのセクタ数
+ if ((SDFS3SYS_SLOT_B_LBA-SDFS3SYS_FIXED_LBA)<>$20)||((SDFS3SYS_FIXED_LBA&$20)<>0)
+        error   "slot A/B LBA must differ only in bit 5 (BOOT3 uses eora #$20)"
+ endif
+BOOT3_FIRST        equ FAT_VOLUME_LBA2     ; cold だけ: 先に試した slot の LBA 下位
+BOOT3_GEN_A        equ FAT_FAT_LBA0        ; cold だけ: slot A の世代・marker の和の控え(2B)
+
+; BOOT3(cold)。marker と世代で先に試す slot を決め、#314 の 1 回読みで試す。だめなら
+; 他方を試し、両方だめなら区画を無効にして「?」でモニタへ戻る(#300 の選択規則)。
+; 「試す」は全体の和まで照合するので、有効と分かった slot をそのまま使う。
 CMD_BOOT3:
         clr     BB_MAGIC
         jsr     SD_INIT
         bcs     CMD_BOOT3_ERROR
-        ldx     #SDFS3SYS_FIXED_LBA
-        stx     BB_SLOT_LBA
+        jsr     BOOT3_PICK
+        staa    BOOT3_FIRST
+        jsr     BOOT3_TRY
+        jsr     SD_INIT                ; 読み出しの失敗のあとでもカードを立て直してから他方を読む
+        bcs     CMD_BOOT3_ERROR
+        ldaa    BOOT3_FIRST
+        eora    #$20                   ; A(64) と B(96) を入れ替える
+        jsr     BOOT3_TRY
+CMD_BOOT3_ERROR:
+        clr     BB_MAGIC
+        jmp     MAIN_LOOP_ERROR
+
+; A = slot の LBA 下位。SDFS3SYS を 1 回読みで検証してヘッダの load へ置き、BIOS 区画を書いて
+; CCP の +0 へ入る(戻らない)。ヘッダの 32B は SD のバッファで、ペイロードはコピーした RAM で
+; 和を取り、足してヘッダ +$18 と照合する。ROM は resident のスロットを呼ばない。
+; 失敗したら C=1 で戻る(和が合わないときは RAM の resident の区画だけが新旧混ざるが、
+; 区画を無効にしてあるので使われない)。BB_WORK を全部使う。
+BOOT3_TRY:
+        clr     BB_MAGIC
+        clr     BB_SLOT_LBA
+        staa    BB_SLOT_LBA+1
         jsr     BB_READ_HEADER
-        bcs     CMD_BOOT3_ERROR
+        bcs     BOOT3_TRY_RTS
         jsr     BOOT3_CHECK_HEADER
-        bcs     CMD_BOOT3_ERROR
+        bcs     BOOT3_TRY_RTS
         ldx     #SDFS3SYS_HEADER_SIZE
         stx     BB_RR_OFF
         ldx     SD_SECTOR_BUF+14
@@ -1932,9 +1959,9 @@ CMD_BOOT3:
         ldx     BB_IMG_BASE
         stx     BB_RR_DST
         jsr     BB_READ_RANGE
-        bcs     CMD_BOOT3_ERROR
+        bcs     BOOT3_TRY_RTS
         jsr     BB_STORE
-        bcs     CMD_BOOT3_ERROR
+        bcs     BOOT3_TRY_RTS
         ldab    BB_SUM_CCP+1           ; ヘッダ + CCP + 核 = ヘッダ +$18
         ldaa    BB_SUM_CCP
         addb    BB_SUM_CORE+1
@@ -1942,17 +1969,155 @@ CMD_BOOT3:
         addb    BOOT3_HEADER_SUM+1
         adca    BOOT3_HEADER_SUM
         cmpb    BB_IMG_SUM+1
-        bne     CMD_BOOT3_FAIL_SUM
+        bne     BOOT3_TRY_FAIL_SUM
         cmpa    BB_IMG_SUM
-        bne     CMD_BOOT3_FAIL_SUM
+        bne     BOOT3_TRY_FAIL_SUM
         lds     #STACK_TOP
         ldx     BB_CCP_VEC
         jmp     0,x
-CMD_BOOT3_FAIL_SUM:
-        jsr     BOOT3_FAIL_SUM
-CMD_BOOT3_ERROR:
-        clr     BB_MAGIC
-        jmp     MAIN_LOOP_ERROR
+BOOT3_TRY_FAIL_SUM:
+        jmp     BOOT3_FAIL_SUM
+BOOT3_TRY_RTS:
+        rts
+
+; 先に試す slot の LBA 下位を A に返す。marker が有効なら active_slot、無効(読めない
+; ものを含む)なら世代: 両方 0 でなく B > A なら B、それ以外は A。世代は slot が有効か
+; 確かめずに比べる(無効な slot を先に選んでも、試して失敗し他方へ進むだけ)。
+BOOT3_PICK:
+        ldaa    #SDFS3MRK_LBA
+        jsr     BOOT3_READ_LBA
+        bcs     BOOT3_PICK_GEN
+        jsr     BOOT3_CHECK_MARKER
+        bcc     BOOT3_PICK_RTS
+BOOT3_PICK_GEN:
+        ldx     #0
+        stx     BOOT3_GEN_A
+        ldaa    #SDFS3SYS_FIXED_LBA
+        jsr     BOOT3_READ_LBA
+        bcs     BOOT3_PICK_B_HEADER
+        ldx     SD_SECTOR_BUF+$1C
+        stx     BOOT3_GEN_A
+BOOT3_PICK_B_HEADER:
+        ldaa    #SDFS3SYS_SLOT_B_LBA
+        jsr     BOOT3_READ_LBA
+        bcs     BOOT3_PICK_A
+        ldx     BOOT3_GEN_A
+        beq     BOOT3_PICK_A
+        ldx     SD_SECTOR_BUF+$1C
+        beq     BOOT3_PICK_A
+        ldab    BOOT3_GEN_A+1          ; A - B に借りが出れば B が新しい
+        subb    SD_SECTOR_BUF+$1D
+        ldaa    BOOT3_GEN_A
+        sbca    SD_SECTOR_BUF+$1C
+        bcc     BOOT3_PICK_A
+        ldaa    #SDFS3SYS_SLOT_B_LBA
+        rts
+BOOT3_PICK_A:
+        ldaa    #SDFS3SYS_FIXED_LBA
+BOOT3_PICK_RTS:
+        rts
+
+; LBA A(上位 0)のセクタを SD_SECTOR_BUF に読む。C=1 で失敗。
+BOOT3_READ_LBA:
+        clr     SD_LBA0
+        clr     SD_LBA1
+        clr     SD_LBA2
+        staa    SD_LBA3
+        ldx     #SD_SECTOR_BUF
+        jmp     SD_READ_SECTOR
+
+; SD_SECTOR_BUF の active marker を #300 の有効条件で検査する。C=0 で A = active の LBA 下位。
+; 和の欄(+$18)はバッファで 0 にする。BB_WORK を使う。
+BOOT3_CHECK_MARKER:
+        ldx     #SD_SECTOR_BUF
+        ldaa    0,x
+        cmpa    #'S'
+        bne     BOOT3_MARKER_FAIL
+        ldaa    1,x
+        cmpa    #'D'
+        bne     BOOT3_MARKER_FAIL
+        ldaa    2,x
+        cmpa    #'F'
+        bne     BOOT3_MARKER_FAIL
+        ldaa    3,x
+        cmpa    #'S'
+        bne     BOOT3_MARKER_FAIL
+        ldaa    4,x
+        cmpa    #'3'
+        bne     BOOT3_MARKER_FAIL
+        ldaa    5,x
+        cmpa    #'M'
+        bne     BOOT3_MARKER_FAIL
+        ldaa    6,x
+        cmpa    #'R'
+        bne     BOOT3_MARKER_FAIL
+        ldaa    7,x
+        cmpa    #'K'
+        beq     BOOT3_MARKER_FIELDS
+BOOT3_MARKER_FAIL:
+        sec
+        rts
+BOOT3_MARKER_FIELDS:
+        ldaa    8,x                    ; marker_version
+        cmpa    #1
+        bne     BOOT3_MARKER_FAIL
+        ldaa    9,x                    ; active_slot は 0 か 1
+        cmpa    #1
+        bhi     BOOT3_MARKER_FAIL
+        ldaa    10,x                   ; slot_count
+        cmpa    #2
+        bne     BOOT3_MARKER_FAIL
+        ldaa    11,x                   ; flags bit0 = 16bit の和が有効
+        bita    #$01
+        beq     BOOT3_MARKER_FAIL
+        ldaa    14,x                   ; slot_max_sectors・slot_a_lba・slot_b_lba は ROM と同じ
+        oraa    16,x
+        oraa    18,x
+        bne     BOOT3_MARKER_FAIL
+        ldaa    15,x
+        cmpa    #SDFS3SYS_SLOT_MAX
+        bne     BOOT3_MARKER_FAIL
+        ldaa    17,x
+        cmpa    #SDFS3SYS_FIXED_LBA
+        bne     BOOT3_MARKER_FAIL
+        ldaa    19,x
+        cmpa    #SDFS3SYS_SLOT_B_LBA
+        bne     BOOT3_MARKER_FAIL
+        ldaa    26,x                   ; marker_size は 32〜512
+        beq     BOOT3_MARKER_SIZE_LO
+        cmpa    #1
+        beq     BOOT3_MARKER_SUM
+        cmpa    #2
+        bne     BOOT3_MARKER_FAIL
+        tst     27,x
+        bne     BOOT3_MARKER_FAIL
+        bra     BOOT3_MARKER_SUM
+BOOT3_MARKER_SIZE_LO:
+        ldaa    27,x
+        cmpa    #32
+        blo     BOOT3_MARKER_FAIL
+BOOT3_MARKER_SUM:                      ; +$18 を 0 にしたセクタ 512B の和 = +$18
+        ldaa    24,x
+        ldab    25,x
+        staa    BOOT3_GEN_A
+        stab    BOOT3_GEN_A+1
+        clr     24,x
+        clr     25,x
+        ldx     #SD_SECTOR_BUF+$0200
+        stx     BB_WORK
+        ldx     #SD_SECTOR_BUF
+        jsr     BIOS_RAM_SUM
+        cmpa    BOOT3_GEN_A
+        bne     BOOT3_MARKER_FAIL
+        cmpb    BOOT3_GEN_A+1
+        bne     BOOT3_MARKER_FAIL
+        ldaa    #SDFS3SYS_FIXED_LBA
+        tst     SD_SECTOR_BUF+9
+        beq     BOOT3_MARKER_OK
+        ldaa    #SDFS3SYS_SLOT_B_LBA
+BOOT3_MARKER_OK:
+        clc
+        rts
 
 BOOT3_CHECK_HEADER:
         ldx     #SD_SECTOR_BUF
