@@ -878,6 +878,629 @@ def test_sdfs3_init_clears_last_error() -> None:
     print("[PASS] test_sdfs3_init_clears_last_error")
 
 
+# ---------------------------------------------------------------------------
+# #312: BIOS 入口表・RAM の和・BIOS 区画
+# ---------------------------------------------------------------------------
+
+BIOS_PROFILES = {
+    "sbcio_vdg": "-sbcio-vdg",
+    "k6802_vdg": "-k6802-vdg",
+}
+BIOS_ENTRY_TARGETS = [
+    ("BIOS_WBOOT", 0xE0E6, "BIOS_WBOOT_IMPL"),
+    ("BIOS_INFO", 0xE0E9, "BIOS_INFO_IMPL"),
+    ("BIOS_GET_API", 0xE0EC, "SDFS3_FIND_API"),
+    ("BIOS_EXEC", 0xE0EF, "BIOS_EXEC_IMPL"),
+    ("BIOS_READ_LINE", 0xE0F2, "BIOS_READ_LINE_IMPL"),
+    ("BIOS_MONITOR", 0xE0F5, "BIOS_MONITOR_IMPL"),
+    ("BIOS_SD_INIT", 0xE0F8, "SD_INIT"),
+    ("BIOS_SD_READ", 0xE0FB, "SD_READ_SECTOR"),
+    ("BIOS_SD_SELECT", 0xE0FE, "SD_SELECT"),
+    ("BIOS_SD_DESELECT", 0xE101, "SD_DESELECT"),
+    ("BIOS_SD_SEND_CMD", 0xE104, "SD_SEND_CMD"),
+    ("BIOS_SD_XFER", 0xE107, "SD_SPI_XFER"),
+    ("BIOS_SD_WAIT_R1", 0xE10A, "SD_WAIT_R1"),
+    ("BIOS_SD_WRITE", 0xE10D, "BIOS_UNIMPL"),
+    ("BIOS_RSV14", 0xE110, "BIOS_UNIMPL"),
+    ("BIOS_RSV15", 0xE113, "BIOS_UNIMPL"),
+]
+BIOS_HARNESS_ADDR = 0x0300
+BIOS_HARNESS2_ADDR = 0x0380
+BB_SIZE = 0x20
+BB_CHECK_OFFSET = 0x13
+
+
+def _rom_byte_reader(rom: bytes):
+    base = 0x10000 - len(rom)
+
+    def read(address: int, length: int = 1) -> bytes:
+        return rom[address - base : address - base + length]
+
+    return read
+
+
+def test_rom_bios_entry_table_layout() -> None:
+    target_names = sorted({target for _, _, target in BIOS_ENTRY_TARGETS})
+    for profile, suffix in BIOS_PROFILES.items():
+        _run_make(profile, "bin")
+        lst = PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.lst"
+        rom = (PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin").read_bytes()
+        symbols = _load_symbols(
+            lst,
+            *[name for name, _, _ in BIOS_ENTRY_TARGETS],
+            *target_names,
+            "BIOS_TABLE_END",
+            "BIOS_GAP_END",
+            "MIKBUG_INEEE",
+            "MONITOR_REENTRY_AT",
+            "MAIN_LOOP",
+        )
+        read = _rom_byte_reader(rom)
+        for index, (name, address, target) in enumerate(BIOS_ENTRY_TARGETS):
+            assert address == 0xE0E6 + index * 3, f"{name} expected address is not contiguous"
+            assert symbols[name] == address, f"{profile}: {name}={symbols[name]:04X}, want {address:04X}"
+            code = read(address, 3)
+            want = bytes([0x7E, symbols[target] >> 8, symbols[target] & 0xFF])
+            assert code == want, f"{profile}: {name} is {code.hex()} want jmp {target} ({want.hex()})"
+        assert symbols["BIOS_TABLE_END"] == 0xE116
+        assert symbols["BIOS_GAP_END"] <= symbols["MIKBUG_INEEE"] == 0xE1AC, (
+            f"{profile}: BIOS code reaches INEEE: {symbols['BIOS_GAP_END']:04X}"
+        )
+        assert read(symbols["BIOS_UNIMPL"], 2) == b"\x0D\x39", f"{profile}: BIOS_UNIMPL is not sec;rts"
+        assert symbols["MONITOR_REENTRY_AT"] == 0xE20D, f"{profile}: MONITOR_REENTRY_AT moved"
+        main_loop = symbols["MAIN_LOOP"]
+        assert read(0xE20D, 3) == bytes([0x7E, main_loop >> 8, main_loop & 0xFF]), (
+            f"{profile}: $E20D is no longer jmp MAIN_LOOP"
+        )
+    print("[PASS] test_rom_bios_entry_table_layout")
+
+
+def _assemble_source(tmp: Path, name: str, source: str) -> bytes:
+    src = tmp / f"{name}.asm"
+    obj = tmp / f"{name}.p"
+    bin_path = tmp / f"{name}.bin"
+    lst = tmp / f"{name}.lst"
+    src.write_text(source, encoding="ascii")
+    result = subprocess.run(
+        ["asl", "-q", "-L", "-olist", str(lst), "-o", str(obj), str(src)],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=10,
+    )
+    if result.returncode != 0:
+        raise AssertionError(f"assemble {name} failed: {result.stdout!r} {result.stderr!r}")
+    result = subprocess.run(
+        ["p2bin", str(obj), str(bin_path), "-q"],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=10,
+    )
+    if result.returncode != 0:
+        raise AssertionError(f"p2bin {name} failed: {result.stdout!r} {result.stderr!r}")
+    return bin_path.read_bytes()
+
+
+def _equ_lines(symbols: dict[str, int]) -> list[str]:
+    return [f"{name:<20} equ ${value:04X}" for name, value in symbols.items()]
+
+
+def _harness_input(harness: bytes, address: int = BIOS_HARNESS_ADDR) -> str:
+    return f"M{address:04X}\r{_hex_bytes(harness)}\r.\r"
+
+
+def _final_dump(stdout: str, start: int) -> str:
+    """エミュレータが終了時に出すダンプ(出力の最後)を、開始番地の行から返す。"""
+    matches = list(re.finditer(rf"(?m)^(?:\] )?{start:04X} ", stdout))
+    assert matches, f"missing final dump at {start:04X}: {stdout[-400:]!r}"
+    return stdout[matches[-1].start() :]
+
+
+def _after(stdout: str, marker: str) -> str:
+    assert marker in stdout, f"missing {marker!r} in output: {stdout!r}"
+    return stdout[stdout.index(marker) + len(marker) :]
+
+
+def test_rom_bios_read_line_and_sd_match_internal() -> None:
+    profile, suffix = "sbcio_vdg", BIOS_PROFILES["sbcio_vdg"]
+    _run_make(profile, "bin")
+    symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.lst",
+        "BIOS_READ_LINE",
+        "BIOS_SD_INIT",
+        "BIOS_SD_READ",
+        "READ_LINE",
+        "SD_INIT",
+        "SD_READ_SECTOR",
+        "LINE_BUF",
+        "LINE_LEN",
+        "SD_LBA0",
+        "SD_LBA1",
+        "SD_LBA2",
+        "SD_LBA3",
+    )
+    source = "\n".join(
+        [
+            "        cpu     6800",
+            *_equ_lines(symbols),
+            "COPY_DST equ $0080",
+            "COPY_SRC equ $0082",
+            "COPY_CNT equ $0084",
+            f"        org     ${BIOS_HARNESS_ADDR:04X}",
+            "START:",
+            "        ldx     #$FFFF",
+            "        ldab    #$EE",
+            "        jsr     BIOS_READ_LINE",
+            "        stx     $0200",
+            "        stab    $0202",
+            "        ldaa    LINE_LEN",
+            "        staa    $0203",
+            "        ldx     #$0210",
+            "        jsr     COPY16",
+            "        jsr     READ_LINE",
+            "        ldaa    LINE_LEN",
+            "        staa    $0204",
+            "        ldx     #$0220",
+            "        jsr     COPY16",
+            "        jsr     BIOS_SD_INIT",
+            "        tpa",
+            "        staa    $0205",
+            "        jsr     SET_LBA",
+            "        ldx     #$1000",
+            "        jsr     BIOS_SD_READ",
+            "        tpa",
+            "        staa    $0206",
+            "        jsr     SD_INIT",
+            "        tpa",
+            "        staa    $0207",
+            "        jsr     SET_LBA",
+            "        ldx     #$1200",
+            "        jsr     SD_READ_SECTOR",
+            "        tpa",
+            "        staa    $0208",
+            "        swi",
+            "SET_LBA:",
+            "        clr     SD_LBA0",
+            "        clr     SD_LBA1",
+            "        clr     SD_LBA2",
+            f"        ldaa    #{SDFS3SYS_FIXED_LBA}",
+            "        staa    SD_LBA3",
+            "        rts",
+            "COPY16:",
+            "        stx     COPY_DST",
+            "        ldx     #LINE_BUF",
+            "        stx     COPY_SRC",
+            "        ldaa    #16",
+            "        staa    COPY_CNT",
+            "COPY16_LOOP:",
+            "        ldx     COPY_SRC",
+            "        ldaa    0,x",
+            "        inx",
+            "        stx     COPY_SRC",
+            "        ldx     COPY_DST",
+            "        staa    0,x",
+            "        inx",
+            "        stx     COPY_DST",
+            "        dec     COPY_CNT",
+            "        bne     COPY16_LOOP",
+            "        rts",
+            "",
+        ]
+    )
+    with _temporary_directory() as tmp:
+        harness = _assemble_source(Path(tmp), "bios_read_line_sd", source)
+    sector = bytes((i * 7 + 3) & 0xFF for i in range(SECTOR_SIZE))
+    line = "HELLX\x08O BIOS 312"
+    expected_line = b"HELLO BIOS 312"
+    stdout, stderr, rc = _run_emu(
+        rom_path=PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
+        input_text=_harness_input(harness) + f"G{BIOS_HARNESS_ADDR:04X}\r{line}\r{line}\r\r",
+        max_cycles=150_000_000,
+        dump_range="0200-13FF",
+        sd_image=_build_sdfs3sys_sd_image(sector),
+        timeout=40,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    dump = _final_dump(stdout, 0x0200)
+    status = _dump_range_bytes(dump, 0x0200, 9)
+    assert (status[0] << 8 | status[1]) == symbols["LINE_BUF"], f"BIOS_READ_LINE X != LINE_BUF: {status!r}"
+    assert status[2] == len(expected_line), f"BIOS_READ_LINE B != length: {status!r}"
+    assert status[3] == status[4] == len(expected_line), f"LINE_LEN differs: {status!r}"
+    via_bios = bytes(_dump_range_bytes(dump, 0x0210, 16))
+    via_rom = bytes(_dump_range_bytes(dump, 0x0220, 16))
+    assert via_bios[: len(expected_line)] == expected_line, f"BIOS_READ_LINE buffer: {via_bios!r}"
+    assert via_bios == via_rom, f"BIOS_READ_LINE and READ_LINE differ: {via_bios!r} {via_rom!r}"
+    assert status[5] & 1 == 0 and status[7] & 1 == 0, f"SD_INIT should succeed: {status!r}"
+    assert status[6] & 1 == 0 and status[8] & 1 == 0, f"SD_READ should succeed: {status!r}"
+    assert status[5] == status[7] and status[6] == status[8], f"BIOS and ROM flags differ: {status!r}"
+    buf_bios = bytes(_dump_range_bytes(dump, 0x1000, SECTOR_SIZE))
+    buf_rom = bytes(_dump_range_bytes(dump, 0x1200, SECTOR_SIZE))
+    assert buf_bios == sector, "BIOS_SD_READ did not read LBA 64"
+    assert buf_rom == buf_bios, "BIOS_SD_READ and SD_READ_SECTOR differ"
+    print("[PASS] test_rom_bios_read_line_and_sd_match_internal")
+
+
+def test_rom_bios_exec_returns_to_wboot() -> None:
+    profile, suffix = "sbcio_vdg", BIOS_PROFILES["sbcio_vdg"]
+    _run_make(profile, "bin")
+    symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.lst",
+        "BIOS_EXEC",
+        "BIOS_WBOOT",
+        "BIOS_PROG_STACK",
+    )
+    source = "\n".join(
+        [
+            "        cpu     6800",
+            *_equ_lines(symbols),
+            f"        org     ${BIOS_HARNESS_ADDR:04X}",
+            "START:",
+            "        ldaa    #$77",
+            "        ldab    #ARGS_END-ARGS",
+            "        ldx     #BLOCK",
+            "        jmp     BIOS_EXEC",
+            "BLOCK:  fdb     ENTRY,ARGS",
+            "ENTRY:",
+            "        staa    $0200",
+            "        stab    $0201",
+            "        stx     $0202",
+            "        sts     $0204",
+            "        tsx",
+            "        ldaa    0,x",
+            "        staa    $0206",
+            "        ldaa    1,x",
+            "        staa    $0207",
+            "        ldaa    #$5A",
+            "        staa    $0208",
+            "        rts",
+            "        org     $0340",
+            'ARGS:   fcc     "ARG 312"',
+            "ARGS_END:",
+            "",
+        ]
+    )
+    with _temporary_directory() as tmp:
+        harness = _assemble_source(Path(tmp), "bios_exec", source)
+    args_addr = 0x0340
+    stdout, stderr, rc = _run_emu(
+        rom_path=PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
+        input_text=_harness_input(harness) + f"G{BIOS_HARNESS_ADDR:04X}\rD0200-0208\r\r",
+        max_cycles=30_000_000,
+        dump_range="0200-0208",
+        timeout=20,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    after_go = _after(stdout, f"G{BIOS_HARNESS_ADDR:04X}")
+    assert "\n?\n" in after_go.replace("\r", ""), f"WBOOT should print '?': {after_go!r}"
+    assert "]" in after_go.split("?", 1)[1], f"monitor prompt missing after WBOOT: {after_go!r}"
+    regs = _dump_bytes(_final_dump(stdout, 0x0200), 0x0200)
+    assert regs[8] == 0x5A, f"program entry did not run: {regs!r}"
+    assert regs[0] == 0, f"A should be 0 at entry: {regs!r}"
+    assert regs[1] == len("ARG 312"), f"B should keep the argument length: {regs!r}"
+    assert (regs[2] << 8 | regs[3]) == args_addr, f"X should be argptr: {regs!r}"
+    assert (regs[4] << 8 | regs[5]) == symbols["BIOS_PROG_STACK"] - 2, f"SP at entry: {regs!r}"
+    assert (regs[6] << 8 | regs[7]) == symbols["BIOS_WBOOT"], f"return address should be WBOOT: {regs!r}"
+    print("[PASS] test_rom_bios_exec_returns_to_wboot")
+
+
+def test_rom_bios_info_and_reserved() -> None:
+    profile, suffix = "sbcio_vdg", BIOS_PROFILES["sbcio_vdg"]
+    _run_make(profile, "bin")
+    symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.lst",
+        "BIOS_INFO",
+        "BIOS_GET_API",
+        "BIOS_SD_WRITE",
+        "BIOS_RSV14",
+        "BIOS_RSV15",
+        "BIOS_VERSION",
+    )
+    lines = [
+        "        cpu     6800",
+        *_equ_lines(symbols),
+        f"        org     ${BIOS_HARNESS_ADDR:04X}",
+        "        clra",
+        "        clrb",
+        "        jsr     BIOS_INFO",
+        "        staa    $0200",
+        "        stab    $0201",
+    ]
+    for index, name in enumerate(("BIOS_SD_WRITE", "BIOS_RSV14", "BIOS_RSV15", "BIOS_GET_API")):
+        lines += ["        clc", f"        jsr     {name}", "        tpa", f"        staa    ${0x0202 + index:04X}"]
+    lines += ["        swi", ""]
+    with _temporary_directory() as tmp:
+        harness = _assemble_source(Path(tmp), "bios_info", "\n".join(lines))
+    stdout, stderr, rc = _run_emu(
+        rom_path=PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
+        input_text=_harness_input(harness) + f"G{BIOS_HARNESS_ADDR:04X}\r\r",
+        max_cycles=30_000_000,
+        dump_range="0200-0205",
+        timeout=20,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    values = _dump_bytes(_final_dump(stdout, 0x0200), 0x0200)
+    assert values[0] == symbols["BIOS_VERSION"] == 1, f"BIOS_INFO A: {values!r}"
+    assert values[1] == 16, f"BIOS_INFO B: {values!r}"
+    assert all(flag & 1 for flag in values[2:5]), f"reserved entries should return C=1: {values!r}"
+    assert values[5] & 1, f"BIOS_GET_API before BOOT3 should return C=1: {values!r}"
+    print("[PASS] test_rom_bios_info_and_reserved")
+
+
+def _bb_block(
+    *,
+    img_base: int = 0x5000,
+    core_base: int = 0x5800,
+    img_last: int = 0x5FFF,
+    ccp_vec: int = 0x5400,
+    magic: tuple[int, int] = (0xB3, 0x4C),
+    fix_check: bool = True,
+) -> bytearray:
+    block = bytearray(BB_SIZE)
+    block[0:2] = bytes(magic)
+    for offset, value in (
+        (0x02, img_base),
+        (0x04, core_base),
+        (0x06, img_last),
+        (0x08, 0x1234),
+        (0x0A, 0xBEEF),
+        (0x0C, ccp_vec),
+        (0x0E, SDFS3SYS_FIXED_LBA),
+        (0x10, 0x5A5A),
+    ):
+        block[offset] = value >> 8
+        block[offset + 1] = value & 0xFF
+    block[0x12] = 0
+    block[0x14:0x20] = bytes(range(0x60, 0x6C))
+    if fix_check:
+        block[BB_CHECK_OFFSET] = (-sum(block[:BB_CHECK_OFFSET])) & 0xFF
+    return block
+
+
+def test_rom_bios_block_rejects_garbage() -> None:
+    profile, suffix = "sbcio_vdg", BIOS_PROFILES["sbcio_vdg"]
+    _run_make(profile, "bin")
+    symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.lst",
+        "BB_CHECK_VALID",
+        "BIOS_BLOCK",
+        "SDFS3_WORK_BASE",
+        "USER_RAM_END",
+        "SDFS3_RAM_FLOOR",
+    )
+    assert symbols["USER_RAM_END"] == 0x7FFF and symbols["SDFS3_RAM_FLOOR"] == 0x4000
+    cases: list[tuple[str, bytes, int]] = []
+    seed = 0x312
+    for index in range(8):
+        data = bytearray()
+        for _ in range(BB_SIZE):
+            seed = (seed * 1103515245 + 12345) & 0x7FFFFFFF
+            data.append((seed >> 16) & 0xFF)
+        assert data[0:2] != b"\xB3\x4C"
+        cases.append((f"random{index}", bytes(data), 1))
+    cases += [
+        ("valid", bytes(_bb_block()), 0),
+        ("valid_bounds", bytes(_bb_block(img_base=0x4000, core_base=0x4000, img_last=0x7FFF, ccp_vec=0x4000)), 0),
+        ("valid_plan_b", bytes(_bb_block(img_base=0x6C00, core_base=0x7000, img_last=0x7FFF, ccp_vec=0x6C00)), 0),
+        ("valid_312_layout", bytes(_bb_block(core_base=0x5000, ccp_vec=0x5000)), 0),
+        ("img_below_floor", bytes(_bb_block(img_base=0x3FFF, ccp_vec=0x5000)), 1),
+        ("img_above_core", bytes(_bb_block(img_base=0x5801)), 1),
+        ("core_below_img", bytes(_bb_block(core_base=0x4FFF)), 1),
+        ("core_above_last", bytes(_bb_block(core_base=0x6000)), 1),
+        ("last_above_user_ram", bytes(_bb_block(img_last=0x8000)), 1),
+        ("last_below_core", bytes(_bb_block(img_last=0x57FF)), 1),
+        ("ccp_below_img", bytes(_bb_block(ccp_vec=0x4FFF)), 1),
+        ("ccp_above_core", bytes(_bb_block(ccp_vec=0x5801)), 1),
+        ("magic_hi", bytes(_bb_block(magic=(0xB2, 0x4C))), 1),
+        ("magic_lo", bytes(_bb_block(magic=(0xB3, 0x4D))), 1),
+    ]
+    broken = _bb_block()
+    broken[0x12] ^= 0x01
+    cases.append(("one_byte_changed", bytes(broken), 1))
+    marker_addr = symbols["SDFS3_WORK_BASE"]
+    lines = [
+        "        cpu     6800",
+        *_equ_lines(symbols),
+        "SRC     equ $0080",
+        "DST     equ $0082",
+        "CNT     equ $0084",
+        "RES     equ $0086",
+        f"        org     ${BIOS_HARNESS_ADDR:04X}",
+        "        ldx     #CASES",
+        "        stx     SRC",
+        "        ldx     #$0200",
+        "        stx     RES",
+        "        ldx     #MARKER",
+        "        ldaa    #$A5",
+        "        staa    0,x",
+        "        staa    7,x",
+        "NEXT:",
+        "        ldx     SRC",
+        "        cpx     #CASES_END",
+        "        beq     DONE",
+        "        ldx     #BIOS_BLOCK",
+        "        stx     DST",
+        f"        ldaa    #{BB_SIZE}",
+        "        staa    CNT",
+        "COPY:",
+        "        ldx     SRC",
+        "        ldaa    0,x",
+        "        inx",
+        "        stx     SRC",
+        "        ldx     DST",
+        "        staa    0,x",
+        "        inx",
+        "        stx     DST",
+        "        dec     CNT",
+        "        bne     COPY",
+        "        clc",
+        "        jsr     BB_CHECK_VALID",
+        "        tpa",
+        "        anda    #1",
+        "        ldx     RES",
+        "        staa    0,x",
+        "        inx",
+        "        stx     RES",
+        "        bra     NEXT",
+        "DONE:",
+        "        swi",
+        f"MARKER  equ ${marker_addr:04X}",
+        "CASES:",
+    ]
+    for name, data, _ in cases:
+        lines.append(f"        fcb     {','.join(f'${b:02X}' for b in data)} ; {name}")
+    lines += ["CASES_END:", ""]
+    with _temporary_directory() as tmp:
+        harness = _assemble_source(Path(tmp), "bios_block_check", "\n".join(lines))
+    block = symbols["BIOS_BLOCK"]
+    stdout, stderr, rc = _run_emu(
+        rom_path=PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
+        input_text=(
+            _harness_input(harness)
+            + f"G{BIOS_HARNESS_ADDR:04X}\r"
+            + f"D0200-{0x0200 + len(cases) - 1:04X}\r\r"
+        ),
+        max_cycles=200_000_000,
+        dump_range=f"{block:04X}-{marker_addr + 7:04X}",
+        timeout=60,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    after_go = _after(stdout, f"G{BIOS_HARNESS_ADDR:04X}")
+    assert "BRK" in after_go, f"harness did not reach SWI: {after_go[:400]!r}"
+    results = _dump_range_bytes(after_go, 0x0200, len(cases))
+    for (name, _, want), got in zip(cases, results):
+        assert got == want, f"BB_CHECK_VALID {name}: C={got}, want {want}"
+    after = _final_dump(stdout, block)
+    final_block = bytes(_dump_range_bytes(after, block, BB_SIZE))
+    assert final_block == cases[-1][1], "BB_CHECK_VALID must not write the block"
+    markers = _dump_range_bytes(after, marker_addr, 8)
+    assert markers[0] == 0xA5 and markers[7] == 0xA5, f"RAM outside the block changed: {markers!r}"
+    print("[PASS] test_rom_bios_block_rejects_garbage")
+
+
+def test_rom_boot3_writes_bios_block() -> None:
+    profile = "k6802_vdg"
+    suffix = "-k6802-vdg-sdfs3-5000"
+    extra_args = [
+        "SDFS3_LOAD_BASE=0x5000",
+        "SDFS3_LOAD_LIMIT=0x7EFF",
+        "BUILD_CONFIG_NAME=k6802-vdg-sdfs3-5000",
+    ]
+    _run_make(profile, "bin", extra_args=extra_args)
+    _run_make(profile, "sdfs3sys", extra_args=extra_args)
+    symbols = _load_symbols(
+        PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.lst",
+        "BB_CHECK_VALID",
+        "BIOS_RAM_SUM",
+        "BIOS_GET_API",
+        "BIOS_BLOCK",
+        "BB_IMG_BASE",
+        "BB_IMG_LAST",
+        "BB_STATE",
+        "BB_WORK",
+        "SDFS3_LOAD_BASE",
+    )
+    resident = _load_symbols(PROJECT_ROOT / "build" / f"SDFS3{suffix}.lst", "SDFS3_END")
+    sdfs3sys = (PROJECT_ROOT / "build" / f"SDFS3SYS{suffix}.BIN").read_bytes()
+    header = parse_sdfs3sys_header(sdfs3sys)
+    payload = sdfs3sys[HEADER_SIZE:]
+    payload_sum = sum(payload) & 0xFFFF
+    load = symbols["SDFS3_LOAD_BASE"]
+    assert load == 0x5000
+    source = "\n".join(
+        [
+            "        cpu     6800",
+            *_equ_lines({k: v for k, v in symbols.items() if k != "SDFS3_LOAD_BASE"}),
+            f"        org     ${BIOS_HARNESS_ADDR:04X}",
+            "        clc",
+            "        jsr     BB_CHECK_VALID",
+            "        tpa",
+            "        anda    #1",
+            "        staa    $0200",
+            "        ldx     BB_IMG_LAST",
+            "        inx",
+            "        stx     BB_WORK",
+            "        ldx     BB_IMG_BASE",
+            "        jsr     BIOS_RAM_SUM",
+            "        staa    $0201",
+            "        stab    $0202",
+            "        jsr     BIOS_GET_API",
+            "        stx     $0203",
+            "        tpa",
+            "        anda    #1",
+            "        staa    $0205",
+            "        swi",
+            f"        org     ${BIOS_HARNESS2_ADDR:04X}",
+            "        clc",
+            "        jsr     BB_CHECK_VALID",
+            "        tpa",
+            "        anda    #1",
+            "        staa    $0210",
+            "        swi",
+            "",
+        ]
+    )
+    with _temporary_directory() as tmp:
+        harness = _assemble_source(Path(tmp), "bios_boot3_block", source)
+    sd_image = _build_sdfs3sys_fat_sd_image(
+        sdfs3sys,
+        [
+            Fat32File(b"HELLO   S  ", b"S9030000FC\r\n"),
+            Fat32File(b"README  TXT", b"HELLO FROM BOOT3\r\n"),
+        ],
+    )
+    block = symbols["BIOS_BLOCK"]
+    stdout, stderr, rc = _run_emu(
+        rom_path=PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
+        input_text=(
+            "BOOT3\r"
+            "CMD DIR\r"
+            + _harness_input(harness)
+            + f"G{BIOS_HARNESS_ADDR:04X}\r"
+            + f"D{block:04X}-{block + BB_SIZE - 1:04X}\r"
+            + f"M{symbols['BB_STATE']:04X}\r01\r.\r"
+            + f"G{BIOS_HARNESS2_ADDR:04X}\r"
+            + "\r"
+        ),
+        max_cycles=300_000_000,
+        sd_image=sd_image,
+        dump_range="0200-0210",
+        timeout=60,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed for BOOT3: rc={rc} stderr={stderr!r}"
+    assert "OK" in stdout and "SDFS/68 V3 01.01" in stdout, f"BOOT3 should still succeed: {stdout!r}"
+    assert "HELLO.S A " in stdout, f"CMD DIR should still list files: {stdout!r}"
+    after_go = _after(stdout, f"G{BIOS_HARNESS_ADDR:04X}")
+    bb = bytes(_dump_range_bytes(after_go, block, BB_SIZE))
+
+    def word(offset: int) -> int:
+        return bb[offset] << 8 | bb[offset + 1]
+
+    assert bb[0:2] == b"\xB3\x4C", f"BB_MAGIC: {bb.hex()}"
+    assert word(0x02) == load, f"BB_IMG_BASE: {bb.hex()}"
+    assert word(0x04) == load, f"BB_CORE_BASE should be the SDFS3API header: {bb.hex()}"
+    assert word(0x06) == resident["SDFS3_END"] - 1 == load + len(payload) - 1, f"BB_IMG_LAST: {bb.hex()}"
+    assert word(0x08) == 0, f"BB_SUM_CCP: {bb.hex()}"
+    assert word(0x0A) == payload_sum, f"BB_SUM_CORE {word(0x0A):04X} != payload sum {payload_sum:04X}"
+    assert word(0x0C) == load, f"BB_CCP_VEC: {bb.hex()}"
+    assert word(0x0E) == SDFS3SYS_FIXED_LBA, f"BB_SLOT_LBA: {bb.hex()}"
+    assert word(0x10) == header.checksum, f"BB_IMG_SUM should copy header +$18: {bb.hex()}"
+    assert bb[0x12] == 0, f"BB_STATE: {bb.hex()}"
+    assert sum(bb[: BB_CHECK_OFFSET + 1]) & 0xFF == 0, f"BB_CHECK: {bb.hex()}"
+    final = _final_dump(stdout, 0x0200)
+    results = _dump_bytes(final, 0x0200)
+    assert results[0] == 0, f"self-check should pass after BOOT3: {results!r}"
+    assert (results[1] << 8 | results[2]) == payload_sum, f"RAM sum differs from saved sum: {results!r}"
+    assert (results[3] << 8 | results[4]) == load and results[5] == 0, f"BIOS_GET_API: {results!r}"
+    second = _dump_bytes(final, 0x0210)
+    assert second[0] == 1, f"self-check should fail after changing one byte with M: {second!r}"
+    print("[PASS] test_rom_boot3_writes_bios_block")
+
+
 def test_rom_boot3_rejects_bad_sdfs3sys() -> None:
     profile = "k6802_vdg"
     suffix = "-k6802-vdg-sdfs3-5000"
@@ -1884,6 +2507,12 @@ def main() -> None:
         test_sdfs3_core_does_not_reference_ccp,
         test_sdfs3_resident_image_unchanged_after_commands,
         test_sdfs3_init_clears_last_error,
+        test_rom_bios_entry_table_layout,
+        test_rom_bios_read_line_and_sd_match_internal,
+        test_rom_bios_exec_returns_to_wboot,
+        test_rom_bios_info_and_reserved,
+        test_rom_bios_block_rejects_garbage,
+        test_rom_boot3_writes_bios_block,
     ]
     passed = 0
     failed = 0
