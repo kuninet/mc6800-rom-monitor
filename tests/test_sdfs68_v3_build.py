@@ -74,6 +74,7 @@ def _v3(profile: str) -> dict:
         "BIOS_WBOOT",
         "BIOS_BLOCK",
         "BB_MAGIC",
+        "BB_SLOT_LBA",
         "SDFS3_WORK_BASE",
     )
     resident = _load_symbols(
@@ -621,15 +622,16 @@ def _reads(log: list, start: int, stop: int, *, system_only: bool = False) -> li
     ]
 
 
-def _system_sectors(config: dict) -> dict[str, list[int]]:
-    """SDFS3SYS のセクタの LBA。ccp・core は読み直しで読むはずの LBA(先頭セクタは 1 回)。"""
+def _system_sectors(config: dict, base: int = SDFS3SYS_FIXED_LBA) -> dict[str, list[int]]:
+    """slot(先頭 LBA = base)の SDFS3SYS のセクタの LBA。ccp・core は読み直しで読むはずの
+    LBA(先頭セクタは 1 回)。"""
     size = len(config["sdfs3sys"])
-    last = SDFS3SYS_FIXED_LBA + (size - 1) // SECTOR_SIZE
+    last = base + (size - 1) // SECTOR_SIZE
     ccp_end = HEADER_SIZE + (V3_CORE_BASE - V3_CCP_BASE)  # ファイル上の CCP の終端(最後の次)
-    ccp = list(range(SDFS3SYS_FIXED_LBA, SDFS3SYS_FIXED_LBA + (ccp_end - 1) // SECTOR_SIZE + 1))
-    core_first = SDFS3SYS_FIXED_LBA + ccp_end // SECTOR_SIZE
-    core = [SDFS3SYS_FIXED_LBA, *range(core_first, last + 1)]
-    return {"all": list(range(SDFS3SYS_FIXED_LBA, last + 1)), "ccp": ccp, "core": core}
+    ccp = list(range(base, base + (ccp_end - 1) // SECTOR_SIZE + 1))
+    core_first = base + ccp_end // SECTOR_SIZE
+    core = [base, *range(core_first, last + 1)]
+    return {"all": list(range(base, last + 1)), "ccp": ccp, "core": core}
 
 
 def _wboot_sd_image(config: dict) -> bytes:
@@ -651,15 +653,18 @@ def _reset_address(config: dict) -> int:
 
 
 def test_rom_boot3_reads_image_once() -> None:
-    """BOOT3 は SDFS3SYS のセクタを 64 から 1 回ずつ読む(2 回読みならセクタ数の 2 倍)。"""
+    """BOOT3 は既存の単一 LBA イメージ(marker なし)を slot A として、64 から 1 回ずつ読む
+    (2 回読みならセクタ数の 2 倍。#301 のシナリオ 10)。"""
     for profile in V3_PROFILES:
         config = _v3(profile)
         sectors = _system_sectors(config)
         raw, log, _ = _v3_run_sd(config, "BOOT3\rDIR\r\r", sd_image=_wboot_sd_image(config))
         start, stop = _segment(raw, "] BOOT3")
         reads = _reads(log, start, stop)
-        assert reads == sectors["all"], f"{profile}: BOOT3 should read each sector once: {reads}"
-        assert len(reads) == -(-len(config["sdfs3sys"]) // SECTOR_SIZE)
+        # marker なし(LBA 48 は 0)なので、48 と両 slot の先頭で世代を見てから A を読む(#301)
+        assert reads[:3] == [SDFS3MRK_LBA, SLOT_A_LBA, SLOT_B_LBA], f"{profile}: slot pick read {reads}"
+        assert reads[3:] == sectors["all"], f"{profile}: BOOT3 should read each sector once: {reads}"
+        assert len(reads[3:]) == -(-len(config["sdfs3sys"]) // SECTOR_SIZE)
         assert "README.TXT" in _dos(raw.replace("\r", ""), "DIR")
     print("[PASS] test_rom_boot3_reads_image_once")
 
@@ -762,6 +767,279 @@ def test_wboot_reload_fails_without_card_or_after_swap() -> None:
             core = _dump_range_bytes(_after(out, f"] {core_dump}\n"), V3_CORE_BASE, 16)
             assert bytes(core) == payload[V3_CORE_OFFSET : V3_CORE_OFFSET + 16], f"{profile} {label}: core changed"
     print("[PASS] test_wboot_reload_fails_without_card_or_after_swap")
+
+
+# ---------------------------------------------------------------------------
+# system slot A/B と active marker(#300・#301)
+# ---------------------------------------------------------------------------
+
+SDFS3MRK_LBA = 48
+SLOT_A_LBA = SDFS3SYS_FIXED_LBA
+SLOT_B_LBA = 96
+SLOT_GEN_OFFSET = 0x1C
+SLOT_TAG_ADDR = V3_MEMTOP  # CCP の末尾の埋め草($FF)。和の範囲に入るので、目印にして slot を区別する
+SLOT_TAG = 0xB0
+
+
+def _slot_image(config: dict, generation: int, *, tag: int | None = None) -> bytes:
+    """世代(+$1C)と、あれば CCP の末尾の目印を入れ、和を付け直した SDFS3SYS。"""
+    data = bytearray(config["sdfs3sys"])
+    data[SLOT_GEN_OFFSET : SLOT_GEN_OFFSET + 2] = bytes([generation >> 8, generation & 0xFF])
+    if tag is not None:
+        data[HEADER_SIZE + SLOT_TAG_ADDR - V3_CCP_BASE] = tag
+    _refresh_checksum(data)
+    return bytes(data)
+
+
+def _marker(active: int, *, fix_sum: bool = True, **fields) -> bytes:
+    """active marker の 512B(#300 の形式)。fields で欄を差し替え、既定では和を付け直す。"""
+    values = {
+        "magic": b"SDFS3MRK", "version": 1, "active": active, "slot_count": 2, "flags": 0x01,
+        "generation": 1, "slot_max": 32, "slot_a": SLOT_A_LBA, "slot_b": SLOT_B_LBA, "size": 32,
+    }
+    values.update(fields)
+    sector = bytearray(SECTOR_SIZE)
+    sector[0:8] = values["magic"]
+    sector[8:12] = bytes([values["version"], values["active"], values["slot_count"], values["flags"]])
+    for offset, name in ((0x0C, "generation"), (0x0E, "slot_max"), (0x10, "slot_a"), (0x12, "slot_b"), (0x1A, "size")):
+        sector[offset : offset + 2] = bytes([values[name] >> 8, values[name] & 0xFF])
+    if fix_sum:
+        checksum = checksum16(bytes(sector))
+        sector[0x18:0x1A] = bytes([checksum >> 8, checksum & 0xFF])
+    return bytes(sector)
+
+
+def _slots_sd_image(
+    config: dict, slot_a: bytes | None, slot_b: bytes | None, marker: bytes | None, *, cut: int | None = None
+) -> bytes:
+    """marker(48)・slot A(64)・slot B(96)・FAT32(128)の SD。None の所は 0 のまま。
+    cut を渡すとその LBA より先を切る(そこから先の CMD17 は失敗する)。"""
+    image = bytearray(_wboot_sd_image(config))
+    image[SLOT_A_LBA * SECTOR_SIZE : SDFS3SYS_FAT_PARTITION_LBA * SECTOR_SIZE] = bytes(
+        (SDFS3SYS_FAT_PARTITION_LBA - SLOT_A_LBA) * SECTOR_SIZE
+    )
+    for lba, data in ((SDFS3MRK_LBA, marker), (SLOT_A_LBA, slot_a), (SLOT_B_LBA, slot_b)):
+        if data is not None:
+            assert len(data) <= 32 * SECTOR_SIZE
+            image[lba * SECTOR_SIZE : lba * SECTOR_SIZE + len(data)] = data
+    if cut is not None:
+        del image[cut * SECTOR_SIZE :]
+    return bytes(image)
+
+
+def _low_reads(log: list, start: int, stop: int) -> list[int]:
+    """start〜stop の CMD17 のうち marker と slot(48〜127)の LBA。MBR(0)と FAT32 は除く。"""
+    return [lba for lba in _reads(log, start, stop) if SDFS3MRK_LBA <= lba < SDFS3SYS_FAT_PARTITION_LBA]
+
+
+def _boot3_slot(config: dict, sd_image: bytes, extra: str = "") -> tuple[str, list, list[int], int]:
+    """BOOT3(と extra)を動かし、(出力, 記録, BOOT3 で読んだ低位の LBA, BB_SLOT_LBA) を返す。"""
+    slot_lba = config["symbols"]["BB_SLOT_LBA"]
+    raw, log, _ = _v3_run_sd(
+        config,
+        "BOOT3\r" + extra + "\r",
+        sd_image=sd_image,
+        dump_range=f"{slot_lba:04X}-{slot_lba + 1:04X}",
+    )
+    start, stop = _segment(raw, "] BOOT3") if PROMPT in raw else _segment(raw, "] BOOT3", end="] ")
+    out = raw.replace("\r", "")
+    # 終了時のダンプはプロンプト(「] 」か「SDFS3> 」)の後ろに出る
+    dumps = re.findall(rf"{slot_lba:04X} ([0-9A-F]{{2}}) ([0-9A-F]{{2}})", out)
+    assert dumps, f"missing final dump at {slot_lba:04X}: {out[-400:]!r}"
+    hi, lo = dumps[-1]
+    return raw, log, _low_reads(log, start, stop), (int(hi, 16) << 8) | int(lo, 16)
+
+
+def test_boot3_marker_slot_and_wboot_reload_from_it() -> None:
+    """marker が指す slot から起動し、CCP を潰す .COM から戻ると、その slot から読み直す。
+    起動後に marker を A に戻しても B から読み、B の中身が替わっていたら中止して「?」
+    (#301 のシナリオ 1〜4)。"""
+    for profile in V3_PROFILES:
+        config = _v3(profile)
+        slot_a = _slot_image(config, 1)
+        slot_b = _slot_image(config, 2, tag=SLOT_TAG)
+        a_sectors = _system_sectors(config, SLOT_A_LBA)
+        b_sectors = _system_sectors(config, SLOT_B_LBA)
+        tag_dump = f"D{SLOT_TAG_ADDR:04X}-{SLOT_TAG_ADDR:04X}"
+
+        # 1. active=A なら 48 と A のセクタだけ
+        raw, _log, reads, lba = _boot3_slot(config, _slots_sd_image(config, slot_a, slot_b, _marker(0)), f"EXIT\r{tag_dump}\r")
+        assert reads == [SDFS3MRK_LBA, *a_sectors["all"]], f"{profile}: active=A read {reads}"
+        assert lba == SLOT_A_LBA and WELCOME in raw
+        assert _dump_bytes(_after(raw.replace("\r", ""), f"] {tag_dump}\n"), SLOT_TAG_ADDR) == [0xFF]
+
+        # 1・2. active=B: 48 と B のセクタだけを読み、ZAPCCP.COM の戻りは B の CCP だけを読み直す
+        sd_image = _slots_sd_image(config, slot_a, slot_b, _marker(1))
+        input_text = f"ZAPCCP.COM\rDIR\rEXIT\r{tag_dump}\r"
+        raw, log, reads, lba = _boot3_slot(config, sd_image, input_text)
+        out = raw.replace("\r", "")
+        assert reads == [SDFS3MRK_LBA, *b_sectors["all"]], f"{profile}: active=B read {reads}"
+        assert lba == SLOT_B_LBA, f"{profile}: BB_SLOT_LBA = {lba}"
+        start, stop = _segment(raw, PROMPT + "ZAPCCP.COM")
+        assert raw[start:stop] == "\r\n", f"{profile}: reload must be silent: {raw[start:stop]!r}"
+        assert _low_reads(log, start, stop) == b_sectors["ccp"], f"{profile}: reload read {_low_reads(log, start, stop)}"
+        assert "README.TXT" in _dos(out, "DIR")
+        assert _dump_bytes(_after(out, f"] {tag_dump}\n"), SLOT_TAG_ADDR) == [SLOT_TAG]
+        first_reload = next(n for n, l, _r1, tx in log if tx >= start and l == SLOT_B_LBA)
+
+        # 3. 読み直しの先頭から marker を A に戻したカードに替わっても、B から読む(B はバイト一致)
+        swap = _slots_sd_image(config, slot_a, slot_b, _marker(0, generation=2))
+        raw, log, _ = _v3_run_sd(config, "BOOT3\r" + input_text + "\r", sd_image=sd_image,
+                                 swap_image=swap, swap_at=first_reload)
+        out = raw.replace("\r", "")
+        late = [l for n, l, _r1, _tx in log if n >= first_reload and SDFS3MRK_LBA <= l < SDFS3SYS_FAT_PARTITION_LBA]
+        assert late == b_sectors["ccp"], f"{profile}: reload after marker change read {late}"
+        assert SDFS3MRK_LBA not in [l for n, l, _r1, _tx in log if n >= first_reload]
+        assert "README.TXT" in _dos(out, "DIR") and "\n?\n" not in out
+        assert _dump_bytes(_after(out, f"] {tag_dump}\n"), SLOT_TAG_ADDR) == [SLOT_TAG]
+
+        # 4. 差し替え先の B の中身が違う(+$18 が違う)なら、B の先頭セクタだけ読んで「?」
+        changed = bytearray(slot_b)
+        changed[HEADER_SIZE + 0x0200] ^= 0x01
+        _refresh_checksum(changed)
+        assert changed[CHECKSUM_OFFSET : CHECKSUM_OFFSET + 2] != slot_b[CHECKSUM_OFFSET : CHECKSUM_OFFSET + 2]
+        swap = _slots_sd_image(config, slot_a, bytes(changed), _marker(0, generation=2))
+        ccp_dump = f"D{V3_CCP_BASE:04X}-{V3_CCP_BASE + 15:04X}"
+        raw, log, _ = _v3_run_sd(config, f"BOOT3\rZAPCCP.COM\rDOS\r{ccp_dump}\r\r", sd_image=sd_image,
+                                 swap_image=swap, swap_at=first_reload)
+        out = raw.replace("\r", "")
+        assert f"{PROMPT}ZAPCCP.COM\n?\n] DOS\n?\n] " in out, f"{profile}: changed slot B: {out[-600:]!r}"
+        late = [(l, r1) for n, l, r1, _tx in log if n >= first_reload]
+        assert late == [(SLOT_B_LBA, 0x00)], f"{profile}: changed slot B should stop at its header: {late}"
+        ccp = _dump_range_bytes(_after(out, f"] {ccp_dump}"), V3_CCP_BASE, 16)
+        assert ccp == [0] * 16, f"{profile}: RAM must not be written: {ccp}"
+    print("[PASS] test_boot3_marker_slot_and_wboot_reload_from_it")
+
+
+def test_boot3_invalid_marker_falls_back_to_generation() -> None:
+    """marker の欄が 1 つでも #300 の有効条件を外れたら、世代の大きい B から起動する
+    (欄を壊したら和は付け直す。和のケースだけ付け直さない)。境界の 32・$0100・512 は有効
+    (#301 のシナリオ 5)。"""
+    cases = [
+        ("valid", {}, True),
+        ("size 32", {"size": 32}, True),
+        ("size $0100", {"size": 0x0100}, True),
+        ("size 512", {"size": 512}, True),
+        ("magic", {"magic": b"SDFS3MRX"}, False),
+        ("version 2", {"version": 2}, False),
+        ("active 2", {"active": 2}, False),
+        ("slot_count 3", {"slot_count": 3}, False),
+        ("flags bit0", {"flags": 0x02}, False),
+        ("slot_max 33", {"slot_max": 33}, False),
+        ("slot_max $0120", {"slot_max": 0x0120}, False),
+        ("slot_a 65", {"slot_a": 65}, False),
+        ("slot_a $0140", {"slot_a": 0x0140}, False),
+        ("slot_b 97", {"slot_b": 97}, False),
+        ("slot_b $0160", {"slot_b": 0x0160}, False),
+        ("size 31", {"size": 31}, False),
+        ("size 513", {"size": 513}, False),
+        ("size $0300", {"size": 0x0300}, False),
+        ("checksum", {"fix_sum": False}, False),
+    ]
+    for profile in V3_PROFILES:
+        config = _v3(profile)
+        slot_a = _slot_image(config, 3)
+        slot_b = _slot_image(config, 4, tag=SLOT_TAG)
+        for label, fields, valid in cases:
+            marker = _marker(**{"active": 0, **fields})
+            if label == "checksum":
+                marker = bytearray(marker)
+                marker[0x18] ^= 0x01
+                marker = bytes(marker)
+            raw, _log, reads, lba = _boot3_slot(config, _slots_sd_image(config, slot_a, slot_b, marker))
+            if valid:
+                want = [SDFS3MRK_LBA, *_system_sectors(config, SLOT_A_LBA)["all"]]
+            else:
+                want = [SDFS3MRK_LBA, SLOT_A_LBA, SLOT_B_LBA, *_system_sectors(config, SLOT_B_LBA)["all"]]
+            assert reads == want, f"{profile} {label}: read {reads}, want {want}"
+            assert lba == (SLOT_A_LBA if valid else SLOT_B_LBA), f"{profile} {label}: BB_SLOT_LBA = {lba}"
+            assert WELCOME in raw and PROMPT in raw, f"{profile} {label}: {raw[-400:]!r}"
+    print("[PASS] test_boot3_invalid_marker_falls_back_to_generation")
+
+
+def test_boot3_generation_picks_first_slot() -> None:
+    """marker が無いときは世代で先に試す slot を決める。両方 0 でなく B > A のときだけ B。
+    上位バイトで決まる組、同値、A が空(0 埋め)を含む(#301 のシナリオ 6)。"""
+    for profile in V3_PROFILES:
+        config = _v3(profile)
+        a_all = _system_sectors(config, SLOT_A_LBA)["all"]
+        b_all = _system_sectors(config, SLOT_B_LBA)["all"]
+        head = [SDFS3MRK_LBA, SLOT_A_LBA, SLOT_B_LBA]
+        cases = [
+            ("A 3 / B 2", 3, 2, head + a_all, SLOT_A_LBA),
+            ("A 3 / B 4", 3, 4, head + b_all, SLOT_B_LBA),
+            ("A 0 / B 5", 0, 5, head + a_all, SLOT_A_LBA),
+            ("A 5 / B 0", 5, 0, head + a_all, SLOT_A_LBA),
+            ("A 5 / B 5", 5, 5, head + a_all, SLOT_A_LBA),
+            ("A $0100 / B $00FF", 0x0100, 0x00FF, head + a_all, SLOT_A_LBA),
+            ("A $00FF / B $0100", 0x00FF, 0x0100, head + b_all, SLOT_B_LBA),
+            ("A $FFFF / B $0001", 0xFFFF, 0x0001, head + a_all, SLOT_A_LBA),
+            ("A empty / B 0", None, 0, head + [SLOT_A_LBA] + b_all, SLOT_B_LBA),
+        ]
+        for label, gen_a, gen_b, want, want_lba in cases:
+            slot_a = None if gen_a is None else _slot_image(config, gen_a)
+            slot_b = _slot_image(config, gen_b, tag=SLOT_TAG)
+            raw, _log, reads, lba = _boot3_slot(config, _slots_sd_image(config, slot_a, slot_b, None))
+            assert reads == want, f"{profile} {label}: read {reads}, want {want}"
+            assert lba == want_lba and PROMPT in raw, f"{profile} {label}: BB_SLOT_LBA = {lba}"
+    print("[PASS] test_boot3_generation_picks_first_slot")
+
+
+def test_boot3_falls_back_from_bad_active_slot() -> None:
+    """active の slot が和の不一致・ヘッダ不正・読めないときは他方から起動し、その後の
+    読み直しも起動した slot から読む。両方だめなら BOOT3 も DOS も「?」(#301 のシナリオ 7〜9)。"""
+    for profile in V3_PROFILES:
+        config = _v3(profile)
+        block = config["symbols"]["BIOS_BLOCK"]
+        a_sectors = _system_sectors(config, SLOT_A_LBA)
+        b_sectors = _system_sectors(config, SLOT_B_LBA)
+        slot_a = _slot_image(config, 1)
+        slot_b = _slot_image(config, 2, tag=SLOT_TAG)
+        bad_sum_b = bytearray(slot_b)
+        bad_sum_b[-1] ^= 0x01  # ペイロードだけ壊す(ヘッダの和は元のまま)
+        bad_magic_a = bytearray(slot_a)
+        bad_magic_a[0] = ord("X")
+
+        # 7. active=B の和が不一致: B を全部読んでから A を全部読み、A から。読み直しも A
+        raw, log, reads, lba = _boot3_slot(
+            config, _slots_sd_image(config, slot_a, bytes(bad_sum_b), _marker(1)), "ZAPCCP.COM\rDIR\r"
+        )
+        assert reads == [SDFS3MRK_LBA, *b_sectors["all"], *a_sectors["all"]], f"{profile}: sum fallback read {reads}"
+        assert lba == SLOT_A_LBA, f"{profile}: BB_SLOT_LBA = {lba}"
+        start, stop = _segment(raw, PROMPT + "ZAPCCP.COM")
+        assert _low_reads(log, start, stop) == a_sectors["ccp"], f"{profile}: reload read {_low_reads(log, start, stop)}"
+        assert "README.TXT" in _dos(raw.replace("\r", ""), "DIR")
+
+        # 8. active=A のヘッダ不正: A は先頭セクタだけ読み、B から
+        raw, _log, reads, lba = _boot3_slot(config, _slots_sd_image(config, bytes(bad_magic_a), slot_b, _marker(0)))
+        assert reads == [SDFS3MRK_LBA, SLOT_A_LBA, *b_sectors["all"]], f"{profile}: header fallback read {reads}"
+        assert lba == SLOT_B_LBA and PROMPT in raw
+
+        # active=B が読めない(カードが 96 の手前で終わる): 96 の失敗のあと A から
+        raw, log, reads, lba = _boot3_slot(config, _slots_sd_image(config, slot_a, None, _marker(1), cut=SLOT_B_LBA))
+        assert reads == [SDFS3MRK_LBA, SLOT_B_LBA, *a_sectors["all"]], f"{profile}: read-error fallback read {reads}"
+        assert [r1 for _n, l, r1, _tx in log if l == SLOT_B_LBA] == [0x04]
+        assert lba == SLOT_A_LBA and WELCOME in raw
+
+        # marker なしで B の先頭が読めない: 世代は比べずに A から(BOOT3_PICK の読み出し失敗の分岐)
+        raw, log, reads, lba = _boot3_slot(config, _slots_sd_image(config, slot_a, None, None, cut=SLOT_B_LBA))
+        assert reads == [SDFS3MRK_LBA, SLOT_A_LBA, SLOT_B_LBA, *a_sectors["all"]], f"{profile}: no-marker read error read {reads}"
+        assert [r1 for _n, l, r1, _tx in log if l == SLOT_B_LBA] == [0x04]
+        assert lba == SLOT_A_LBA and WELCOME in raw
+
+        # 9. 両方だめ: BOOT3 も DOS も「?」、区画は無効
+        raw, log, _ = _v3_run_sd(
+            config,
+            "BOOT3\rDOS\r\r",
+            sd_image=_slots_sd_image(config, bytes(bad_magic_a), bytes(bad_sum_b), _marker(1)),
+            dump_range=f"{block:04X}-{block + 1:04X}",
+        )
+        out = raw.replace("\r", "")
+        assert "] BOOT3\n?\n] DOS\n?\n] " in out, f"{profile}: both bad: {out[-400:]!r}"
+        assert PROMPT not in out and WELCOME not in out
+        assert [l for _n, l, _r1, _tx in log] == [SDFS3MRK_LBA, *b_sectors["all"], SLOT_A_LBA], f"{profile}: {log}"
+        assert _dump_bytes(_final_dump(out, block), block)[0] == 0, f"{profile}: BB_MAGIC should be cleared"
+    print("[PASS] test_boot3_falls_back_from_bad_active_slot")
 
 
 def test_monitor_gate_warns_and_dos_after_reset_and_ramtest() -> None:
@@ -2797,6 +3075,10 @@ def main() -> None:
         test_rom_boot3_reads_image_once,
         test_wboot_reloads_only_broken_parts,
         test_wboot_reload_fails_without_card_or_after_swap,
+        test_boot3_marker_slot_and_wboot_reload_from_it,
+        test_boot3_invalid_marker_falls_back_to_generation,
+        test_boot3_generation_picks_first_slot,
+        test_boot3_falls_back_from_bad_active_slot,
         test_monitor_gate_warns_and_dos_after_reset_and_ramtest,
         test_v2_boot_exit_returns_to_monitor_and_disables_dos,
         test_monitor_stack_fits_in_128_bytes,

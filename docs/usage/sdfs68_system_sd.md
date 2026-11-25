@@ -64,7 +64,7 @@ SDFS3>
 
 | 操作 | 動き |
 | --- | --- |
-| `BOOT3` | `SDFS3SYS` を検証して `$6400-$7FFF` に置き、CCP と核の和を ROM の BIOS 区画に控えて、CCP の cold 入口（Welcome あり）へ入る。古い resident（API major 1）や壊れたイメージは `?` |
+| `BOOT3` | system slot A（LBA `64`）か B（LBA `96`）の `SDFS3SYS` を検証して `$6400-$7FFF` に置き、起動した slot と CCP と核の和を ROM の BIOS 区画に控えて、CCP の cold 入口（Welcome あり）へ入る。LBA `48` の active marker が有効ならその slot を、無効なら世代の大きい slot を先に試し、だめなら他方を試す（#300・#301）。両方とも古い resident（API major 1）や壊れたイメージなら `?` |
 | `SDFS3> ` の内蔵コマンド | `DIR [path]`、`TYPE path`、`LOAD file`、`RUN addr`、`RUN file`、`EXIT`。それ以外の `<名前>.COM` は `.COM` として起動する |
 | `.COM` | `$0100` に読み、`BIOS_EXEC` で起動する。`RTS` は ROM の WBOOT（`$E0E6`）に戻り、CCP と核を検査してから `SDFS3> ` に戻る（Welcome なし）。大きさの上限は `$6300` バイト（#315 で `$6F00` に広がる） |
 | `RUN` | `RUN addr`・`RUN file` とも `BIOS_EXEC` で起動する。プログラムの `RTS` は `SDFS3> ` に戻る。`SWI` で止めたあとはモニタにいるので、`DOS` で戻る |
@@ -121,7 +121,7 @@ python tools\mk_sdfs_image.py --stage1 STAGE1.BIN --sdfs SDFS.BIN --output sdfs.
 
 - FAT32 形式の SDイメージファイル。
 - partition開始前の physical LBA `16` 以降にstage1 loaderを配置する。
-- v3 `BOOT3` 用に physical LBA `64` 以降へ `SDFS3SYS` を配置する。
+- v3 `BOOT3` 用に physical LBA `64` 以降へ `SDFS3SYS` を配置する（system slot A。marker と slot B は書かない。`BOOT3` は marker のないカードを slot A から起動する。#301）。
 - v2/stage1だけのSDではFAT32 partitionを physical LBA `32` から開始できる。
 - `BOOT3` 用の `SDFS3SYS` を同居させるv3 system SDでは、system領域と重ならないようにFAT32 partitionを physical LBA `128` 以降から開始する。
 - 既定出力はホストOSがFAT32として扱えるクラスタ数を持つ。
