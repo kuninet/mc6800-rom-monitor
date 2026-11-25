@@ -37,3 +37,4 @@ v3 は、現行の `BOOT -> stage1 -> SDFS.BIN -> SDFS> ` 方式を単純に拡�
 | #295 | [issue-295_boot3_fixed_lba.md](issue-295_boot3_fixed_lba.md) | ROMモニタの `BOOT3` 固定LBA loader |
 | #298 | [issue-298_init_welcome.md](issue-298_init_welcome.md) | resident INIT API と Welcome 表示 |
 | #300 | [issue-300_system_slot_layout.md](issue-300_system_slot_layout.md) | system slot A/Bとactive marker形式 |
+| #310 | [issue-310_plan_b_abi.md](issue-310_plan_b_abi.md) | 案 B（CP/M 式の完全分離）の配置とROM/resident ABI。#311〜#318 の正 |
