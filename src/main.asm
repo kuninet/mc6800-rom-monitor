@@ -91,7 +91,7 @@ BIOS_READ_LINE_IMPL:
         ldab    LINE_LEN
         rts
 
-; $E20D は #314 でモニタの門へ飛ぶ命令に変わる。
+; $E20D はモニタの門(MON_GATE)へ飛ぶ。
 BIOS_MONITOR_IMPL:
         lds     #STACK_TOP
         jmp     MONITOR_REENTRY
@@ -149,8 +149,10 @@ MONITOR_REENTRY_AT:
  if MONITOR_REENTRY_AT <> MONITOR_REENTRY
         error   "MONITOR_REENTRY_AT must be MONITOR_BASE+$0D"
  endif
- endif
+        jmp     MON_GATE                ; 番地は変えない(v2 の EXIT が決め打ちで飛ぶ)
+ else
         jmp     MAIN_LOOP
+ endif
 
 RESET:
         lds     #STACK_TOP
@@ -1039,7 +1041,14 @@ CMD_GO:
 CMD_GO_ERR:
         jmp     MAIN_LOOP_ERROR
 CMD_GO_ADDR_OK:
-
+ if MONITOR_FEATURE_SD
+; プログラムはモニタと別のスタック(W+$1F7F から)で動かし、RTS でモニタの門へ戻す(決定 4・16)。
+        ldaa    #MON_GATE/$0100
+        staa    BIOS_PROG_STACK-1
+        ldaa    #MON_GATE&$00FF
+        staa    BIOS_PROG_STACK
+        lds     #BIOS_PROG_STACK-2
+ endif
         ldx     HEX_VALUE_HI
         jmp     0,x
 
@@ -1887,32 +1896,60 @@ SDFS3SYS_MAX_HI equ $40
 SDFS3SYS_MAX_LO equ $00
 SDFS3SYS_MIN_LO equ SDFS3SYS_HEADER_SIZE+1
 
-BOOT3_EXPECTED_SUM equ FAT_VOLUME_LBA0
-BOOT3_COMPUTED_SUM equ FAT_VOLUME_LBA2
-BOOT3_REMAIN       equ FAT_FAT_LBA0
-BOOT3_PAYLOAD      equ FAT_FAT_LBA2
-BOOT3_COUNT        equ FAT_DATA_LBA0
-BOOT3_SRC_PTR      equ FAT_DATA_LBA2
-BOOT3_DST_PTR      equ FAT_ROOT_CLUS0
+BOOT3_HEADER_SUM   equ FAT_VOLUME_LBA0     ; cold だけが使う(FAT_* は BOOT3 のあと CCP が mount し直す)
 
-; BOOT3(cold)。SDFS3SYS を検証してヘッダの load へ置き、BIOS 区画を書いて CCP の +0 へ入る。
-; ROM は resident のスロットを呼ばない。失敗したら区画を無効にして「?」でモニタへ戻る。
+; 範囲指定の読み込みと和の照合の作業欄(BIOS 区画の BB_WORK。#314)。FAT_* は使わない。
+BB_RR_OFF          equ BB_WORK             ; ファイル上のオフセット(次に写すバイト)
+BB_RR_END          equ BB_WORK+2           ; ファイル上のオフセットの終端(最後の次)
+BB_RR_DST          equ BB_WORK+4           ; 次に書く RAM の番地
+BB_RR_TMP          equ BB_WORK+6           ; 作業用(セクタバッファ内の番地など)
+BB_STATE_TMP       equ BB_WORK+7           ; BB_CHECK_SUMS が組み立てる STATE
+BB_STATE_CCP       equ $01
+BB_STATE_CORE      equ $02
+ if (SD_SECTOR_BUF&$01FF)<>0
+        error   "SD_SECTOR_BUF must be 512-byte aligned (BB_READ_RANGE)"
+ endif
+
+; BOOT3(cold)。SDFS3SYS を 1 回読みで検証してヘッダの load へ置き、BIOS 区画を書いて
+; CCP の +0 へ入る。ヘッダの 32B は SD のバッファで、ペイロードはコピーした RAM で和を取り、
+; 足してヘッダ +$18 と照合する。ROM は resident のスロットを呼ばない。
+; 失敗したら区画を無効にして「?」でモニタへ戻る(和が合わないときは RAM の resident の
+; 区画だけが新旧混ざるが、区画を無効にするので使われない)。
 CMD_BOOT3:
         clr     BB_MAGIC
         jsr     SD_INIT
         bcs     CMD_BOOT3_ERROR
-        jsr     BOOT3_SET_LBA
-        jsr     BOOT3_READ_SECTOR
+        ldx     #SDFS3SYS_FIXED_LBA
+        stx     BB_SLOT_LBA
+        jsr     BB_READ_HEADER
         bcs     CMD_BOOT3_ERROR
         jsr     BOOT3_CHECK_HEADER
         bcs     CMD_BOOT3_ERROR
-        jsr     BOOT3_COPY_PAYLOAD
+        ldx     #SDFS3SYS_HEADER_SIZE
+        stx     BB_RR_OFF
+        ldx     SD_SECTOR_BUF+14
+        stx     BB_RR_END
+        ldx     BB_IMG_BASE
+        stx     BB_RR_DST
+        jsr     BB_READ_RANGE
         bcs     CMD_BOOT3_ERROR
         jsr     BB_STORE
         bcs     CMD_BOOT3_ERROR
+        ldab    BB_SUM_CCP+1           ; ヘッダ + CCP + 核 = ヘッダ +$18
+        ldaa    BB_SUM_CCP
+        addb    BB_SUM_CORE+1
+        adca    BB_SUM_CORE
+        addb    BOOT3_HEADER_SUM+1
+        adca    BOOT3_HEADER_SUM
+        cmpb    BB_IMG_SUM+1
+        bne     CMD_BOOT3_FAIL_SUM
+        cmpa    BB_IMG_SUM
+        bne     CMD_BOOT3_FAIL_SUM
         lds     #STACK_TOP
         ldx     BB_CCP_VEC
         jmp     0,x
+CMD_BOOT3_FAIL_SUM:
+        jsr     BOOT3_FAIL_SUM
 CMD_BOOT3_ERROR:
         clr     BB_MAGIC
         jmp     MAIN_LOOP_ERROR
@@ -1997,6 +2034,10 @@ BOOT3_CHECK_RANGE:
         cmpb    #(USER_RAM_END+1)&$00FF
         bhi     BOOT3_HEADER_FAIL_SIZE
 BOOT3_RANGE_OK:
+        subb    #1                     ; IMG_LAST = load + payload - 1(payload >= 1)
+        sbca    #0
+        staa    BB_IMG_LAST
+        stab    BB_IMG_LAST+1
         ldaa    12,x
         ldab    13,x
         staa    BB_IMG_BASE
@@ -2011,195 +2052,22 @@ BOOT3_RANGE_OK:
         adca    18,x
         staa    BB_CORE_BASE
         stab    BB_CORE_BASE+1
-BOOT3_CHECKSUM_PREP:
+; ヘッダ +$18 を区画に控え、+$18 を 0 にしたヘッダ 32B の和を取る。
         ldaa    24,x
-        staa    BOOT3_EXPECTED_SUM
+        staa    BB_IMG_SUM
         ldaa    25,x
-        staa    BOOT3_EXPECTED_SUM+1
+        staa    BB_IMG_SUM+1
         clr     24,x
         clr     25,x
-        clr     BOOT3_COMPUTED_SUM
-        clr     BOOT3_COMPUTED_SUM+1
-        ldaa    14,x
-        staa    BOOT3_REMAIN
-        ldaa    15,x
-        staa    BOOT3_REMAIN+1
-        jsr     BOOT3_SUM_CURRENT
-BOOT3_SUM_LOOP:
-        ldaa    BOOT3_REMAIN
-        oraa    BOOT3_REMAIN+1
-        beq     BOOT3_SUM_DONE
-        jsr     BOOT_INC_SD_LBA
-        jsr     BOOT3_READ_SECTOR
-        bcs     BOOT3_SUM_FAIL_SD
-        jsr     BOOT3_SUM_CURRENT
-        bra     BOOT3_SUM_LOOP
-BOOT3_SUM_DONE:
-        ldaa    BOOT3_COMPUTED_SUM
-        cmpa    BOOT3_EXPECTED_SUM
-        bne     BOOT3_SUM_FAIL_SUM
-        ldaa    BOOT3_COMPUTED_SUM+1
-        cmpa    BOOT3_EXPECTED_SUM+1
-        bne     BOOT3_SUM_FAIL_SUM
-        clc
-        rts
-BOOT3_SUM_FAIL_SD:
-        jmp     BOOT3_FAIL_SD
-BOOT3_SUM_FAIL_SUM:
-        jmp     BOOT3_FAIL_SUM
-
-BOOT3_COPY_PAYLOAD:
-        jsr     BOOT3_SET_LBA
-        jsr     BOOT3_READ_SECTOR
-        bcs     BOOT3_COPY_FAIL_SD
-        ldx     #SD_SECTOR_BUF
-        ldaa    14,x
-        staa    BOOT3_PAYLOAD
-        ldaa    15,x
-        suba    #SDFS3SYS_HEADER_SIZE
-        staa    BOOT3_PAYLOAD+1
-        bcc     BOOT3_COPY_SIZE_OK
-        dec     BOOT3_PAYLOAD
-BOOT3_COPY_SIZE_OK:
         ldx     #SD_SECTOR_BUF+SDFS3SYS_HEADER_SIZE
-        stx     BOOT3_SRC_PTR
-        ldx     BB_IMG_BASE
-        stx     BOOT3_DST_PTR
-        jsr     BOOT3_SET_COUNT_480
-        jsr     BOOT3_COPY_CURRENT
-BOOT3_COPY_LOOP:
-        ldaa    BOOT3_PAYLOAD
-        oraa    BOOT3_PAYLOAD+1
-        beq     BOOT3_COPY_DONE
-        jsr     BOOT_INC_SD_LBA
-        jsr     BOOT3_READ_SECTOR
-        bcs     BOOT3_COPY_FAIL_SD
+        stx     BB_WORK
         ldx     #SD_SECTOR_BUF
-        stx     BOOT3_SRC_PTR
-        jsr     BOOT3_SET_PAYLOAD_COUNT_512
-        jsr     BOOT3_COPY_CURRENT
-        bra     BOOT3_COPY_LOOP
-BOOT3_COPY_DONE:
+        jsr     BIOS_RAM_SUM
+        staa    BOOT3_HEADER_SUM
+        stab    BOOT3_HEADER_SUM+1
         clc
         rts
-BOOT3_COPY_FAIL_SD:
-        jmp     BOOT3_FAIL_SD
 
-BOOT3_SUM_CURRENT:
-        jsr     BOOT3_SET_REMAIN_COUNT_512
-        ldx     #SD_SECTOR_BUF
-BOOT3_SUM_BYTE:
-        ldaa    BOOT3_COUNT
-        oraa    BOOT3_COUNT+1
-        beq     BOOT3_SUM_CURRENT_DONE
-        ldaa    0,x
-        adda    BOOT3_COMPUTED_SUM+1
-        staa    BOOT3_COMPUTED_SUM+1
-        bcc     BOOT3_SUM_NO_CARRY
-        inc     BOOT3_COMPUTED_SUM
-BOOT3_SUM_NO_CARRY:
-        inx
-        jsr     BOOT3_DEC_COUNT_REMAIN
-        bra     BOOT3_SUM_BYTE
-BOOT3_SUM_CURRENT_DONE:
-        rts
-
-BOOT3_COPY_CURRENT:
-        ldaa    BOOT3_COUNT
-        oraa    BOOT3_COUNT+1
-        beq     BOOT3_COPY_CURRENT_DONE
-        ldx     BOOT3_SRC_PTR
-        ldaa    0,x
-        inx
-        stx     BOOT3_SRC_PTR
-        ldx     BOOT3_DST_PTR
-        staa    0,x
-        inx
-        stx     BOOT3_DST_PTR
-        jsr     BOOT3_DEC_COUNT_PAYLOAD
-        bra     BOOT3_COPY_CURRENT
-BOOT3_COPY_CURRENT_DONE:
-        rts
-
-BOOT3_SET_REMAIN_COUNT_512:
-        ldaa    BOOT3_REMAIN
-        cmpa    #2
-        bhs     BOOT3_SET_COUNT_512
-        staa    BOOT3_COUNT
-        ldaa    BOOT3_REMAIN+1
-        staa    BOOT3_COUNT+1
-        rts
-BOOT3_SET_PAYLOAD_COUNT_512:
-        ldaa    BOOT3_PAYLOAD
-        cmpa    #2
-        bhs     BOOT3_SET_COUNT_512
-        staa    BOOT3_COUNT
-        ldaa    BOOT3_PAYLOAD+1
-        staa    BOOT3_COUNT+1
-        rts
-BOOT3_SET_COUNT_512:
-        ldaa    #2
-        staa    BOOT3_COUNT
-        clr     BOOT3_COUNT+1
-        rts
-BOOT3_SET_COUNT_480:
-        ldaa    BOOT3_PAYLOAD
-        cmpa    #1
-        bhi     BOOT3_COUNT_480
-        bne     BOOT3_COUNT_PAYLOAD
-        ldaa    BOOT3_PAYLOAD+1
-        cmpa    #$E0
-        bhs     BOOT3_COUNT_480
-BOOT3_COUNT_PAYLOAD:
-        ldaa    BOOT3_PAYLOAD
-        staa    BOOT3_COUNT
-        ldaa    BOOT3_PAYLOAD+1
-        staa    BOOT3_COUNT+1
-        rts
-BOOT3_COUNT_480:
-        ldaa    #1
-        staa    BOOT3_COUNT
-        ldaa    #$E0
-        staa    BOOT3_COUNT+1
-        rts
-
-BOOT3_DEC_COUNT_REMAIN:
-        jsr     BOOT3_DEC_COUNT
-        dec     BOOT3_REMAIN+1
-        ldaa    BOOT3_REMAIN+1
-        cmpa    #$FF
-        bne     BOOT3_DEC_REMAIN_DONE
-        dec     BOOT3_REMAIN
-BOOT3_DEC_REMAIN_DONE:
-        rts
-BOOT3_DEC_COUNT_PAYLOAD:
-        jsr     BOOT3_DEC_COUNT
-        dec     BOOT3_PAYLOAD+1
-        ldaa    BOOT3_PAYLOAD+1
-        cmpa    #$FF
-        bne     BOOT3_DEC_PAYLOAD_DONE
-        dec     BOOT3_PAYLOAD
-BOOT3_DEC_PAYLOAD_DONE:
-        rts
-BOOT3_DEC_COUNT:
-        dec     BOOT3_COUNT+1
-        ldaa    BOOT3_COUNT+1
-        cmpa    #$FF
-        bne     BOOT3_DEC_COUNT_DONE
-        dec     BOOT3_COUNT
-BOOT3_DEC_COUNT_DONE:
-        rts
-
-BOOT3_SET_LBA:
-        clr     SD_LBA0
-        clr     SD_LBA1
-        clr     SD_LBA2
-        ldaa    #SDFS3SYS_FIXED_LBA
-        staa    SD_LBA3
-        rts
-BOOT3_READ_SECTOR:
-        ldx     #SD_SECTOR_BUF
-        jmp     SD_READ_SECTOR
 BOOT3_FAIL_SIG:
         ldaa    #FAT_ERR_SIG
         bra     BOOT3_FAIL_A
@@ -2208,12 +2076,103 @@ BOOT3_FAIL_SIZE:
         bra     BOOT3_FAIL_A
 BOOT3_FAIL_SUM:
         ldaa    #FAT_ERR_CHECKSUM
-        bra     BOOT3_FAIL_A
-BOOT3_FAIL_SD:
-        ldaa    SD_ERROR
 BOOT3_FAIL_A:
         staa    FAT_ERROR
         sec
+        rts
+
+; slot の先頭セクタ(SDFS3SYS ヘッダ)を SD_SECTOR_BUF に読む。LBA = BB_SLOT_LBA。C=1 で失敗。
+BB_READ_HEADER:
+        clr     BB_RR_OFF
+        jsr     BB_RR_LBA
+        bra     BB_RR_LOAD
+
+; ファイル上の [OFF, END) を DST から RAM へ写す(BB_WORK の OFF・END・DST)。C=1 で SD の失敗。
+; 呼ぶ前に BB_READ_HEADER で slot の先頭セクタを読んであること。必要なセクタだけを読み、
+; バッファにあるセクタ(SD_LBA と同じ)は読み直さない。SD_SECTOR_BUF と SD_* だけを使う。
+BB_READ_RANGE:
+        jsr     BB_RR_AT_END
+        beq     BB_RR_DONE
+        jsr     BB_RR_ENSURE
+        bcs     BB_RR_RTS
+BB_RR_BYTE:
+        ldaa    BB_RR_OFF              ; バッファ内の番地 = SD_SECTOR_BUF + (OFF & $01FF)
+        anda    #$01
+        adda    #SD_SECTOR_BUF/$0100
+        staa    BB_RR_TMP
+        ldaa    BB_RR_OFF+1
+        staa    BB_RR_TMP+1
+        ldx     BB_RR_TMP
+        ldaa    0,x
+        ldx     BB_RR_DST
+        staa    0,x
+        inx
+        stx     BB_RR_DST
+        ldx     BB_RR_OFF
+        inx
+        stx     BB_RR_OFF
+        ldaa    BB_RR_OFF+1
+        bne     BB_RR_NEXT
+        ldaa    BB_RR_OFF
+        bita    #$01
+        beq     BB_READ_RANGE          ; 512 境界: 次のセクタへ
+BB_RR_NEXT:
+        jsr     BB_RR_AT_END
+        bne     BB_RR_BYTE
+BB_RR_DONE:
+        clc
+BB_RR_RTS:
+        rts
+
+; Z=1 なら OFF = END。
+BB_RR_AT_END:
+        ldaa    BB_RR_OFF
+        cmpa    BB_RR_END
+        bne     BB_RR_AT_END_RTS
+        ldaa    BB_RR_OFF+1
+        cmpa    BB_RR_END+1
+BB_RR_AT_END_RTS:
+        rts
+
+; OFF のセクタをバッファに用意する。今のバッファのセクタ(SD_LBA)と同じなら読まない。
+BB_RR_ENSURE:
+        jsr     BB_RR_LBA
+        tst     SD_LBA0
+        bne     BB_RR_LOAD
+        tst     SD_LBA1
+        bne     BB_RR_LOAD
+        cmpa    SD_LBA2
+        bne     BB_RR_LOAD
+        cmpb    SD_LBA3
+        bne     BB_RR_LOAD
+        clc
+        rts
+BB_RR_LOAD:
+        clr     SD_LBA0
+        clr     SD_LBA1
+        staa    SD_LBA2
+        stab    SD_LBA3
+        ldx     #SD_SECTOR_BUF
+        jmp     SD_READ_SECTOR
+
+; A:B = BB_SLOT_LBA + OFF/512(cold と warm で同じ部品を使う)。
+BB_RR_LBA:
+        ldab    BB_RR_OFF
+        lsrb
+        clra
+        addb    BB_SLOT_LBA+1
+        adca    BB_SLOT_LBA
+        rts
+
+; A:B = X - IMG_BASE + ヘッダ(RAM の番地からファイル上のオフセットへ)。BB_RR_TMP を使う。
+BB_FILE_OFF:
+        stx     BB_RR_TMP
+        ldab    BB_RR_TMP+1
+        ldaa    BB_RR_TMP
+        subb    BB_IMG_BASE+1
+        sbca    BB_IMG_BASE
+        addb    #SDFS3SYS_HEADER_SIZE
+        adca    #0
         rts
 
 SDFS3_API_MAJOR    equ 2
@@ -2265,17 +2224,9 @@ BB_CHECK_API_FAIL:
         rts
 
 ; BIOS 区画を仕上げる(BOOT3 の成功時)。C=0 で成功、C=1 で失敗(区画は呼び手が無効にする)。
-; 入る前に IMG_BASE・CCP_VEC・CORE_BASE はヘッダから控えてあり、BOOT3_DST_PTR は
-; イメージの終端(最後の次)、BOOT3_EXPECTED_SUM はヘッダ +$18。
+; 入る前に IMG_BASE・CCP_VEC・CORE_BASE・IMG_LAST・IMG_SUM・SLOT_LBA は書いてある。
 ; 和はいったん 0 で CHECK を付けて自己検査し、範囲が正しいと分かってから取る。
 BB_STORE:
-        ldx     BOOT3_DST_PTR
-        dex
-        stx     BB_IMG_LAST
-        ldx     BOOT3_EXPECTED_SUM
-        stx     BB_IMG_SUM
-        ldx     #SDFS3SYS_FIXED_LBA
-        stx     BB_SLOT_LBA
         ldx     #0
         stx     BB_SUM_CCP
         stx     BB_SUM_CORE
@@ -2306,6 +2257,13 @@ BB_SET_CHECK:
         staa    BB_CHECK
         rts
 
+; A を STATE に書いて CHECK を付け直す。戻ったとき Z は STATE が 0 かどうか。
+BB_SET_STATE:
+        staa    BB_STATE
+        jsr     BB_SET_CHECK
+        tst     BB_STATE
+        rts
+
 ; RAM 上の CCP [IMG_BASE, CORE_BASE) と核 [CORE_BASE, IMG_LAST] の和を A:B に返す。
 ; 区画の自己検査を通したあとで呼ぶ。BB_WORK を使う。
 BB_RAM_SUM_CCP:
@@ -2319,6 +2277,31 @@ BB_RAM_SUM_CORE:
         stx     BB_WORK
         ldx     BB_CORE_BASE
         jmp     BIOS_RAM_SUM
+
+; RAM の CCP と核の和を区画と照合し、壊れた区画のビット(BB_STATE_CCP・BB_STATE_CORE)を
+; A に返す。区画の自己検査を通したあとで呼ぶ。BB_WORK だけを使い、区画の欄には書かない。
+BB_CHECK_SUMS:
+        clr     BB_STATE_TMP
+        jsr     BB_RAM_SUM_CCP
+        cmpa    BB_SUM_CCP
+        bne     BB_CHECK_SUMS_CCP_BAD
+        cmpb    BB_SUM_CCP+1
+        beq     BB_CHECK_SUMS_CORE
+BB_CHECK_SUMS_CCP_BAD:
+        inc     BB_STATE_TMP
+BB_CHECK_SUMS_CORE:
+        jsr     BB_RAM_SUM_CORE
+        cmpa    BB_SUM_CORE
+        bne     BB_CHECK_SUMS_CORE_BAD
+        cmpb    BB_SUM_CORE+1
+        beq     BB_CHECK_SUMS_DONE
+BB_CHECK_SUMS_CORE_BAD:
+        ldaa    BB_STATE_TMP
+        oraa    #BB_STATE_CORE
+        staa    BB_STATE_TMP
+BB_CHECK_SUMS_DONE:
+        ldaa    BB_STATE_TMP
+        rts
 
 ; 区画の +$00..+$12 の 8bit 和を A に返す。X を壊す。
 BB_SUM8:
@@ -2381,27 +2364,125 @@ BB_INVALID:
         sec
         rts
 
-; BIOS_WBOOT とモニタの DOS(DOS へ warm で入る門)。区画の自己検査と、CCP・核の和の照合に
-; 通ったら CCP の +3 へ。通らなければ「?」でモニタへ(読み直しは #314)。
-; 区画の MAGIC〜CHECK には書かない(BB_WORK だけ使う)。
+; BIOS_WBOOT とモニタの DOS(DOS へ warm で入る門)。区画の自己検査に通ったら和を照合して
+; STATE に記録し、壊れた区画(CCP だけ/核だけ/両方)だけを SD から静かに読み直して
+; CCP の +3 へ入る(Welcome は出さない。決定 13)。
+; 自己検査に通らなければ区画に書かずに「?」でモニタへ。読み直しに失敗したら(SD が抜けた、
+; カードが替わった、読み直しても和が合わない)区画を無効にして「?」でモニタへ。
 BIOS_WBOOT_IMPL:
         lds     #STACK_TOP
         jsr     BB_CHECK_VALID
+        bcs     BIOS_WBOOT_REJECT
+        jsr     BB_CHECK_SUMS
+        jsr     BB_SET_STATE
+        beq     BIOS_WBOOT_ENTER
+        jsr     BB_RELOAD
         bcs     BIOS_WBOOT_FAIL
-        jsr     BB_RAM_SUM_CCP
-        cmpa    BB_SUM_CCP
+        jsr     BB_CHECK_SUMS
+        jsr     BB_SET_STATE
         bne     BIOS_WBOOT_FAIL
-        cmpb    BB_SUM_CCP+1
-        bne     BIOS_WBOOT_FAIL
-        jsr     BB_RAM_SUM_CORE
-        cmpa    BB_SUM_CORE
-        bne     BIOS_WBOOT_FAIL
-        cmpb    BB_SUM_CORE+1
-        bne     BIOS_WBOOT_FAIL
+BIOS_WBOOT_ENTER:
         ldx     BB_CCP_VEC
         jmp     3,x
 BIOS_WBOOT_FAIL:
+        clr     BB_MAGIC
+BIOS_WBOOT_REJECT:
         jmp     MAIN_LOOP_ERROR
+
+; STATE のビットの区画だけを SD から読み直す。C=1 で失敗。
+; slot の先頭セクタを読み、ヘッダ +$18 が BB_IMG_SUM と違えば(カードが替わった)、RAM に
+; 書く前にやめる。区画の値は自己検査を通してあること。
+BB_RELOAD:
+        jsr     SD_INIT
+        bcs     BB_RELOAD_RTS
+        jsr     BB_READ_HEADER
+        bcs     BB_RELOAD_RTS
+        ldaa    SD_SECTOR_BUF+24
+        cmpa    BB_IMG_SUM
+        bne     BB_RELOAD_FAIL
+        ldaa    SD_SECTOR_BUF+25
+        cmpa    BB_IMG_SUM+1
+        bne     BB_RELOAD_FAIL
+        ldaa    BB_STATE
+        bita    #BB_STATE_CCP
+        beq     BB_RELOAD_CORE
+        ldx     #SDFS3SYS_HEADER_SIZE  ; CCP: ファイル上 [ヘッダ, CORE_BASE の位置) を IMG_BASE へ
+        stx     BB_RR_OFF
+        ldx     BB_IMG_BASE
+        stx     BB_RR_DST
+        ldx     BB_CORE_BASE
+        jsr     BB_FILE_OFF
+        staa    BB_RR_END
+        stab    BB_RR_END+1
+        jsr     BB_READ_RANGE
+        bcs     BB_RELOAD_RTS
+BB_RELOAD_CORE:
+        ldaa    BB_STATE
+        bita    #BB_STATE_CORE
+        beq     BB_RELOAD_OK
+        ldx     BB_IMG_LAST            ; 核: ファイル上 [CORE_BASE の位置, IMG_LAST の次) を CORE_BASE へ
+        inx
+        jsr     BB_FILE_OFF
+        staa    BB_RR_END
+        stab    BB_RR_END+1
+        ldx     BB_CORE_BASE
+        stx     BB_RR_DST
+        jsr     BB_FILE_OFF
+        staa    BB_RR_OFF
+        stab    BB_RR_OFF+1
+        jsr     BB_READ_RANGE
+        bcs     BB_RELOAD_RTS
+BB_RELOAD_OK:
+        clc
+BB_RELOAD_RTS:
+        rts
+BB_RELOAD_FAIL:
+        sec
+        rts
+
+; モニタ行きの検査(決定 1)。区画が有効なら和を照合して STATE に記録し、壊れていれば注意を
+; 1 行(*SDFS3 CCP / *SDFS3 CORE / *SDFS3 CCP CORE)出す。読み直さない。
+; 区画が無効(v2 モード・未ロード)なら何もしない。BB_WORK とレジスタだけを使う。
+MON_CHECK:
+        jsr     BB_CHECK_VALID
+        bcs     MON_CHECK_DONE
+        jsr     BB_CHECK_SUMS
+        jsr     BB_SET_STATE
+        beq     MON_CHECK_DONE
+        ldx     #TXT_BB_WARN
+        jsr     PDATA1
+        ldaa    BB_STATE
+        bita    #BB_STATE_CCP
+        beq     MON_CHECK_CORE
+        ldx     #TXT_BB_CCP
+        jsr     PDATA1
+MON_CHECK_CORE:
+        ldaa    BB_STATE
+        bita    #BB_STATE_CORE
+        beq     MON_CHECK_EOL
+        ldx     #TXT_BB_CORE
+        jsr     PDATA1
+MON_CHECK_EOL:
+        jsr     PRINT_CRLF
+MON_CHECK_DONE:
+        rts
+
+; モニタの門。$E20D(CONTRL・v2 の EXIT・BIOS_MONITOR)、SWI の BRK 表示のあと、G で
+; 起動したプログラムの RTS がここへ来る。モニタのスタックに戻してから検査する。
+MON_GATE:
+        lds     #STACK_TOP
+        jsr     MON_CHECK
+        jmp     MAIN_LOOP
+
+TXT_BB_WARN:
+        fcc     "*SDFS3"
+        fcb     $04
+TXT_BB_CCP:
+        fcc     " CCP"
+        fcb     $04
+TXT_BB_CORE:
+        fcc     " CORE"
+        fcb     $04
 
 ; X = SDFS3API ヘッダ(区画の CORE_BASE)、C=0。区画が無効なら C=1。和は見ない。B は保つ。
 BIOS_GET_API_IMPL:
@@ -3052,7 +3133,11 @@ SWI_HANDLER_PRINT:
         ldaa    BRK_SAVE_CC
         jsr     PRINT_HEX8
         jsr     PRINT_CRLF
+ if MONITOR_FEATURE_SD
+        jmp     MON_GATE                ; 退避したあとで検査する(決定 1)
+ else
         jmp     MAIN_LOOP
+ endif
 
 DISASM_ONE:
         ldx     DISASM_ADDR

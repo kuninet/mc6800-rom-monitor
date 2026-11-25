@@ -84,6 +84,7 @@ class ACIA:
         self._interactive = input_data is None
         self._exit_on_eof = input_data is not None if exit_on_eof is None else exit_on_eof
         self._old_termios = None
+        self.tx_count = 0  # 送信したバイト数(SD の記録と出力の位置を突き合わせる)
         if self._interactive and sys.stdin.isatty() and not _IS_WINDOWS:
             self._old_termios = termios.tcgetattr(sys.stdin)
             tty.setcbreak(sys.stdin.fileno())
@@ -136,6 +137,7 @@ class ACIA:
         """ACIA データレジスタへ書く（1文字送信）"""
         if not self._tx_ready:
             return
+        self.tx_count += 1
         ch = chr(value & 0x7F)
         sys.stdout.write(ch)
         sys.stdout.flush()
@@ -167,6 +169,13 @@ class SDCard:
         self.command = []
         self.app_cmd = False
         self.idle = True
+        # CMD17 の記録と失敗注入・差し替え(#314)。番号は 1 始まり
+        self.cmd17_count = 0
+        self.cmd17_log = []          # (番号, LBA, R1, 送信済みバイト数)
+        self.fail_cmd17_from = None  # この番号以降の CMD17 を R1 エラーにする(SD を抜いた代わり)
+        self.swap_image = None       # この番号の CMD17 からイメージを差し替える(カードの差し替え)
+        self.swap_at = None
+        self.tx_counter = None       # 送信済みバイト数を返す関数
 
     @classmethod
     def from_file(cls, path):
@@ -218,10 +227,21 @@ class SDCard:
             return [0x00, 0x40, 0x00, 0x00, 0x00]
         if cmd == 17:
             self.app_cmd = False
+            self.cmd17_count += 1
+            number = self.cmd17_count
+            if self.swap_image is not None and self.swap_at is not None and number >= self.swap_at:
+                self.image = self.swap_image
+                self.swap_image = None
+            tx = self.tx_counter() if self.tx_counter is not None else 0
+            if self.fail_cmd17_from is not None and number >= self.fail_cmd17_from:
+                self.cmd17_log.append((number, arg, 0x04, tx))
+                return [0x04]
             offset = arg * self.SECTOR_SIZE
             sector = self.image[offset:offset + self.SECTOR_SIZE]
             if len(sector) != self.SECTOR_SIZE:
+                self.cmd17_log.append((number, arg, 0x04, tx))
                 return [0x04]
+            self.cmd17_log.append((number, arg, 0x00, tx))
             return [0x00, 0xFE] + list(sector) + [0xFF, 0xFF]
 
         self.app_cmd = False
@@ -358,6 +378,14 @@ class MC6800:
         # 実行カウンタ（暴走検知用）
         self.cycles = 0
         self.max_cycles = 100_000_000  # 安全弁
+
+        # スタックの実測(#314、決定 16)。SP を読み込む命令(lds・txs)で SP が
+        # stack_watch_floor 以上になったら「モニタのスタック」とみなし、その間の最小 SP を
+        # ROM の命令と RAM の命令に分けて取る。プログラムのスタックへ移ると数えない。
+        self.stack_watch_floor = None
+        self.stack_watch_active = False
+        self.stack_watch_rom_min = None
+        self.stack_watch_ram_min = None
 
     # ----- メモリアクセス -----
     def read(self, addr):
@@ -1808,6 +1836,8 @@ class MC6800:
         """メインループ"""
         self.reset()
         try:
+            if self.stack_watch_floor is not None:
+                self._run_with_stack_watch()
             while self.cycles < self.max_cycles:
                 self.step()
             print("\n[EMU] サイクル上限に到達しました", file=sys.stderr)
@@ -1818,6 +1848,35 @@ class MC6800:
         except Exception as e:
             print(f"\n[EMU] エラー: {e} at PC=${self.pc:04X}", file=sys.stderr)
             raise SystemExit(1)
+
+
+_SP_LOAD_OPCODES = frozenset((0x8E, 0x9E, 0xAE, 0xBE, 0x35))  # lds 4 形式と txs
+
+
+def _stack_watch_step(cpu):
+    pc = cpu.pc
+    opcode = cpu.mem[pc]
+    cpu.step()
+    if opcode in _SP_LOAD_OPCODES:
+        cpu.stack_watch_active = cpu.sp >= cpu.stack_watch_floor
+    if cpu.stack_watch_active:
+        if pc >= ROM_BASE:
+            if cpu.stack_watch_rom_min is None or cpu.sp < cpu.stack_watch_rom_min:
+                cpu.stack_watch_rom_min = cpu.sp
+        elif cpu.stack_watch_ram_min is None or cpu.sp < cpu.stack_watch_ram_min:
+            cpu.stack_watch_ram_min = cpu.sp
+
+
+def _run_with_stack_watch(self):
+    while self.cycles < self.max_cycles:
+        _stack_watch_step(self)
+
+
+MC6800._run_with_stack_watch = _run_with_stack_watch
+
+
+def _format_sp(value):
+    return "none" if value is None else f"${value:04X}"
 
 
 def main():
@@ -1836,7 +1895,19 @@ def main():
                         help="終了時に指定範囲のメモリを16進ダンプする。例: A000-A03F")
     parser.add_argument("--acia-tdre-stuck-low", action="store_true",
                         help="1st ACIAの送信レディを常に0として扱う")
+    parser.add_argument("--sd-log",
+                        help="CMD17 ごとに「番号 LBA R1 送信済みバイト数」を書くファイル")
+    parser.add_argument("--sd-fail-cmd17-from", type=int,
+                        help="N 回目(1 始まり)以降の CMD17 を R1 エラーにする(SD を抜いた代わり)")
+    parser.add_argument("--sd-swap-image",
+                        help="--sd-swap-at の CMD17 から差し替える SD イメージ(カードの差し替え)")
+    parser.add_argument("--sd-swap-at", type=int,
+                        help="差し替えを始める CMD17 の番号(1 始まり)")
+    parser.add_argument("--stack-watch",
+                        help="モニタのスタックの下限(16 進)。lds/txs でこれ以上になった区間の最小 SP を出す")
     args = parser.parse_args()
+    if (args.sd_swap_image is None) != (args.sd_swap_at is None):
+        parser.error("--sd-swap-image と --sd-swap-at は一緒に指定する")
 
     # ROM ロード
     with open(args.rom, "rb") as f:
@@ -1855,9 +1926,18 @@ def main():
     acia = ACIA(input_data=input_data, tx_ready=not args.acia_tdre_stuck_low)
     acia2 = ACIA(input_data=key_input_data or [], exit_on_eof=False)
     sdcard = SDCard.from_file(args.sd) if args.sd else None
+    if sdcard is not None:
+        sdcard.tx_counter = lambda: acia.tx_count
+        sdcard.fail_cmd17_from = args.sd_fail_cmd17_from
+        if args.sd_swap_image is not None:
+            with open(args.sd_swap_image, "rb") as f:
+                sdcard.swap_image = f.read()
+            sdcard.swap_at = args.sd_swap_at
     pia = PIA(sdcard) if sdcard is not None else None
     cpu = MC6800(acia, acia2=acia2, pia=pia)
     cpu.max_cycles = args.max_cycles
+    if args.stack_watch:
+        cpu.stack_watch_floor = int(args.stack_watch, 16)
 
     # ROM のサイズに応じて配置を決定
     # p2bin の出力は ROM_BASE からのオフセットなので、そのまま配置
@@ -1872,6 +1952,13 @@ def main():
         exit_code = int(exc.code or 0) if isinstance(exc.code, int) else 1
     finally:
         acia.cleanup()
+    if args.sd_log and sdcard is not None:
+        with open(args.sd_log, "w", encoding="ascii") as f:
+            for number, lba, r1, tx in sdcard.cmd17_log:
+                f.write(f"{number} {lba} {r1:02X} {tx}\n")
+    if cpu.stack_watch_floor is not None:
+        print(f"[EMU] stack-watch rom_min={_format_sp(cpu.stack_watch_rom_min)} "
+              f"ram_min={_format_sp(cpu.stack_watch_ram_min)}", file=sys.stderr)
     if args.dump_memory:
         start, end = _parse_dump_range(args.dump_memory)
         _print_memory_dump(cpu.mem, start, end)
