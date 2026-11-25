@@ -64,12 +64,12 @@ SDFS3>
 
 | 操作 | 動き |
 | --- | --- |
-| `BOOT3` | system slot A（LBA `64`）か B（LBA `96`）の `SDFS3SYS` を検証して `$6400-$7FFF` に置き、起動した slot と CCP と核の和を ROM の BIOS 区画に控えて、CCP の cold 入口（Welcome あり）へ入る。LBA `48` の active marker が有効ならその slot を、無効なら世代の大きい slot を先に試し、だめなら他方を試す（#300・#301）。両方とも古い resident（API major 1）や壊れたイメージなら `?` |
+| `BOOT3` | system slot A（LBA `64`）か B（LBA `96`）の `SDFS3SYS` を検証して `$6400-$7FFF` に置き、起動した slot と CCP と核の和を ROM の BIOS 区画に控えて、CCP の cold 入口（Welcome あり）へ入る。LBA `48` の active marker が有効ならその slot を、無効なら世代の大きい slot を先に試し、だめなら他方を試す（#300・#301）。両方とも古い resident（API major 1）や壊れたイメージなら `?` と slot A・B の理由を 1 桁ずつ（例 `?42`。表は `docs/usage/monitor_commands.md` の「BOOT3 と DOS のエラーコード」。#307） |
 | `SDFS3> ` の内蔵コマンド | `DIR [path]`、`TYPE path`、`LOAD file`、`RUN addr`、`RUN file`、`EXIT`。それ以外の `<名前>.COM` は `.COM` として起動する |
 | `.COM` | `$0100` に読み、`BIOS_EXEC` で起動する。`RTS` は ROM の WBOOT（`$E0E6`）に戻り、CCP と核を検査してから `SDFS3> ` に戻る（Welcome なし）。大きさの上限は `$6300` バイト（#315 で `$6F00` に広がる） |
 | `RUN` | `RUN addr`・`RUN file` とも `BIOS_EXEC` で起動する。プログラムの `RTS` は `SDFS3> ` に戻る。`SWI` で止めたあとはモニタにいるので、`DOS` で戻る |
 | `EXIT` | モニタの `] ` へ。RAM の CCP と核はそのまま残る |
-| モニタの `DOS` | CCP と核の和が `BOOT3` のときと同じなら、CCP の warm 入口（Welcome なし）へ。モニタで CCP や核を書き換えた、`BOOT3` していない、v2 の `BOOT` をした、のどれかなら `?`（#313 では SD から読み直さない。読み直しは #314） |
+| モニタの `DOS` | CCP と核の和が `BOOT3` のときと同じなら、CCP の warm 入口（Welcome なし）へ。`BOOT3` していない、v2 の `BOOT` をした（BIOS 区画が無効）なら `?6`。モニタで書き換えたなどで CCP や核が壊れていれば SD の起動した slot から何も出さずに読み直す。読み直せないときは `?1`（SD の初期化）・`?2`（読み出し）・`?7`（カードの差し替え）・`?5`（読み直しても和が合わない）（#314・#307） |
 
 v3 の配置（#313 の暫定）: `$0100-$63FF` TPA、`$6400-$6FFF` CCP（入口表 +0 cold／+3 warm）、`$7000-$7FFF` 核（SDFS3API ヘッダ、`GET_MEMTOP` = `$6FFF`）。CCP の先頭は、LOAD と RUN を CCP から外す #316 で `$6C00` に戻る。
 

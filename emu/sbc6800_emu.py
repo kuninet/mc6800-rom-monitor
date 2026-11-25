@@ -175,6 +175,7 @@ class SDCard:
         self.fail_cmd17_from = None  # この番号以降の CMD17 を R1 エラーにする(SD を抜いた代わり)
         self.swap_image = None       # この番号の CMD17 からイメージを差し替える(カードの差し替え)
         self.swap_at = None
+        self.fail_cmd0_after = None  # CMD17 がこの回数済んだあとの CMD0 を R1 エラーにする(#307)
         self.tx_counter = None       # 送信済みバイト数を返す関数
 
     @classmethod
@@ -209,6 +210,8 @@ class SDCard:
         arg = (frame[1] << 24) | (frame[2] << 16) | (frame[3] << 8) | frame[4]
 
         if cmd == 0:
+            if self.fail_cmd0_after is not None and self.cmd17_count >= self.fail_cmd0_after:
+                return [0x04]
             self.idle = True
             self.app_cmd = False
             return [0x01]
@@ -1903,6 +1906,8 @@ def main():
                         help="--sd-swap-at の CMD17 から差し替える SD イメージ(カードの差し替え)")
     parser.add_argument("--sd-swap-at", type=int,
                         help="差し替えを始める CMD17 の番号(1 始まり)")
+    parser.add_argument("--sd-fail-cmd0-after", type=int,
+                        help="CMD17 が N 回済んだあとの CMD0 を R1 エラーにする(SD_INIT の失敗。0 なら最初から)")
     parser.add_argument("--stack-watch",
                         help="モニタのスタックの下限(16 進)。lds/txs でこれ以上になった区間の最小 SP を出す")
     args = parser.parse_args()
@@ -1929,6 +1934,7 @@ def main():
     if sdcard is not None:
         sdcard.tx_counter = lambda: acia.tx_count
         sdcard.fail_cmd17_from = args.sd_fail_cmd17_from
+        sdcard.fail_cmd0_after = args.sd_fail_cmd0_after
         if args.sd_swap_image is not None:
             with open(args.sd_swap_image, "rb") as f:
                 sdcard.swap_image = f.read()

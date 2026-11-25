@@ -324,7 +324,7 @@ API を major 2 に上げる（決定 9）。ROM は major だけを見る。
 
 ### 5-3. 版が合わないとき
 
-- 新しい ROM ＋ 古い resident（major 1）: BOOT3 がヘッダの major で弾き、`?` を出す
+- 新しい ROM ＋ 古い resident（major 1）: BOOT3 がヘッダの major で弾き、`?4x` を出す（#307。上位の桁が slot A の理由）
 - 古い ROM ＋ 新しい resident: 古い ROM は `SDFS3_LOAD_BASE` でヘッダを探すので見つからず、`?` を出す。どちらも暴走しない
 
 ## 6. 既存の Issue の扱い

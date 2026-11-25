@@ -557,6 +557,7 @@ def _v3_run_sd(
     *,
     sd_image: bytes,
     fail_from: int | None = None,
+    fail_cmd0_after: int | None = None,
     swap_image: bytes | None = None,
     swap_at: int | None = None,
     stack_watch: int | None = None,
@@ -572,6 +573,8 @@ def _v3_run_sd(
     args = ["--sd-log", str(log_path)]
     if fail_from is not None:
         args += ["--sd-fail-cmd17-from", str(fail_from)]
+    if fail_cmd0_after is not None:
+        args += ["--sd-fail-cmd0-after", str(fail_cmd0_after)]
     if swap_image is not None:
         swap_path.write_bytes(swap_image)
         args += ["--sd-swap-image", str(swap_path), "--sd-swap-at", str(swap_at)]
@@ -750,13 +753,13 @@ def test_wboot_reload_fails_without_card_or_after_swap() -> None:
         base = SDFS3SYS_FIXED_LBA * SECTOR_SIZE
         swap_image[base : base + len(swapped)] = swapped
 
-        for label, kwargs in (
-            ("no card", {"fail_from": first_reload}),
-            ("swapped", {"swap_image": bytes(swap_image), "swap_at": first_reload}),
+        for label, code, kwargs in (
+            ("no card", "2", {"fail_from": first_reload}),
+            ("swapped", "7", {"swap_image": bytes(swap_image), "swap_at": first_reload}),
         ):
             raw, log, _ = _v3_run_sd(config, input_text, sd_image=sd_image, **kwargs)
             out = raw.replace("\r", "")
-            assert f"{PROMPT}ZAPCCP.COM\n?\n] DOS\n?\n] " in out, f"{profile} {label}: {out[-600:]!r}"
+            assert f"{PROMPT}ZAPCCP.COM\n?{code}\n] DOS\n?6\n] " in out, f"{profile} {label}: {out[-600:]!r}"
             late = [(lba, r1) for n, lba, r1, _tx in log if n >= first_reload]
             if label == "no card":
                 assert late and late[0] == (SDFS3SYS_FIXED_LBA, 0x04), f"{profile}: {late}"
@@ -903,7 +906,7 @@ def test_boot3_marker_slot_and_wboot_reload_from_it() -> None:
         raw, log, _ = _v3_run_sd(config, f"BOOT3\rZAPCCP.COM\rDOS\r{ccp_dump}\r\r", sd_image=sd_image,
                                  swap_image=swap, swap_at=first_reload)
         out = raw.replace("\r", "")
-        assert f"{PROMPT}ZAPCCP.COM\n?\n] DOS\n?\n] " in out, f"{profile}: changed slot B: {out[-600:]!r}"
+        assert f"{PROMPT}ZAPCCP.COM\n?7\n] DOS\n?6\n] " in out, f"{profile}: changed slot B: {out[-600:]!r}"
         late = [(l, r1) for n, l, r1, _tx in log if n >= first_reload]
         assert late == [(SLOT_B_LBA, 0x00)], f"{profile}: changed slot B should stop at its header: {late}"
         ccp = _dump_range_bytes(_after(out, f"] {ccp_dump}"), V3_CCP_BASE, 16)
@@ -1035,11 +1038,121 @@ def test_boot3_falls_back_from_bad_active_slot() -> None:
             dump_range=f"{block:04X}-{block + 1:04X}",
         )
         out = raw.replace("\r", "")
-        assert "] BOOT3\n?\n] DOS\n?\n] " in out, f"{profile}: both bad: {out[-400:]!r}"
+        # A はヘッダ不正(3)、B は和の不一致(5)。B を先に試しても A → B の順に出る(#307)
+        assert "] BOOT3\n?35\n] DOS\n?6\n] " in out, f"{profile}: both bad: {out[-400:]!r}"
         assert PROMPT not in out and WELCOME not in out
         assert [l for _n, l, _r1, _tx in log] == [SDFS3MRK_LBA, *b_sectors["all"], SLOT_A_LBA], f"{profile}: {log}"
         assert _dump_bytes(_final_dump(out, block), block)[0] == 0, f"{profile}: BB_MAGIC should be cleared"
     print("[PASS] test_boot3_falls_back_from_bad_active_slot")
+
+
+# ---------------------------------------------------------------------------
+# BOOT3 と WBOOT の失敗コード(#307)
+# ---------------------------------------------------------------------------
+
+
+def test_boot3_error_codes_name_each_slot() -> None:
+    """cold の BOOT3 は「?」のあとに slot A と slot B の理由を 1 桁ずつ出す(1 = SD の初期化、
+    2 = 読み出し、3 = ヘッダ不正、4 = API の不一致、5 = 和の不一致)。順は試した順ではなく A → B。
+    どの失敗でも区画は無効で、続く DOS は ?6。"""
+    for profile in V3_PROFILES:
+        config = _v3(profile)
+        block = config["symbols"]["BIOS_BLOCK"]
+        slot_a = _slot_image(config, 1)
+        bad_magic_a = bytearray(slot_a)
+        bad_magic_a[0] = ord("X")
+        bad_sum_a = bytearray(slot_a)
+        bad_sum_a[-1] ^= 0x01
+        bad_api_a = bytearray(slot_a)
+        bad_api_a[0x09] = 0x01
+        _refresh_checksum(bad_api_a)
+        core = HEADER_SIZE + V3_CORE_OFFSET
+        bad_core_sig_a = bytearray(slot_a)  # 核の SDFS3API の署名(BB_STORE の BB_CHECK_API)
+        bad_core_sig_a[core] = ord("X")
+        _refresh_checksum(bad_core_sig_a)
+        bad_entry_a = bytearray(slot_a)  # CCP 入口表が核の位置(BB_STORE の BB_CHECK_VALID)
+        bad_entry_a[0x10:0x12] = bytes([V3_CORE_OFFSET >> 8, V3_CORE_OFFSET & 0xFF])
+        _refresh_checksum(bad_entry_a)
+        bad_magic_b = bytearray(_slot_image(config, 2))
+        bad_magic_b[0] = ord("X")
+        good_card = _slots_sd_image(config, slot_a, None, None)
+        cases = [
+            # (名前, SD, 失敗注入, コード, 読む LBA(None なら見ない))
+            ("SD_INIT fails", good_card, {"fail_cmd0_after": 0}, "11", []),
+            ("every read fails", good_card, {"fail_from": 1}, "22",
+             [SDFS3MRK_LBA, SLOT_A_LBA, SLOT_B_LBA, SLOT_A_LBA, SLOT_B_LBA]),  # 選ぶための 3 回と、試す 2 回
+            ("A bad header, B empty", _slots_sd_image(config, bytes(bad_magic_a), None, None), {}, "33", None),
+            # A を試したあと、B の前の SD_INIT のし直しで失敗: B の理由は SD の初期化
+            ("SD_INIT fails before B", _slots_sd_image(config, bytes(bad_magic_a), None, None),
+             {"fail_cmd0_after": 4}, "31", [SDFS3MRK_LBA, SLOT_A_LBA, SLOT_B_LBA, SLOT_A_LBA]),
+            ("A bad sum, B empty", _slots_sd_image(config, bytes(bad_sum_a), None, None), {}, "53", None),
+            ("A old API major, B empty", _slots_sd_image(config, bytes(bad_api_a), None, None), {}, "43", None),
+            ("A bad core API, B empty", _slots_sd_image(config, bytes(bad_core_sig_a), None, None), {}, "43", None),
+            ("A entry table in core, B empty", _slots_sd_image(config, bytes(bad_entry_a), None, None), {}, "33", None),
+            (
+                "active B bad header, A bad sum",
+                _slots_sd_image(config, bytes(bad_sum_a), bytes(bad_magic_b), _marker(1)),
+                {},
+                "53",
+                [SDFS3MRK_LBA, SLOT_B_LBA, *_system_sectors(config, SLOT_A_LBA)["all"]],
+            ),
+        ]
+        for label, sd_image, kwargs, code, reads in cases:
+            raw, log, _ = _v3_run_sd(
+                config, "BOOT3\rDOS\r\r", sd_image=sd_image, dump_range=f"{block:04X}-{block + 1:04X}", **kwargs
+            )
+            out = raw.replace("\r", "")
+            assert f"] BOOT3\n?{code}\n] DOS\n?6\n] " in out, f"{profile} {label}: {out[-400:]!r}"
+            assert PROMPT not in out and WELCOME not in out, f"{profile} {label}: resident must not run"
+            assert _dump_bytes(_final_dump(out, block), block)[0] == 0, f"{profile} {label}: BB_MAGIC"
+            if reads is not None:
+                got = [lba for _n, lba, _r1, _tx in log]
+                assert got == reads, f"{profile} {label}: read {got}"
+    print("[PASS] test_boot3_error_codes_name_each_slot")
+
+
+def test_wboot_error_codes_name_the_cause() -> None:
+    """warm(WBOOT・DOS)は「?」のあとに 1 桁を出す(6 = 区画が無効、1 = SD の初期化、2 = 読み出し、
+    7 = カードの差し替え、5 = 読み直したあとの和の不一致)。6 以外は区画を無効にするので、
+    続く DOS は ?6。CCP を潰す ZAPCCP.COM の戻りで読み直すところを狙う。"""
+    for profile in V3_PROFILES:
+        config = _v3(profile)
+        sd_image = _wboot_sd_image(config)
+        input_text = "DOS\rBOOT3\rHELLO.COM\rZAPCCP.COM\rDOS\r\r"
+        raw, log, _ = _v3_run_sd(config, input_text, sd_image=sd_image)
+        out = raw.replace("\r", "")
+        assert "] DOS\n?6\n] BOOT3\n" in out, f"{profile}: DOS before BOOT3: {out[:400]!r}"
+        # 健全なカードなら読み直しは何も出さずに SDFS3> へ戻る(DOS は CCP のコマンドではないので CCP の ?)
+        assert f"{PROMPT}ZAPCCP.COM\n{PROMPT}DOS\n?\n" in out, f"{profile}: healthy run: {out[-600:]!r}"
+        start, _stop = _segment(raw, PROMPT + "ZAPCCP.COM")
+        first_reload = next(n for n, lba, _r1, tx in log if tx >= start and lba == SDFS3SYS_FIXED_LBA)
+
+        base = SDFS3SYS_FIXED_LBA * SECTOR_SIZE
+        swapped = bytearray(sd_image)  # +$18 の違う版
+        swapped[base + HEADER_SIZE + 0x0200] ^= 0x01
+        image = bytearray(swapped[base : base + len(config["sdfs3sys"])])
+        _refresh_checksum(image)
+        swapped[base : base + len(image)] = image
+        same_sum = bytearray(sd_image)  # +$18 は同じで、CCP の中身だけ違う(読み直しても和が合わない)
+        same_sum[base + HEADER_SIZE + 0x0010] ^= 0x01
+
+        for label, code, kwargs, late_want in (
+            ("SD_INIT fails", "1", {"fail_cmd0_after": first_reload - 1}, []),
+            ("header read fails", "2", {"fail_from": first_reload}, [(SDFS3SYS_FIXED_LBA, 0x04)]),
+            # 先頭セクタはバッファにあるので、次の CMD17 は CCP の 2 セクタ目
+            ("CCP read fails", "2", {"fail_from": first_reload + 1}, [(SDFS3SYS_FIXED_LBA, 0), (SDFS3SYS_FIXED_LBA + 1, 0x04)]),
+            ("card swapped", "7", {"swap_image": bytes(swapped), "swap_at": first_reload}, [(SDFS3SYS_FIXED_LBA, 0)]),
+            ("sum after reload", "5", {"swap_image": bytes(same_sum), "swap_at": first_reload}, None),
+        ):
+            raw, log, _ = _v3_run_sd(config, input_text, sd_image=sd_image, **kwargs)
+            out = raw.replace("\r", "")
+            assert f"{PROMPT}ZAPCCP.COM\n?{code}\n] DOS\n?6\n] " in out, f"{profile} {label}: {out[-600:]!r}"
+            late = [(lba, r1) for n, lba, r1, _tx in log if n >= first_reload]
+            if late_want is not None:
+                assert late == late_want, f"{profile} {label}: {late}"
+            else:
+                assert late == [(lba, 0) for lba in _system_sectors(config)["ccp"]], f"{profile} {label}: {late}"
+    print("[PASS] test_wboot_error_codes_name_the_cause")
 
 
 def test_monitor_gate_warns_and_dos_after_reset_and_ramtest() -> None:
@@ -1142,7 +1255,7 @@ def test_v2_boot_exit_returns_to_monitor_and_disables_dos() -> None:
             dump_range=f"{block:04X}-{block + 1:04X}",
         )
         out = raw.replace("\r", "")
-        assert "SDFS> EXIT\n] DOS\n?\n] " in out, f"{profile}: v2 EXIT / DOS: {out[-600:]!r}"
+        assert "SDFS> EXIT\n] DOS\n?6\n] " in out, f"{profile}: v2 EXIT / DOS: {out[-600:]!r}"
         assert "*SDFS3" not in out, f"{profile}: v2 mode must not warn"
         assert _dump_bytes(_after(out, f"] D{block:04X}"), block)[0] == 0, f"{profile}: BOOT must clear BB_MAGIC"
     print("[PASS] test_v2_boot_exit_returns_to_monitor_and_disables_dos")
@@ -1186,7 +1299,7 @@ def test_monitor_stack_fits_in_128_bytes() -> None:
             config, monitor_cmds, sd_image=_wboot_sd_image(config), stack_watch=floor
         )
         out = _raw.replace("\r", "")
-        assert out.count("BRK 0183") == 2 and "] DOS\n?\n" in out, f"{profile}: {out[-900:]!r}"
+        assert out.count("BRK 0183") == 2 and "] DOS\n?5\n" in out, f"{profile}: {out[-900:]!r}"
         assert out.count("*SDFS3 CCP") == 3, f"{profile}: $E20D, BRK and the resumed jmp $E20D should warn"
         match = re.search(r"\[EMU\] stack-watch rom_min=(\S+) ram_min=(\S+)", stderr)
         assert match and match.group(2) == "none", f"{profile}: {stderr[-300:]!r}"
@@ -1223,7 +1336,10 @@ def test_dos_gate_rejects_unloaded_block_without_writing() -> None:
         garbage.append((seed >> 16) & 0xFF)
     # 形は正しい(MAGIC・CHECK・範囲が通る)が、和が RAM と合わない区画
     shaped = _bb_block(img_base=V3_CCP_BASE, core_base=V3_CORE_BASE, img_last=0x7C00, ccp_vec=V3_CCP_BASE)
-    for label, block_data in (("zero", None), ("garbage", bytes(garbage)), ("bad sums", bytes(shaped))):
+    # 区画が無効なら ?6。形の正しい区画は読み直しに進み、+$18 が違うので差し替え扱いの ?7(#307)
+    for label, code, block_data in (
+        ("zero", "6", None), ("garbage", "6", bytes(garbage)), ("bad sums", "7", bytes(shaped))
+    ):
         prefix = "" if block_data is None else f"M{block:04X}\r{_hex_bytes(block_data)}\r.\r"
         out = _v3_run(
             config,
@@ -1235,7 +1351,7 @@ def test_dos_gate_rejects_unloaded_block_without_writing() -> None:
             max_cycles=100_000_000,
             timeout=40,
         )
-        assert "] DOS\n?\n] " in out, f"{label}: DOS without a valid block should fail: {out[-300:]!r}"
+        assert f"] DOS\n?{code}\n] " in out, f"{label}: DOS without a valid block should fail: {out[-300:]!r}"
         assert PROMPT not in out
         assert bytes(_dump_range_bytes(_after(out, "] DOS\n"), V3_CCP_BASE, 16)) == marker, (
             f"{label}: DOS must not write the CCP area"
@@ -1272,7 +1388,7 @@ def test_dos_gate_rejects_unloaded_block_without_writing() -> None:
     )
     dos = out.split("] DOS\n")[1:]
     assert len(dos) == 2 and dos[0].startswith(PROMPT), f"DOS after BOOT3 should work: {out[-600:]!r}"
-    assert dos[1].startswith("?\n"), f"v2 BOOT should invalidate the v3 block: {dos[1][:80]!r}"
+    assert dos[1].startswith("?6\n"), f"v2 BOOT should invalidate the v3 block: {dos[1][:80]!r}"
     # clr BB_MAGIC は上位バイトだけ消す。それで MAGIC が合わなくなり、区画は無効になる
     assert _dump_bytes(_final_dump(out, block), block)[0] == 0, "BB_MAGIC should be cleared by BOOT"
     print("[PASS] test_dos_gate_rejects_unloaded_block_without_writing")
@@ -1308,20 +1424,22 @@ def test_rom_boot3_rejects_bad_images() -> None:
     bad_magic[0] = ord("X")
     bad_sum = bytearray(good)
     bad_sum[-1] ^= 0x01
+    # 期待するコード(#307): 上位 = slot A の理由。カードは slot B(LBA 96)の手前で終わるので、
+    # B はいつも読み出しの失敗(2)
     cases = [
-        ("old resident (major 1, load $5000)", old_v1),
-        ("header major 1", patched(lambda data: data.__setitem__(0x09, 0x01))),
-        ("api major 1", patched(lambda data: data.__setitem__(core + 8, 0x01))),
-        ("api signature", patched(lambda data: data.__setitem__(core, ord("X")))),
-        ("load below RAM floor", patched(put16(0x0C, 0x3F00))),
-        ("image beyond USER_RAM_END", patched(put16(0x0C, 0x6C00))),
-        ("api offset outside image", patched(put16(0x12, 0x2000))),
-        ("entry table outside CCP", patched(put16(0x10, V3_CORE_OFFSET))),
-        ("bad magic", bytes(bad_magic)),
-        ("bad checksum", bytes(bad_sum)),
+        ("old resident (major 1, load $5000)", "42", old_v1),
+        ("header major 1", "42", patched(lambda data: data.__setitem__(0x09, 0x01))),
+        ("api major 1", "42", patched(lambda data: data.__setitem__(core + 8, 0x01))),
+        ("api signature", "42", patched(lambda data: data.__setitem__(core, ord("X")))),
+        ("load below RAM floor", "32", patched(put16(0x0C, 0x3F00))),
+        ("image beyond USER_RAM_END", "32", patched(put16(0x0C, 0x6C00))),
+        ("api offset outside image", "32", patched(put16(0x12, 0x2000))),
+        ("entry table outside CCP", "32", patched(put16(0x10, V3_CORE_OFFSET))),
+        ("bad magic", "32", bytes(bad_magic)),
+        ("bad checksum", "52", bytes(bad_sum)),
     ]
     block = symbols["BIOS_BLOCK"]
-    for label, image in cases:
+    for label, code, image in cases:
         out = _v3_run(
             config,
             "BOOT3\rDOS\r\r",
@@ -1330,7 +1448,7 @@ def test_rom_boot3_rejects_bad_images() -> None:
             max_cycles=300_000_000,
             timeout=60,
         )
-        assert "] BOOT3\n?\n] DOS\n?\n] " in out, f"{label}: BOOT3 and DOS should both fail: {out[-400:]!r}"
+        assert f"] BOOT3\n?{code}\n] DOS\n?6\n] " in out, f"{label}: BOOT3 and DOS should both fail: {out[-400:]!r}"
         assert PROMPT not in out and WELCOME not in out, f"{label}: resident must not run: {out[-400:]!r}"
         assert _dump_bytes(_final_dump(out, block), block)[0] == 0, f"{label}: BB_MAGIC should be cleared"
     print("[PASS] test_rom_boot3_rejects_bad_images")
@@ -1892,7 +2010,7 @@ def test_rom_bios_exec_returns_to_wboot() -> None:
     )
     assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
     after_go = _after(stdout, f"G{BIOS_HARNESS_ADDR:04X}")
-    assert "\n?\n" in after_go.replace("\r", ""), f"WBOOT should print '?': {after_go!r}"
+    assert "\n?6\n" in after_go.replace("\r", ""), f"WBOOT without a block should print '?6': {after_go!r}"
     assert "]" in after_go.split("?", 1)[1], f"monitor prompt missing after WBOOT: {after_go!r}"
     regs = _dump_bytes(_final_dump(stdout, 0x0200), 0x0200)
     assert regs[8] == 0x5A, f"program entry did not run: {regs!r}"
@@ -3079,6 +3197,8 @@ def main() -> None:
         test_boot3_invalid_marker_falls_back_to_generation,
         test_boot3_generation_picks_first_slot,
         test_boot3_falls_back_from_bad_active_slot,
+        test_boot3_error_codes_name_each_slot,
+        test_wboot_error_codes_name_the_cause,
         test_monitor_gate_warns_and_dos_after_reset_and_ramtest,
         test_v2_boot_exit_returns_to_monitor_and_disables_dos,
         test_monitor_stack_fits_in_128_bytes,
