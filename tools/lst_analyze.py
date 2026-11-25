@@ -157,7 +157,92 @@ def reclaim_report(cfg, rom):
     print(f"  ==> 回収見込み 約 {reuse} bytes")
 
 
+# ---- 核→CCP 参照検査(#311) -------------------------------------------------
+LST_LINE = re.compile(r"^\s*(?:\(\d+\))?\s*(\d+)/\s*([0-9A-Fa-f]+)\s*:\s?(.*)$")
+IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_.$]*")
+HEXPAIR = re.compile(r"^\s*[0-9A-F]{2}(?=\s|$)")
+
+
+def _split_bytes_source(rest):
+    """リスト行の「: 」以降を (バイト数, ソース文字列) に分ける。"""
+    nbytes = 0
+    while True:
+        m = HEXPAIR.match(rest)
+        if not m:
+            break
+        nbytes += 1
+        rest = rest[m.end():]
+    return nbytes, rest.strip()
+
+
+def check_core_ccp_refs(lst_path):
+    """核の範囲 [SDFS3_CORE_START, SDFS3_CCP_START) の命令・データが、CCP の範囲
+    [SDFS3_CCP_START, SDFS3_END) のラベルを参照していないか調べる。
+
+    返り値: (違反リスト, 情報dict)。違反は (行番号, アドレス, ソース, 参照先名)。
+    情報dictには核の範囲と、境界直前の最後の命令(フォールスルー検査用)を入れる。
+    ジャンプテーブルと API ヘッダは CORE_START より前にあるので対象外。"""
+    syms = parse_symbol_table(lst_path)
+    for need in ("SDFS3_CORE_START", "SDFS3_CCP_START", "SDFS3_END"):
+        if need not in syms:
+            raise ValueError(f"missing symbol in listing: {need}")
+    core = int(syms["SDFS3_CORE_START"][0], 16)
+    ccp = int(syms["SDFS3_CCP_START"][0], 16)
+    end = int(syms["SDFS3_END"][0], 16)
+    ccp_labels = {}
+    for name, (value, flag, _unused) in syms.items():
+        if flag != "C":
+            continue
+        try:
+            addr = int(value, 16)
+        except ValueError:
+            continue
+        if ccp <= addr < end:
+            ccp_labels[name] = addr
+    violations = []
+    last_src = None
+    scanned = 0
+    for lineno, line in enumerate(Path(lst_path).read_text(errors="replace").splitlines(), 1):
+        if "Symbol Table" in line:
+            break
+        m = LST_LINE.match(line)
+        if not m:
+            continue
+        addr = int(m.group(2), 16)
+        nbytes, src = _split_bytes_source(m.group(3))
+        if nbytes == 0 or not (core <= addr < ccp):
+            continue
+        scanned += 1
+        code = src.split(";", 1)[0]
+        code = re.sub(r'"[^"]*"', '""', code)
+        code = re.sub(r"'.'", "''", code)
+        code = re.sub(r"^[A-Za-z_][A-Za-z0-9_.$]*:", "", code.strip()).strip()
+        if code:
+            last_src = code
+        for name in IDENT.findall(code):
+            if name in ccp_labels:
+                violations.append((lineno, addr, src, name))
+    info = {"core": core, "ccp": ccp, "end": end, "scanned": scanned, "last_core_insn": last_src}
+    return violations, info
+
+
+def check_core_ccp_main(lst_path):
+    violations, info = check_core_ccp_refs(lst_path)
+    print(f"核 ${info['core']:04X}-${info['ccp'] - 1:04X} / CCP ${info['ccp']:04X}-${info['end'] - 1:04X}"
+          f" (走査 {info['scanned']} 行)")
+    last = (info["last_core_insn"] or "").split()
+    if not last or last[0].lower() not in ("rts", "rti", "jmp", "bra"):
+        print(f"違反: 核の末尾が {info['last_core_insn']!r} で、CCP へ落ち込む可能性")
+        return 1
+    for lineno, addr, src, name in violations:
+        print(f"違反: {lineno}行 ${addr:04X} `{src}` が CCP の {name} を参照")
+    print(f"核→CCP 参照: {len(violations)} 件")
+    return 1 if violations else 0
+
+
 if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--check-core-ccp":
+        sys.exit(check_core_ccp_main(sys.argv[2]))
     cfg = sys.argv[1] if len(sys.argv) > 1 else "sbcio-sdfs"
     ours = our_symbols()
     rom = report(ROOT / f"build/mc6800-monitor-{cfg}.lst", f"ROMモニタ [{cfg}]", ours)

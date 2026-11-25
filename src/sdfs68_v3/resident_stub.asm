@@ -22,6 +22,13 @@ SDFS3_COM_MAX_SIZE equ USER_RAM_END-SDFS3_COM_LOAD_BASE+1
 SDFS3_COM_MAX_HI equ SDFS3_COM_MAX_SIZE/256
 SDFS3_COM_MAX_LO equ SDFS3_COM_MAX_SIZE-SDFS3_COM_MAX_HI*256
 
+; 書き換わる変数はイメージの外（窓の resident ワーク）に置く。#311
+SDFS3_LAST_ERROR equ SDFS3_WORK_BASE
+SDFS3_PARSE_PTR  equ SDFS3_WORK_BASE+1
+SDFS3_PARSE_LEN  equ SDFS3_WORK_BASE+3
+SDFS3_TOKEN_PTR  equ SDFS3_WORK_BASE+4
+SDFS3_TOKEN_LEN  equ SDFS3_WORK_BASE+6
+
         if S1_SUPPORTED = 0
         error   "SDFS/68 v3 resident is not supported for this memory configuration"
         endif
@@ -57,78 +64,13 @@ SDFS3_JUMP_TABLE:
         fdb     SDFS3_NOT_IMPLEMENTED
         fdb     SDFS3_INIT
 
+SDFS3_CORE_START:
+
 SDFS3_GET_INFO:
         ldaa    #SDFS3_API_MAJOR
         ldab    #SDFS3_FLAG_NONE
         ldx     #SDFS3_API_HEADER
         clc
-        rts
-
-SDFS3_CMD_DISPATCH:
-        stx     SDFS3_PARSE_PTR
-        stab    SDFS3_PARSE_LEN
-SDFS3_CMD_SKIP_SPACE:
-        tst     SDFS3_PARSE_LEN
-        beq     SDFS3_BAD_COMMAND
-        ldx     SDFS3_PARSE_PTR
-        ldaa    0,x
-        cmpa    #CHR_SPACE
-        bne     SDFS3_CMD_TOKEN_START
-        inx
-        stx     SDFS3_PARSE_PTR
-        dec     SDFS3_PARSE_LEN
-        bra     SDFS3_CMD_SKIP_SPACE
-SDFS3_CMD_TOKEN_START:
-        stx     SDFS3_TOKEN_PTR
-        clr     SDFS3_TOKEN_LEN
-SDFS3_CMD_TOKEN_SCAN:
-        tst     SDFS3_PARSE_LEN
-        beq     SDFS3_CMD_TOKEN_DONE
-        ldx     SDFS3_PARSE_PTR
-        ldaa    0,x
-        cmpa    #CHR_SPACE
-        beq     SDFS3_CMD_TOKEN_DONE
-        inc     SDFS3_TOKEN_LEN
-        inx
-        stx     SDFS3_PARSE_PTR
-        dec     SDFS3_PARSE_LEN
-        bra     SDFS3_CMD_TOKEN_SCAN
-SDFS3_CMD_TOKEN_DONE:
-        ldaa    SDFS3_TOKEN_LEN
-        beq     SDFS3_BAD_COMMAND
-        cmpa    #3
-        bne     SDFS3_CMD_CHECK_4
-        jsr     SDFS3_IS_DIR
-        bcc     SDFS3_CMD_DIR_STUB
-        jsr     SDFS3_IS_RUN
-        bcc     SDFS3_CMD_RUN_STUB
-        bra     SDFS3_CMD_CHECK_COM
-SDFS3_CMD_CHECK_4:
-        cmpa    #4
-        bne     SDFS3_CMD_CHECK_COM
-        jsr     SDFS3_IS_TYPE
-        bcc     SDFS3_CMD_TYPE_STUB
-        jsr     SDFS3_IS_LOAD
-        bcc     SDFS3_CMD_LOAD_STUB
-SDFS3_CMD_CHECK_COM:
-        jsr     SDFS3_IS_COM_TOKEN
-        bcc     SDFS3_CMD_COM_STUB
-        bra     SDFS3_BAD_COMMAND
-
-SDFS3_CMD_DIR_STUB:
-        jmp     SDFS3_CMD_DIR
-SDFS3_CMD_TYPE_STUB:
-        jmp     SDFS3_CMD_TYPE
-SDFS3_CMD_LOAD_STUB:
-        jmp     SDFS3_CMD_LOAD
-SDFS3_CMD_RUN_STUB:
-        jmp     SDFS3_CMD_RUN
-SDFS3_CMD_COM_STUB:
-        jmp     SDFS3_CMD_COM
-SDFS3_BAD_COMMAND:
-        ldaa    #SDFS3_ERR_BAD_CMD
-        staa    SDFS3_LAST_ERROR
-        sec
         rts
 
 SDFS3_LOAD_PATH:
@@ -159,157 +101,6 @@ SDFS3_GET_CAPS:
         clc
         rts
 
-SDFS3_INIT:
-        ldx     #SDFS3_TXT_WELCOME
-        jsr     SDFS3_PRINT
-        ldaa    #SDFS3_API_MAJOR
-        jsr     SDFS3_PRINT_HEX8
-        ldaa    #'.'
-        jsr     SDFS3_PUTC
-        ldaa    #SDFS3_API_MINOR
-        jsr     SDFS3_PRINT_HEX8
-        ldaa    #CHR_CR
-        jsr     SDFS3_PUTC
-        ldx     #SDFS3_TXT_BASE
-        jsr     SDFS3_PRINT
-        ldaa    #SDFS3_LOAD_BASE/$0100
-        jsr     SDFS3_PRINT_HEX8
-        ldaa    #SDFS3_LOAD_BASE&$00FF
-        jsr     SDFS3_PRINT_HEX8
-        ldx     #SDFS3_TXT_END
-        jsr     SDFS3_PRINT
-        ldaa    #(SDFS3_END-1)/$0100
-        jsr     SDFS3_PRINT_HEX8
-        ldaa    #(SDFS3_END-1)&$00FF
-        jsr     SDFS3_PRINT_HEX8
-        ldaa    #CHR_CR
-        jsr     SDFS3_PUTC
-        clc
-        rts
-
-SDFS3_IS_DIR:
-        ldx     SDFS3_TOKEN_PTR
-        ldaa    0,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'D'
-        bne     SDFS3_IS_DIR_FAIL
-        ldaa    1,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'I'
-        bne     SDFS3_IS_DIR_FAIL
-        ldaa    2,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'R'
-        bne     SDFS3_IS_DIR_FAIL
-        clc
-        rts
-SDFS3_IS_DIR_FAIL:
-        sec
-        rts
-
-SDFS3_IS_RUN:
-        ldx     SDFS3_TOKEN_PTR
-        ldaa    0,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'R'
-        bne     SDFS3_IS_RUN_FAIL
-        ldaa    1,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'U'
-        bne     SDFS3_IS_RUN_FAIL
-        ldaa    2,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'N'
-        bne     SDFS3_IS_RUN_FAIL
-        clc
-        rts
-SDFS3_IS_RUN_FAIL:
-        sec
-        rts
-
-SDFS3_IS_TYPE:
-        ldx     SDFS3_TOKEN_PTR
-        ldaa    0,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'T'
-        bne     SDFS3_IS_TYPE_FAIL
-        ldaa    1,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'Y'
-        bne     SDFS3_IS_TYPE_FAIL
-        ldaa    2,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'P'
-        bne     SDFS3_IS_TYPE_FAIL
-        ldaa    3,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'E'
-        bne     SDFS3_IS_TYPE_FAIL
-        clc
-        rts
-SDFS3_IS_TYPE_FAIL:
-        sec
-        rts
-
-SDFS3_IS_LOAD:
-        ldx     SDFS3_TOKEN_PTR
-        ldaa    0,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'L'
-        bne     SDFS3_IS_LOAD_FAIL
-        ldaa    1,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'O'
-        bne     SDFS3_IS_LOAD_FAIL
-        ldaa    2,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'A'
-        bne     SDFS3_IS_LOAD_FAIL
-        ldaa    3,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'D'
-        bne     SDFS3_IS_LOAD_FAIL
-        clc
-        rts
-SDFS3_IS_LOAD_FAIL:
-        sec
-        rts
-
-SDFS3_IS_COM_TOKEN:
-        ldaa    SDFS3_TOKEN_LEN
-        cmpa    #5
-        blo     SDFS3_IS_COM_FAIL
-        suba    #4
-        tab
-        ldx     SDFS3_TOKEN_PTR
-SDFS3_COM_EXT_PTR_LOOP:
-        tstb
-        beq     SDFS3_COM_EXT_PTR_DONE
-        inx
-        decb
-        bra     SDFS3_COM_EXT_PTR_LOOP
-SDFS3_COM_EXT_PTR_DONE:
-        ldaa    0,x
-        cmpa    #'.'
-        bne     SDFS3_IS_COM_FAIL
-        ldaa    1,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'C'
-        bne     SDFS3_IS_COM_FAIL
-        ldaa    2,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'O'
-        bne     SDFS3_IS_COM_FAIL
-        ldaa    3,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'M'
-        bne     SDFS3_IS_COM_FAIL
-        clc
-        rts
-SDFS3_IS_COM_FAIL:
-        sec
-        rts
-
 SDFS3_TO_UPPER:
         cmpa    #'a'
         blo     SDFS3_TO_UPPER_DONE
@@ -317,238 +108,6 @@ SDFS3_TO_UPPER:
         bhi     SDFS3_TO_UPPER_DONE
         suba    #$20
 SDFS3_TO_UPPER_DONE:
-        rts
-
-SDFS3_CMD_DIR:
-        ldx     SDFS3_PARSE_PTR
-        stx     PATH_PTR
-        ldaa    SDFS3_PARSE_LEN
-        staa    PATH_LEN
-        jsr     FAT32_MOUNT
-        bcs     SDFS3_CMD_DIR_FAIL
-        jsr     SDFS3_DIR_PATH
-        bcs     SDFS3_CMD_DIR_PATH_FAIL
-        clr     SDFS3_LAST_ERROR
-        clc
-        rts
-SDFS3_CMD_DIR_PATH_FAIL:
-        ldaa    FAT_ERROR
-        beq     SDFS3_CMD_DIR_NOT_FOUND
-SDFS3_CMD_DIR_FAIL:
-        jmp     SDFS3_FAT_FAIL
-SDFS3_CMD_DIR_NOT_FOUND:
-        jmp     SDFS3_NOT_FOUND
-
-SDFS3_CMD_TYPE:
-        ldx     SDFS3_PARSE_PTR
-        stx     PATH_PTR
-        ldaa    SDFS3_PARSE_LEN
-        staa    PATH_LEN
-        jsr     FAT32_MOUNT
-        bcs     SDFS3_CMD_TYPE_FAT_FAIL
-        jsr     SDFS3_RESOLVE_FILE_SAVED
-        bcs     SDFS3_CMD_TYPE_NOT_FOUND
-        jsr     FAT32_STREAM_OPEN
-        bcs     SDFS3_CMD_TYPE_FAT_FAIL
-SDFS3_TYPE_LOOP:
-        jsr     FAT32_STREAM_GETC
-        bcc     SDFS3_TYPE_PUTC
-        jsr     FAT_BYTES_REMAIN
-        bcs     SDFS3_CMD_TYPE_FAT_FAIL
-        clr     SDFS3_LAST_ERROR
-        clc
-        rts
-SDFS3_TYPE_PUTC:
-        jsr     SDFS3_PUTC
-        bra     SDFS3_TYPE_LOOP
-SDFS3_CMD_TYPE_NOT_FOUND:
-        jmp     SDFS3_NOT_FOUND
-SDFS3_CMD_TYPE_FAT_FAIL:
-        jmp     SDFS3_FAT_FAIL
-
-SDFS3_CMD_LOAD:
-        ldx     SDFS3_PARSE_PTR
-        ldab    SDFS3_PARSE_LEN
-        jsr     SDFS3_LOAD_FILE
-        bcs     SDFS3_CMD_LOAD_FAIL
-        ldx     #SDFS3_TXT_OK
-        jsr     SDFS3_PRINT
-        clr     SDFS3_LAST_ERROR
-        clc
-        rts
-SDFS3_CMD_LOAD_FAIL:
-        ldaa    #SDFS3_ERR_LOAD
-        jmp     SDFS3_FAIL_A
-
-SDFS3_LOAD_FILE:
-        clr     LOADER_MODE
-        clr     LOADER_STAGE
-        clr     SDFS_RUN_ENTRY_SET
-        stx     PATH_PTR
-        stab    PATH_LEN
-        jsr     FAT32_MOUNT
-        bcs     SDFS3_LOAD_FILE_FAIL
-        jsr     SDFS3_RESOLVE_FILE_SAVED
-        bcs     SDFS3_LOAD_FILE_FAIL
-        jsr     FAT32_STREAM_OPEN
-        bcs     SDFS3_LOAD_FILE_FAIL
-SDFS3_LOAD_LOOP:
-        jsr     SDFS3_READ_LOADER_RECORD
-        bcs     SDFS3_LOAD_FILE_FAIL
-        cmpa    #1
-        beq     SDFS3_LOAD_FILE_DONE
-        bra     SDFS3_LOAD_LOOP
-SDFS3_LOAD_FILE_DONE:
-        clc
-        rts
-SDFS3_LOAD_FILE_FAIL:
-        sec
-        rts
-
-SDFS3_CMD_RUN:
-        ldx     SDFS3_PARSE_PTR
-        ldab    SDFS3_PARSE_LEN
-        jsr     SDFS3_PARSE_HEX16
-        bcs     SDFS3_CMD_RUN_FILE
-        lds     #STACK_TOP
-        ldx     HEX_VALUE_HI
-        jmp     0,x
-SDFS3_CMD_RUN_FILE:
-        ldx     SDFS3_PARSE_PTR
-        ldab    SDFS3_PARSE_LEN
-        jsr     SDFS3_LOAD_FILE
-        bcs     SDFS3_CMD_RUN_FAIL
-        ldaa    LOADER_MODE
-        cmpa    #LOAD_MODE_SREC
-        bne     SDFS3_CMD_RUN_FAIL
-        ldaa    SDFS_RUN_ENTRY_SET
-        beq     SDFS3_CMD_RUN_FAIL
-        lds     #STACK_TOP
-        ldx     SDFS_RUN_ENTRY
-        jmp     0,x
-SDFS3_CMD_RUN_FAIL:
-        ldaa    #SDFS3_ERR_RUN
-        jmp     SDFS3_FAIL_A
-
-SDFS3_CMD_COM:
-        ldx     SDFS3_TOKEN_PTR
-        ldab    SDFS3_TOKEN_LEN
-        addb    SDFS3_PARSE_LEN
-        jsr     SDFS3_PARSE_COM_PATH_COMMAND
-        bcs     SDFS3_CMD_COM_FAIL
-        jsr     FAT32_MOUNT
-        bcs     SDFS3_CMD_COM_FAIL
-        jsr     SDFS3_RESOLVE_FILE_SAVED
-        bcs     SDFS3_CMD_COM_FAIL
-        jsr     SDFS3_PARSE_COM_CHECK_EXT
-        bcs     SDFS3_CMD_COM_FAIL
-        jsr     SDFS3_COM_CHECK_SIZE
-        bcs     SDFS3_CMD_COM_FAIL
-        jsr     FAT32_STREAM_OPEN
-        bcs     SDFS3_CMD_COM_FAIL
-        jsr     SDFS3_COM_LOAD_RAW
-        bcs     SDFS3_CMD_COM_FAIL
-        jsr     SDFS3_COM_RESTORE_ARGS
-        ldx     ARG2_PTR
-        ldab    ARG2_LEN
-        clra
-        jsr     SDFS3_COM_LOAD_BASE
-        clr     SDFS3_LAST_ERROR
-        clc
-        rts
-SDFS3_CMD_COM_FAIL:
-        ldaa    #SDFS3_ERR_COM
-        jmp     SDFS3_FAIL_A
-
-SDFS3_COM_CHECK_SIZE:
-        ldaa    FAT_FILE_SIZE0
-        oraa    FAT_FILE_SIZE1
-        bne     SDFS3_COM_CHECK_FAIL
-        ldaa    FAT_FILE_SIZE2
-        oraa    FAT_FILE_SIZE3
-        beq     SDFS3_COM_CHECK_FAIL
-        ldaa    FAT_FILE_SIZE2
-        cmpa    #SDFS3_COM_MAX_HI
-        bhi     SDFS3_COM_CHECK_FAIL
-        blo     SDFS3_COM_CHECK_OK
-        ldaa    FAT_FILE_SIZE3
-        cmpa    #SDFS3_COM_MAX_LO
-        bhi     SDFS3_COM_CHECK_FAIL
-SDFS3_COM_CHECK_OK:
-        clc
-        rts
-SDFS3_COM_CHECK_FAIL:
-        sec
-        rts
-
-SDFS3_COM_LOAD_RAW:
-        ldx     #SDFS3_COM_LOAD_BASE
-        stx     FAT_READ_PTR
-SDFS3_COM_LOAD_LOOP:
-        jsr     FAT_BYTES_REMAIN
-        bcc     SDFS3_COM_LOAD_DONE
-        jsr     FAT32_STREAM_GETC
-        bcs     SDFS3_COM_LOAD_FAIL
-        ldx     FAT_READ_PTR
-        staa    0,x
-        inx
-        stx     FAT_READ_PTR
-        bra     SDFS3_COM_LOAD_LOOP
-SDFS3_COM_LOAD_DONE:
-        clc
-        rts
-SDFS3_COM_LOAD_FAIL:
-        sec
-        rts
-
-SDFS3_COM_RESTORE_ARGS:
-        ldx     PATH_ARG_PTR
-        stx     ARG2_PTR
-        ldaa    PATH_ARG_LEN
-        staa    ARG2_LEN
-        rts
-
-SDFS3_DIR_PATH:
-        jsr     SDFS3_RESOLVE_DIR_SAVED
-        bcs     SDFS3_DIR_FAIL
-SDFS3_DIR_CLUSTER_LOOP:
-        jsr     FAT_CLUSTER_TO_SD_LBA
-        bcs     SDFS3_DIR_FAIL
-        ldx     #SD_SECTOR_BUF
-        jsr     SD_READ_SECTOR
-        bcs     SDFS3_DIR_SD_FAIL
-        ldx     #SD_SECTOR_BUF
-        stx     FAT_ENTRY_PTR
-        ldaa    #16
-        staa    FAT_DIR_COUNT
-SDFS3_DIR_ENTRY_LOOP:
-        ldx     FAT_ENTRY_PTR
-        ldaa    0,x
-        beq     SDFS3_DIR_DONE
-        cmpa    #$E5
-        beq     SDFS3_DIR_NEXT_ENTRY
-        jsr     SDFS3_DIR_ENTRY_VISIBLE
-        bcs     SDFS3_DIR_NEXT_ENTRY
-        jsr     SDFS3_PRINT_DIR_ENTRY
-SDFS3_DIR_NEXT_ENTRY:
-        jsr     FAT_ADVANCE_ENTRY_PTR
-        dec     FAT_DIR_COUNT
-        bne     SDFS3_DIR_ENTRY_LOOP
-        jsr     FAT32_NEXT_CLUSTER
-        bcs     SDFS3_DIR_NEXT_DONE_OR_FAIL
-        jsr     FAT_COPY_NEXT_TO_CUR
-        bra     SDFS3_DIR_CLUSTER_LOOP
-SDFS3_DIR_NEXT_DONE_OR_FAIL:
-        ldaa    FAT_ERROR
-        bne     SDFS3_DIR_FAIL
-SDFS3_DIR_DONE:
-        clc
-        rts
-SDFS3_DIR_SD_FAIL:
-        ldaa    #FAT_ERR_SD
-        staa    FAT_ERROR
-SDFS3_DIR_FAIL:
-        sec
         rts
 
 SDFS3_RESOLVE_FILE_SAVED:
@@ -907,6 +466,515 @@ SDFS3_CLEAR_FIND_NAME_LOOP:
         inx
         decb
         bne     SDFS3_CLEAR_FIND_NAME_LOOP
+        rts
+
+SDFS3_PRINT_HEX8:
+        psha
+        lsra
+        lsra
+        lsra
+        lsra
+        bsr     SDFS3_PRINT_NIBBLE
+        pula
+        bsr     SDFS3_PRINT_NIBBLE
+        rts
+
+SDFS3_PRINT_NIBBLE:
+        anda    #$0F
+        adda    #'0'
+        cmpa    #'9'+1
+        blo     SDFS3_PRINT_NIBBLE_OUT
+        adda    #7
+SDFS3_PRINT_NIBBLE_OUT:
+        jmp     SDFS3_PUTC
+
+SDFS3_PRINT:
+        ldaa    0,x
+        beq     SDFS3_PRINT_DONE
+        jsr     SDFS3_PUTC
+        inx
+        bra     SDFS3_PRINT
+SDFS3_PRINT_DONE:
+        rts
+
+SDFS3_PUTC:
+        psha
+        jsr     MIKBUG_OUTCH
+        pula
+        cmpa    #CHR_CR
+        bne     SDFS3_PUTC_DONE
+        ldaa    #CHR_LF
+        jsr     MIKBUG_OUTCH
+SDFS3_PUTC_DONE:
+        rts
+
+SDFS3_NOT_FOUND:
+        ldaa    #SDFS3_ERR_NOT_FOUND
+        bra     SDFS3_FAIL_A
+SDFS3_FAT_FAIL:
+        ldaa    #SDFS3_ERR_IO
+SDFS3_FAIL_A:
+        staa    SDFS3_LAST_ERROR
+        sec
+        rts
+
+FAT32_INCLUDE_FIND_API equ 1
+FAT32_INCLUDE_FILE_API equ 1
+
+        include "sdcard.asm"
+        include "fat32.asm"
+
+SDFS3_CCP_START:
+
+SDFS3_CMD_DISPATCH:
+        stx     SDFS3_PARSE_PTR
+        stab    SDFS3_PARSE_LEN
+SDFS3_CMD_SKIP_SPACE:
+        tst     SDFS3_PARSE_LEN
+        beq     SDFS3_BAD_COMMAND
+        ldx     SDFS3_PARSE_PTR
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        bne     SDFS3_CMD_TOKEN_START
+        inx
+        stx     SDFS3_PARSE_PTR
+        dec     SDFS3_PARSE_LEN
+        bra     SDFS3_CMD_SKIP_SPACE
+SDFS3_CMD_TOKEN_START:
+        stx     SDFS3_TOKEN_PTR
+        clr     SDFS3_TOKEN_LEN
+SDFS3_CMD_TOKEN_SCAN:
+        tst     SDFS3_PARSE_LEN
+        beq     SDFS3_CMD_TOKEN_DONE
+        ldx     SDFS3_PARSE_PTR
+        ldaa    0,x
+        cmpa    #CHR_SPACE
+        beq     SDFS3_CMD_TOKEN_DONE
+        inc     SDFS3_TOKEN_LEN
+        inx
+        stx     SDFS3_PARSE_PTR
+        dec     SDFS3_PARSE_LEN
+        bra     SDFS3_CMD_TOKEN_SCAN
+SDFS3_CMD_TOKEN_DONE:
+        ldaa    SDFS3_TOKEN_LEN
+        beq     SDFS3_BAD_COMMAND
+        cmpa    #3
+        bne     SDFS3_CMD_CHECK_4
+        jsr     SDFS3_IS_DIR
+        bcc     SDFS3_CMD_DIR_STUB
+        jsr     SDFS3_IS_RUN
+        bcc     SDFS3_CMD_RUN_STUB
+        bra     SDFS3_CMD_CHECK_COM
+SDFS3_CMD_CHECK_4:
+        cmpa    #4
+        bne     SDFS3_CMD_CHECK_COM
+        jsr     SDFS3_IS_TYPE
+        bcc     SDFS3_CMD_TYPE_STUB
+        jsr     SDFS3_IS_LOAD
+        bcc     SDFS3_CMD_LOAD_STUB
+SDFS3_CMD_CHECK_COM:
+        jsr     SDFS3_IS_COM_TOKEN
+        bcc     SDFS3_CMD_COM_STUB
+        bra     SDFS3_BAD_COMMAND
+
+SDFS3_CMD_DIR_STUB:
+        jmp     SDFS3_CMD_DIR
+SDFS3_CMD_TYPE_STUB:
+        jmp     SDFS3_CMD_TYPE
+SDFS3_CMD_LOAD_STUB:
+        jmp     SDFS3_CMD_LOAD
+SDFS3_CMD_RUN_STUB:
+        jmp     SDFS3_CMD_RUN
+SDFS3_CMD_COM_STUB:
+        jmp     SDFS3_CMD_COM
+SDFS3_BAD_COMMAND:
+        ldaa    #SDFS3_ERR_BAD_CMD
+        staa    SDFS3_LAST_ERROR
+        sec
+        rts
+
+SDFS3_INIT:
+        clr     SDFS3_LAST_ERROR
+        ldx     #SDFS3_TXT_WELCOME
+        jsr     SDFS3_PRINT
+        ldaa    #SDFS3_API_MAJOR
+        jsr     SDFS3_PRINT_HEX8
+        ldaa    #'.'
+        jsr     SDFS3_PUTC
+        ldaa    #SDFS3_API_MINOR
+        jsr     SDFS3_PRINT_HEX8
+        ldaa    #CHR_CR
+        jsr     SDFS3_PUTC
+        ldx     #SDFS3_TXT_BASE
+        jsr     SDFS3_PRINT
+        ldaa    #SDFS3_LOAD_BASE/$0100
+        jsr     SDFS3_PRINT_HEX8
+        ldaa    #SDFS3_LOAD_BASE&$00FF
+        jsr     SDFS3_PRINT_HEX8
+        ldx     #SDFS3_TXT_END
+        jsr     SDFS3_PRINT
+        ldaa    #(SDFS3_END-1)/$0100
+        jsr     SDFS3_PRINT_HEX8
+        ldaa    #(SDFS3_END-1)&$00FF
+        jsr     SDFS3_PRINT_HEX8
+        ldaa    #CHR_CR
+        jsr     SDFS3_PUTC
+        clc
+        rts
+
+SDFS3_IS_DIR:
+        ldx     SDFS3_TOKEN_PTR
+        ldaa    0,x
+        jsr     SDFS3_TO_UPPER
+        cmpa    #'D'
+        bne     SDFS3_IS_DIR_FAIL
+        ldaa    1,x
+        jsr     SDFS3_TO_UPPER
+        cmpa    #'I'
+        bne     SDFS3_IS_DIR_FAIL
+        ldaa    2,x
+        jsr     SDFS3_TO_UPPER
+        cmpa    #'R'
+        bne     SDFS3_IS_DIR_FAIL
+        clc
+        rts
+SDFS3_IS_DIR_FAIL:
+        sec
+        rts
+
+SDFS3_IS_RUN:
+        ldx     SDFS3_TOKEN_PTR
+        ldaa    0,x
+        jsr     SDFS3_TO_UPPER
+        cmpa    #'R'
+        bne     SDFS3_IS_RUN_FAIL
+        ldaa    1,x
+        jsr     SDFS3_TO_UPPER
+        cmpa    #'U'
+        bne     SDFS3_IS_RUN_FAIL
+        ldaa    2,x
+        jsr     SDFS3_TO_UPPER
+        cmpa    #'N'
+        bne     SDFS3_IS_RUN_FAIL
+        clc
+        rts
+SDFS3_IS_RUN_FAIL:
+        sec
+        rts
+
+SDFS3_IS_TYPE:
+        ldx     SDFS3_TOKEN_PTR
+        ldaa    0,x
+        jsr     SDFS3_TO_UPPER
+        cmpa    #'T'
+        bne     SDFS3_IS_TYPE_FAIL
+        ldaa    1,x
+        jsr     SDFS3_TO_UPPER
+        cmpa    #'Y'
+        bne     SDFS3_IS_TYPE_FAIL
+        ldaa    2,x
+        jsr     SDFS3_TO_UPPER
+        cmpa    #'P'
+        bne     SDFS3_IS_TYPE_FAIL
+        ldaa    3,x
+        jsr     SDFS3_TO_UPPER
+        cmpa    #'E'
+        bne     SDFS3_IS_TYPE_FAIL
+        clc
+        rts
+SDFS3_IS_TYPE_FAIL:
+        sec
+        rts
+
+SDFS3_IS_LOAD:
+        ldx     SDFS3_TOKEN_PTR
+        ldaa    0,x
+        jsr     SDFS3_TO_UPPER
+        cmpa    #'L'
+        bne     SDFS3_IS_LOAD_FAIL
+        ldaa    1,x
+        jsr     SDFS3_TO_UPPER
+        cmpa    #'O'
+        bne     SDFS3_IS_LOAD_FAIL
+        ldaa    2,x
+        jsr     SDFS3_TO_UPPER
+        cmpa    #'A'
+        bne     SDFS3_IS_LOAD_FAIL
+        ldaa    3,x
+        jsr     SDFS3_TO_UPPER
+        cmpa    #'D'
+        bne     SDFS3_IS_LOAD_FAIL
+        clc
+        rts
+SDFS3_IS_LOAD_FAIL:
+        sec
+        rts
+
+SDFS3_IS_COM_TOKEN:
+        ldaa    SDFS3_TOKEN_LEN
+        cmpa    #5
+        blo     SDFS3_IS_COM_FAIL
+        suba    #4
+        tab
+        ldx     SDFS3_TOKEN_PTR
+SDFS3_COM_EXT_PTR_LOOP:
+        tstb
+        beq     SDFS3_COM_EXT_PTR_DONE
+        inx
+        decb
+        bra     SDFS3_COM_EXT_PTR_LOOP
+SDFS3_COM_EXT_PTR_DONE:
+        ldaa    0,x
+        cmpa    #'.'
+        bne     SDFS3_IS_COM_FAIL
+        ldaa    1,x
+        jsr     SDFS3_TO_UPPER
+        cmpa    #'C'
+        bne     SDFS3_IS_COM_FAIL
+        ldaa    2,x
+        jsr     SDFS3_TO_UPPER
+        cmpa    #'O'
+        bne     SDFS3_IS_COM_FAIL
+        ldaa    3,x
+        jsr     SDFS3_TO_UPPER
+        cmpa    #'M'
+        bne     SDFS3_IS_COM_FAIL
+        clc
+        rts
+SDFS3_IS_COM_FAIL:
+        sec
+        rts
+
+SDFS3_CMD_DIR:
+        ldx     SDFS3_PARSE_PTR
+        stx     PATH_PTR
+        ldaa    SDFS3_PARSE_LEN
+        staa    PATH_LEN
+        jsr     FAT32_MOUNT
+        bcs     SDFS3_CMD_DIR_FAIL
+        jsr     SDFS3_DIR_PATH
+        bcs     SDFS3_CMD_DIR_PATH_FAIL
+        clr     SDFS3_LAST_ERROR
+        clc
+        rts
+SDFS3_CMD_DIR_PATH_FAIL:
+        ldaa    FAT_ERROR
+        beq     SDFS3_CMD_DIR_NOT_FOUND
+SDFS3_CMD_DIR_FAIL:
+        jmp     SDFS3_FAT_FAIL
+SDFS3_CMD_DIR_NOT_FOUND:
+        jmp     SDFS3_NOT_FOUND
+
+SDFS3_CMD_TYPE:
+        ldx     SDFS3_PARSE_PTR
+        stx     PATH_PTR
+        ldaa    SDFS3_PARSE_LEN
+        staa    PATH_LEN
+        jsr     FAT32_MOUNT
+        bcs     SDFS3_CMD_TYPE_FAT_FAIL
+        jsr     SDFS3_RESOLVE_FILE_SAVED
+        bcs     SDFS3_CMD_TYPE_NOT_FOUND
+        jsr     FAT32_STREAM_OPEN
+        bcs     SDFS3_CMD_TYPE_FAT_FAIL
+SDFS3_TYPE_LOOP:
+        jsr     FAT32_STREAM_GETC
+        bcc     SDFS3_TYPE_PUTC
+        jsr     FAT_BYTES_REMAIN
+        bcs     SDFS3_CMD_TYPE_FAT_FAIL
+        clr     SDFS3_LAST_ERROR
+        clc
+        rts
+SDFS3_TYPE_PUTC:
+        jsr     SDFS3_PUTC
+        bra     SDFS3_TYPE_LOOP
+SDFS3_CMD_TYPE_NOT_FOUND:
+        jmp     SDFS3_NOT_FOUND
+SDFS3_CMD_TYPE_FAT_FAIL:
+        jmp     SDFS3_FAT_FAIL
+
+SDFS3_CMD_LOAD:
+        ldx     SDFS3_PARSE_PTR
+        ldab    SDFS3_PARSE_LEN
+        jsr     SDFS3_LOAD_FILE
+        bcs     SDFS3_CMD_LOAD_FAIL
+        ldx     #SDFS3_TXT_OK
+        jsr     SDFS3_PRINT
+        clr     SDFS3_LAST_ERROR
+        clc
+        rts
+SDFS3_CMD_LOAD_FAIL:
+        ldaa    #SDFS3_ERR_LOAD
+        jmp     SDFS3_FAIL_A
+
+SDFS3_LOAD_FILE:
+        clr     LOADER_MODE
+        clr     LOADER_STAGE
+        clr     SDFS_RUN_ENTRY_SET
+        stx     PATH_PTR
+        stab    PATH_LEN
+        jsr     FAT32_MOUNT
+        bcs     SDFS3_LOAD_FILE_FAIL
+        jsr     SDFS3_RESOLVE_FILE_SAVED
+        bcs     SDFS3_LOAD_FILE_FAIL
+        jsr     FAT32_STREAM_OPEN
+        bcs     SDFS3_LOAD_FILE_FAIL
+SDFS3_LOAD_LOOP:
+        jsr     SDFS3_READ_LOADER_RECORD
+        bcs     SDFS3_LOAD_FILE_FAIL
+        cmpa    #1
+        beq     SDFS3_LOAD_FILE_DONE
+        bra     SDFS3_LOAD_LOOP
+SDFS3_LOAD_FILE_DONE:
+        clc
+        rts
+SDFS3_LOAD_FILE_FAIL:
+        sec
+        rts
+
+SDFS3_CMD_RUN:
+        ldx     SDFS3_PARSE_PTR
+        ldab    SDFS3_PARSE_LEN
+        jsr     SDFS3_PARSE_HEX16
+        bcs     SDFS3_CMD_RUN_FILE
+        lds     #STACK_TOP
+        ldx     HEX_VALUE_HI
+        jmp     0,x
+SDFS3_CMD_RUN_FILE:
+        ldx     SDFS3_PARSE_PTR
+        ldab    SDFS3_PARSE_LEN
+        jsr     SDFS3_LOAD_FILE
+        bcs     SDFS3_CMD_RUN_FAIL
+        ldaa    LOADER_MODE
+        cmpa    #LOAD_MODE_SREC
+        bne     SDFS3_CMD_RUN_FAIL
+        ldaa    SDFS_RUN_ENTRY_SET
+        beq     SDFS3_CMD_RUN_FAIL
+        lds     #STACK_TOP
+        ldx     SDFS_RUN_ENTRY
+        jmp     0,x
+SDFS3_CMD_RUN_FAIL:
+        ldaa    #SDFS3_ERR_RUN
+        jmp     SDFS3_FAIL_A
+
+SDFS3_CMD_COM:
+        ldx     SDFS3_TOKEN_PTR
+        ldab    SDFS3_TOKEN_LEN
+        addb    SDFS3_PARSE_LEN
+        jsr     SDFS3_PARSE_COM_PATH_COMMAND
+        bcs     SDFS3_CMD_COM_FAIL
+        jsr     FAT32_MOUNT
+        bcs     SDFS3_CMD_COM_FAIL
+        jsr     SDFS3_RESOLVE_FILE_SAVED
+        bcs     SDFS3_CMD_COM_FAIL
+        jsr     SDFS3_PARSE_COM_CHECK_EXT
+        bcs     SDFS3_CMD_COM_FAIL
+        jsr     SDFS3_COM_CHECK_SIZE
+        bcs     SDFS3_CMD_COM_FAIL
+        jsr     FAT32_STREAM_OPEN
+        bcs     SDFS3_CMD_COM_FAIL
+        jsr     SDFS3_COM_LOAD_RAW
+        bcs     SDFS3_CMD_COM_FAIL
+        jsr     SDFS3_COM_RESTORE_ARGS
+        ldx     ARG2_PTR
+        ldab    ARG2_LEN
+        clra
+        jsr     SDFS3_COM_LOAD_BASE
+        clr     SDFS3_LAST_ERROR
+        clc
+        rts
+SDFS3_CMD_COM_FAIL:
+        ldaa    #SDFS3_ERR_COM
+        jmp     SDFS3_FAIL_A
+
+SDFS3_COM_CHECK_SIZE:
+        ldaa    FAT_FILE_SIZE0
+        oraa    FAT_FILE_SIZE1
+        bne     SDFS3_COM_CHECK_FAIL
+        ldaa    FAT_FILE_SIZE2
+        oraa    FAT_FILE_SIZE3
+        beq     SDFS3_COM_CHECK_FAIL
+        ldaa    FAT_FILE_SIZE2
+        cmpa    #SDFS3_COM_MAX_HI
+        bhi     SDFS3_COM_CHECK_FAIL
+        blo     SDFS3_COM_CHECK_OK
+        ldaa    FAT_FILE_SIZE3
+        cmpa    #SDFS3_COM_MAX_LO
+        bhi     SDFS3_COM_CHECK_FAIL
+SDFS3_COM_CHECK_OK:
+        clc
+        rts
+SDFS3_COM_CHECK_FAIL:
+        sec
+        rts
+
+SDFS3_COM_LOAD_RAW:
+        ldx     #SDFS3_COM_LOAD_BASE
+        stx     FAT_READ_PTR
+SDFS3_COM_LOAD_LOOP:
+        jsr     FAT_BYTES_REMAIN
+        bcc     SDFS3_COM_LOAD_DONE
+        jsr     FAT32_STREAM_GETC
+        bcs     SDFS3_COM_LOAD_FAIL
+        ldx     FAT_READ_PTR
+        staa    0,x
+        inx
+        stx     FAT_READ_PTR
+        bra     SDFS3_COM_LOAD_LOOP
+SDFS3_COM_LOAD_DONE:
+        clc
+        rts
+SDFS3_COM_LOAD_FAIL:
+        sec
+        rts
+
+SDFS3_COM_RESTORE_ARGS:
+        ldx     PATH_ARG_PTR
+        stx     ARG2_PTR
+        ldaa    PATH_ARG_LEN
+        staa    ARG2_LEN
+        rts
+
+SDFS3_DIR_PATH:
+        jsr     SDFS3_RESOLVE_DIR_SAVED
+        bcs     SDFS3_DIR_FAIL
+SDFS3_DIR_CLUSTER_LOOP:
+        jsr     FAT_CLUSTER_TO_SD_LBA
+        bcs     SDFS3_DIR_FAIL
+        ldx     #SD_SECTOR_BUF
+        jsr     SD_READ_SECTOR
+        bcs     SDFS3_DIR_SD_FAIL
+        ldx     #SD_SECTOR_BUF
+        stx     FAT_ENTRY_PTR
+        ldaa    #16
+        staa    FAT_DIR_COUNT
+SDFS3_DIR_ENTRY_LOOP:
+        ldx     FAT_ENTRY_PTR
+        ldaa    0,x
+        beq     SDFS3_DIR_DONE
+        cmpa    #$E5
+        beq     SDFS3_DIR_NEXT_ENTRY
+        jsr     SDFS3_DIR_ENTRY_VISIBLE
+        bcs     SDFS3_DIR_NEXT_ENTRY
+        jsr     SDFS3_PRINT_DIR_ENTRY
+SDFS3_DIR_NEXT_ENTRY:
+        jsr     FAT_ADVANCE_ENTRY_PTR
+        dec     FAT_DIR_COUNT
+        bne     SDFS3_DIR_ENTRY_LOOP
+        jsr     FAT32_NEXT_CLUSTER
+        bcs     SDFS3_DIR_NEXT_DONE_OR_FAIL
+        jsr     FAT_COPY_NEXT_TO_CUR
+        bra     SDFS3_DIR_CLUSTER_LOOP
+SDFS3_DIR_NEXT_DONE_OR_FAIL:
+        ldaa    FAT_ERROR
+        bne     SDFS3_DIR_FAIL
+SDFS3_DIR_DONE:
+        clc
+        rts
+SDFS3_DIR_SD_FAIL:
+        ldaa    #FAT_ERR_SD
+        staa    FAT_ERROR
+SDFS3_DIR_FAIL:
+        sec
         rts
 
 SDFS3_PARSE_COM_PATH_COMMAND:
@@ -1537,66 +1605,6 @@ SDFS3_DIR_ENTRY_SKIP:
         sec
         rts
 
-SDFS3_PRINT_HEX8:
-        psha
-        lsra
-        lsra
-        lsra
-        lsra
-        bsr     SDFS3_PRINT_NIBBLE
-        pula
-        bsr     SDFS3_PRINT_NIBBLE
-        rts
-
-SDFS3_PRINT_NIBBLE:
-        anda    #$0F
-        adda    #'0'
-        cmpa    #'9'+1
-        blo     SDFS3_PRINT_NIBBLE_OUT
-        adda    #7
-SDFS3_PRINT_NIBBLE_OUT:
-        jmp     SDFS3_PUTC
-
-SDFS3_PRINT:
-        ldaa    0,x
-        beq     SDFS3_PRINT_DONE
-        jsr     SDFS3_PUTC
-        inx
-        bra     SDFS3_PRINT
-SDFS3_PRINT_DONE:
-        rts
-
-SDFS3_PUTC:
-        psha
-        jsr     MIKBUG_OUTCH
-        pula
-        cmpa    #CHR_CR
-        bne     SDFS3_PUTC_DONE
-        ldaa    #CHR_LF
-        jsr     MIKBUG_OUTCH
-SDFS3_PUTC_DONE:
-        rts
-
-SDFS3_NOT_FOUND:
-        ldaa    #SDFS3_ERR_NOT_FOUND
-        bra     SDFS3_FAIL_A
-SDFS3_FAT_FAIL:
-        ldaa    #SDFS3_ERR_IO
-SDFS3_FAIL_A:
-        staa    SDFS3_LAST_ERROR
-        sec
-        rts
-
-SDFS3_LAST_ERROR:
-        fcb     SDFS3_ERR_NONE
-SDFS3_PARSE_PTR:
-        fdb     0
-SDFS3_PARSE_LEN:
-        fcb     0
-SDFS3_TOKEN_PTR:
-        fdb     0
-SDFS3_TOKEN_LEN:
-        fcb     0
 SDFS3_TXT_OK:
         fcc     "OK"
         fcb     CHR_CR,0
@@ -1610,11 +1618,6 @@ SDFS3_TXT_END:
         fcc     " END="
         fcb     0
 
-FAT32_INCLUDE_FIND_API equ 1
-FAT32_INCLUDE_FILE_API equ 1
-
-        include "sdcard.asm"
-        include "fat32.asm"
 
 SDFS3_END:
         if SDFS3_END-1 > SDFS3_LOAD_LIMIT
