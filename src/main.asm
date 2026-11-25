@@ -1919,37 +1919,74 @@ SDFS3SYS_SLOT_MAX  equ 32                  ; slot あたりのセクタ数
  endif
 BOOT3_FIRST        equ FAT_VOLUME_LBA2     ; cold だけ: 先に試した slot の LBA 下位
 BOOT3_GEN_A        equ FAT_FAT_LBA0        ; cold だけ: slot A の世代・marker の和の控え(2B)
+BOOT3_ERR          equ FAT_VOLUME_LBA3     ; cold だけ: 失敗の理由。上位 4bit = slot A、下位 = slot B
+
+; BOOT3(cold)と WBOOT(warm)の失敗コード(#307)。「?」のあとに cold は slot A と B の理由を
+; 1 桁ずつ(例 ?53)、warm は 1 桁(例 ?7)で出す。利用者向けの表は docs/usage/monitor_commands.md。
+BT_ERR_SD_INIT     equ 1                   ; SD の初期化に失敗
+BT_ERR_READ        equ 2                   ; セクタの読み出しに失敗
+BT_ERR_HEADER      equ 3                   ; ヘッダ不正(署名・版・大きさ・置き場所・入口表と核の位置)
+BT_ERR_API         equ 4                   ; API の不一致(ヘッダ +$09 の major、核の SDFS3API)
+BT_ERR_SUM         equ 5                   ; 和の不一致
+BT_ERR_BLOCK       equ 6                   ; BIOS 区画が無効(warm だけ)
+BT_ERR_SWAP        equ 7                   ; カードの差し替え(warm だけ)
 
 ; BOOT3(cold)。marker と世代で先に試す slot を決め、#314 の 1 回読みで試す。だめなら
 ; 他方を試し、両方だめなら区画を無効にして「?」でモニタへ戻る(#300 の選択規則)。
 ; 「試す」は全体の和まで照合するので、有効と分かった slot をそのまま使う。
 CMD_BOOT3:
         clr     BB_MAGIC
+        ldaa    #BT_ERR_SD_INIT*$11    ; SD_INIT の失敗は両方の slot の理由
+        staa    BOOT3_ERR
         jsr     SD_INIT
         bcs     CMD_BOOT3_ERROR
+        clr     BOOT3_ERR
         jsr     BOOT3_PICK
         staa    BOOT3_FIRST
         jsr     BOOT3_TRY
+        jsr     BOOT3_NOTE
         jsr     SD_INIT                ; 読み出しの失敗のあとでもカードを立て直してから他方を読む
-        bcs     CMD_BOOT3_ERROR
-        ldaa    BOOT3_FIRST
+        ldaa    BOOT3_FIRST            ; ldaa と eora は C を変えない
         eora    #$20                   ; A(64) と B(96) を入れ替える
+        bcc     CMD_BOOT3_OTHER
+        staa    BB_SLOT_LBA+1          ; 立て直せなければ、他方の slot の理由は SD の初期化
+        ldaa    #BT_ERR_SD_INIT
+        jsr     BOOT3_NOTE
+        bra     CMD_BOOT3_ERROR
+CMD_BOOT3_OTHER:
         jsr     BOOT3_TRY
+        jsr     BOOT3_NOTE
 CMD_BOOT3_ERROR:
         clr     BB_MAGIC
-        jmp     MAIN_LOOP_ERROR
+        ldaa    BOOT3_ERR
+        jmp     BT_SHOW_ERR2
+
+; A = BOOT3_TRY の失敗コード。試した slot(BB_SLOT_LBA)が A なら BOOT3_ERR の上位 4bit に、
+; B なら下位 4bit に入れる(表示は試した順ではなく A → B)。
+BOOT3_NOTE:
+        ldab    BB_SLOT_LBA+1
+        cmpb    #SDFS3SYS_FIXED_LBA
+        bne     BOOT3_NOTE_B
+        asla
+        asla
+        asla
+        asla
+BOOT3_NOTE_B:
+        oraa    BOOT3_ERR
+        staa    BOOT3_ERR
+        rts
 
 ; A = slot の LBA 下位。SDFS3SYS を 1 回読みで検証してヘッダの load へ置き、BIOS 区画を書いて
 ; CCP の +0 へ入る(戻らない)。ヘッダの 32B は SD のバッファで、ペイロードはコピーした RAM で
 ; 和を取り、足してヘッダ +$18 と照合する。ROM は resident のスロットを呼ばない。
-; 失敗したら C=1 で戻る(和が合わないときは RAM の resident の区画だけが新旧混ざるが、
+; 失敗したら C=1・A = 失敗コード(BT_ERR_*)で戻る(和が合わないときは RAM の resident の区画だけが新旧混ざるが、
 ; 区画を無効にしてあるので使われない)。BB_WORK を全部使う。
 BOOT3_TRY:
         clr     BB_MAGIC
         clr     BB_SLOT_LBA
         staa    BB_SLOT_LBA+1
         jsr     BB_READ_HEADER
-        bcs     BOOT3_TRY_RTS
+        bcs     BOOT3_TRY_FAIL_READ
         jsr     BOOT3_CHECK_HEADER
         bcs     BOOT3_TRY_RTS
         ldx     #SDFS3SYS_HEADER_SIZE
@@ -1959,7 +1996,7 @@ BOOT3_TRY:
         ldx     BB_IMG_BASE
         stx     BB_RR_DST
         jsr     BB_READ_RANGE
-        bcs     BOOT3_TRY_RTS
+        bcs     BOOT3_TRY_FAIL_READ
         jsr     BB_STORE
         bcs     BOOT3_TRY_RTS
         ldab    BB_SUM_CCP+1           ; ヘッダ + CCP + 核 = ヘッダ +$18
@@ -1976,7 +2013,11 @@ BOOT3_TRY:
         ldx     BB_CCP_VEC
         jmp     0,x
 BOOT3_TRY_FAIL_SUM:
-        jmp     BOOT3_FAIL_SUM
+        ldaa    #BT_ERR_SUM
+        sec
+        rts
+BOOT3_TRY_FAIL_READ:
+        ldaa    #BT_ERR_READ           ; ldaa は C を変えない(C=1 のまま)
 BOOT3_TRY_RTS:
         rts
 
@@ -2148,9 +2189,9 @@ BOOT3_CHECK_HEADER:
         ldaa    8,x
         cmpa    #1
         bne     BOOT3_HEADER_FAIL_SIG
-        ldaa    9,x
+        ldaa    9,x                    ; abi_major
         cmpa    #SDFS3_API_MAJOR
-        bne     BOOT3_HEADER_FAIL_SIG
+        bne     BOOT3_HEADER_FAIL_API
         ldaa    11,x
         cmpa    #1
         bne     BOOT3_HEADER_FAIL_SIG
@@ -2174,9 +2215,14 @@ BOOT3_CHECK_MIN:
         blo     BOOT3_HEADER_FAIL_SIZE
         bra     BOOT3_CHECK_RANGE
 BOOT3_HEADER_FAIL_SIG:
-        jmp     BOOT3_FAIL_SIG
 BOOT3_HEADER_FAIL_SIZE:
-        jmp     BOOT3_FAIL_SIZE
+        ldaa    #BT_ERR_HEADER
+        sec
+        rts
+BOOT3_HEADER_FAIL_API:
+        ldaa    #BT_ERR_API
+        sec
+        rts
 ; 大きさを確かめたあとで、load が置いてよい範囲に収まるかを見る(仕様 1-5)。
 ; SDFS3_RAM_FLOOR <= load、load + (size - ヘッダ) <= USER_RAM_END+1(桁あふれなし)。
 ; 通ったら load・CCP 入口表・核の先頭を区画に控える(コピーでヘッダが上書きされるため)。
@@ -2231,19 +2277,6 @@ BOOT3_RANGE_OK:
         staa    BOOT3_HEADER_SUM
         stab    BOOT3_HEADER_SUM+1
         clc
-        rts
-
-BOOT3_FAIL_SIG:
-        ldaa    #FAT_ERR_SIG
-        bra     BOOT3_FAIL_A
-BOOT3_FAIL_SIZE:
-        ldaa    #FAT_ERR_SIZE
-        bra     BOOT3_FAIL_A
-BOOT3_FAIL_SUM:
-        ldaa    #FAT_ERR_CHECKSUM
-BOOT3_FAIL_A:
-        staa    FAT_ERROR
-        sec
         rts
 
 ; slot の先頭セクタ(SDFS3SYS ヘッダ)を SD_SECTOR_BUF に読む。LBA = BB_SLOT_LBA。C=1 で失敗。
@@ -2388,7 +2421,8 @@ BB_CHECK_API_FAIL:
         sec
         rts
 
-; BIOS 区画を仕上げる(BOOT3 の成功時)。C=0 で成功、C=1 で失敗(区画は呼び手が無効にする)。
+; BIOS 区画を仕上げる(BOOT3 の成功時)。C=0 で成功、C=1・A = 失敗コードで失敗(区画は呼び手が
+; 無効にする)。
 ; 入る前に IMG_BASE・CCP_VEC・CORE_BASE・IMG_LAST・IMG_SUM・SLOT_LBA は書いてある。
 ; 和はいったん 0 で CHECK を付けて自己検査し、範囲が正しいと分かってから取る。
 BB_STORE:
@@ -2402,9 +2436,9 @@ BB_STORE:
         staa    BB_MAGIC+1
         jsr     BB_SET_CHECK
         jsr     BB_CHECK_VALID
-        bcs     BB_STORE_DONE
+        bcs     BB_STORE_BAD_HEADER    ; 入口表・核の位置がイメージの外
         jsr     BB_CHECK_API
-        bcs     BB_STORE_DONE
+        bcs     BB_STORE_BAD_API
         jsr     BB_RAM_SUM_CCP
         staa    BB_SUM_CCP
         stab    BB_SUM_CCP+1
@@ -2413,7 +2447,12 @@ BB_STORE:
         stab    BB_SUM_CORE+1
         jsr     BB_SET_CHECK
         clc
-BB_STORE_DONE:
+        rts
+BB_STORE_BAD_HEADER:
+        ldaa    #BT_ERR_HEADER         ; ldaa は C を変えない(C=1 のまま)
+        rts
+BB_STORE_BAD_API:
+        ldaa    #BT_ERR_API
         rts
 
 BB_SET_CHECK:
@@ -2532,8 +2571,8 @@ BB_INVALID:
 ; BIOS_WBOOT とモニタの DOS(DOS へ warm で入る門)。区画の自己検査に通ったら和を照合して
 ; STATE に記録し、壊れた区画(CCP だけ/核だけ/両方)だけを SD から静かに読み直して
 ; CCP の +3 へ入る(Welcome は出さない。決定 13)。
-; 自己検査に通らなければ区画に書かずに「?」でモニタへ。読み直しに失敗したら(SD が抜けた、
-; カードが替わった、読み直しても和が合わない)区画を無効にして「?」でモニタへ。
+; 自己検査に通らなければ区画に書かずに「?6」でモニタへ。読み直しに失敗したら(SD が抜けた、
+; カードが替わった、読み直しても和が合わない)区画を無効にして「?」とコードでモニタへ(#307)。
 BIOS_WBOOT_IMPL:
         lds     #STACK_TOP
         jsr     BB_CHECK_VALID
@@ -2545,29 +2584,50 @@ BIOS_WBOOT_IMPL:
         bcs     BIOS_WBOOT_FAIL
         jsr     BB_CHECK_SUMS
         jsr     BB_SET_STATE
-        bne     BIOS_WBOOT_FAIL
+        bne     BIOS_WBOOT_FAIL_SUM
 BIOS_WBOOT_ENTER:
         ldx     BB_CCP_VEC
         jmp     3,x
+BIOS_WBOOT_FAIL_SUM:
+        ldaa    #BT_ERR_SUM
 BIOS_WBOOT_FAIL:
         clr     BB_MAGIC
+        bra     BT_SHOW_ERR1
 BIOS_WBOOT_REJECT:
-        jmp     MAIN_LOOP_ERROR
+        ldaa    #BT_ERR_BLOCK
 
-; STATE のビットの区画だけを SD から読み直す。C=1 で失敗。
+; 「?」と A の下位 4bit を 1 桁(warm)、または A を 16 進 2 桁(cold)出してモニタへ(#307)。
+BT_SHOW_ERR1:
+        psha
+        ldaa    #CHR_QUESTION
+        jsr     MON_OUTEEE
+        pula
+        jsr     PRINT_NIBBLE
+        bra     BT_SHOW_EOL
+BT_SHOW_ERR2:
+        psha
+        ldaa    #CHR_QUESTION
+        jsr     MON_OUTEEE
+        pula
+        jsr     PRINT_HEX8
+BT_SHOW_EOL:
+        jsr     PRINT_CRLF
+        jmp     MAIN_LOOP
+
+; STATE のビットの区画だけを SD から読み直す。C=1・A = 失敗コード(1・2・7)で失敗。
 ; slot の先頭セクタを読み、ヘッダ +$18 が BB_IMG_SUM と違えば(カードが替わった)、RAM に
 ; 書く前にやめる。区画の値は自己検査を通してあること。
 BB_RELOAD:
         jsr     SD_INIT
-        bcs     BB_RELOAD_RTS
+        bcs     BB_RELOAD_FAIL_INIT
         jsr     BB_READ_HEADER
-        bcs     BB_RELOAD_RTS
+        bcs     BB_RELOAD_FAIL_READ
         ldaa    SD_SECTOR_BUF+24
         cmpa    BB_IMG_SUM
-        bne     BB_RELOAD_FAIL
+        bne     BB_RELOAD_FAIL_SWAP
         ldaa    SD_SECTOR_BUF+25
         cmpa    BB_IMG_SUM+1
-        bne     BB_RELOAD_FAIL
+        bne     BB_RELOAD_FAIL_SWAP
         ldaa    BB_STATE
         bita    #BB_STATE_CCP
         beq     BB_RELOAD_CORE
@@ -2580,7 +2640,7 @@ BB_RELOAD:
         staa    BB_RR_END
         stab    BB_RR_END+1
         jsr     BB_READ_RANGE
-        bcs     BB_RELOAD_RTS
+        bcs     BB_RELOAD_FAIL_READ
 BB_RELOAD_CORE:
         ldaa    BB_STATE
         bita    #BB_STATE_CORE
@@ -2596,12 +2656,18 @@ BB_RELOAD_CORE:
         staa    BB_RR_OFF
         stab    BB_RR_OFF+1
         jsr     BB_READ_RANGE
-        bcs     BB_RELOAD_RTS
+        bcs     BB_RELOAD_FAIL_READ
 BB_RELOAD_OK:
         clc
-BB_RELOAD_RTS:
         rts
-BB_RELOAD_FAIL:
+BB_RELOAD_FAIL_INIT:
+        ldaa    #BT_ERR_SD_INIT        ; ldaa は C を変えない(C=1 のまま)
+        rts
+BB_RELOAD_FAIL_READ:
+        ldaa    #BT_ERR_READ
+        rts
+BB_RELOAD_FAIL_SWAP:
+        ldaa    #BT_ERR_SWAP
         sec
         rts
 
