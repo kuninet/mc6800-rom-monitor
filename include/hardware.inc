@@ -165,8 +165,6 @@ PATH_LEN         equ PATH_PTR+2
 PATH_DELIM       equ PATH_LEN+1
 PATH_ARG_PTR     equ PATH_DELIM+1
 PATH_ARG_LEN     equ PATH_ARG_PTR+2
-SDFS3_DISPATCH   equ PATH_ARG_LEN+1
-SDFS3_RETURN     equ SDFS3_DISPATCH+2
 SDFS3_WORK_BASE  equ MIKBUG_VAR_BASE+$20
 
 ; 案 B の BIOS 入口表（#310 の 1-6）。MIKBUG の隙間 $E0E6 から 3 バイトの jmp を 16 本並べる。
@@ -211,7 +209,6 @@ BB_IMG_SUM       equ BIOS_BLOCK+$10
 BB_STATE         equ BIOS_BLOCK+$12
 BB_CHECK         equ BIOS_BLOCK+$13
 BB_WORK          equ BIOS_BLOCK+$14
-BB_CHECK_LEN     equ $14
 BB_MAGIC_HI      equ $B3
 BB_MAGIC_LO      equ $4C
  endif

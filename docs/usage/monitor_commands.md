@@ -46,13 +46,13 @@ ROM単体で使える低レベル操作、復旧口、マシン語デバッグ�
 ### SDFS/68起動入口
 
 `BOOT` はROM上のファイル操作コマンドではなく、system SD上のstage1を起動してSDFS/68へ制御を渡す入口である。
-`BOOT3` は v3 resident 用の入口で、fixed system area の `SDFS3SYS` をRAMへロードしてROM monitorへ戻る。
+`BOOT3` は v3 resident 用の入口で、fixed system area の `SDFS3SYS` をRAMへロードし、v3 の DOS のプロンプト `SDFS3> ` へ入る。`DOS` は、`EXIT` でモニタへ戻ったあとに `SDFS3> ` へ戻る入口である。
 
 | コマンド | 用途 |
 | --- | --- |
 | `BOOT` | 固定LBAからSDFS/68 stage1 loaderを読み込んで、第2段システムへ移行する。`FEATURE_SD=1` かつ stage1対応RAM構成のROMで有効 |
-| `BOOT3` | fixed LBA `64` の `SDFS3SYS` を検証し、payloadを `SDFS3_LOAD_BASE` へロードする。成功後は `CMD <tail>` でv3 residentを呼び出す |
-| `CMD <tail>` | RAM上のSDFS/68 v3 resident APIを検出し、slot 1 `SDFS3_CMD_DISPATCH` へ `tail` を渡す。`FEATURE_SD=1` かつ stage1対応RAM構成のROMで有効 |
+| `BOOT3` | fixed LBA `64` の `SDFS3SYS` を検証し、ヘッダの `load`（`$6400`）へ置いて BIOS 区画に CCP と核の和を控え、CCP の cold 入口（Welcome と `SDFS3> `）へ入る。失敗したら `?`。`sbcio_vdg`・`k6802_vdg` の ROM で使う |
+| `DOS` | BIOS 区画を検査し、RAM 上の CCP と核の和が合えば CCP の warm 入口（`SDFS3> `、Welcome なし）へ入る。合わない、または `BOOT3` していなければ `?` でモニタに残る（ROM の WBOOT `$E0E6` と同じ門） |
 
 ### ROM常駐FAT互換コマンド
 
@@ -366,7 +366,7 @@ D M MAP RAMTEST G L B C R U H F
 
 ```text
 ] H
-D M MAP RAMTEST G L BOOT BOOT3 CMD B C R U H F
+D M MAP RAMTEST G L BOOT BOOT3 DOS B C R U H F
 ]
 ```
 
@@ -374,7 +374,7 @@ D M MAP RAMTEST G L BOOT BOOT3 CMD B C R U H F
 
 ```text
 ] H
-D DIR M MAP RAMTEST G L LF BOOT BOOT3 CMD B C R U H F
+D DIR M MAP RAMTEST G L LF BOOT BOOT3 DOS B C R U H F
 ]
 ```
 
@@ -382,7 +382,7 @@ D DIR M MAP RAMTEST G L LF BOOT BOOT3 CMD B C R U H F
 
 ```text
 ] H
-D M MAP RAMTEST G L BOOT BOOT3 CMD B C R U H F
+D M MAP RAMTEST G L BOOT BOOT3 DOS B C R U H F
 ]
 ```
 
