@@ -94,12 +94,6 @@ endif
 ifneq ($(filter command line environment environment override,$(origin VDG_VRAM_CONFIG)),)
 AXIS_OVERRIDE := 1
 endif
-ifneq ($(filter command line environment environment override,$(origin SDFS3_LOAD_BASE)),)
-AXIS_OVERRIDE := 1
-endif
-ifneq ($(filter command line environment environment override,$(origin SDFS3_LOAD_LIMIT)),)
-AXIS_OVERRIDE := 1
-endif
 
 MEMORY_CONFIG ?= $(PROFILE_MEMORY_CONFIG)
 BOARD_IO ?= $(PROFILE_BOARD_IO)
@@ -109,8 +103,6 @@ FEATURE_VDG ?= $(PROFILE_FEATURE_VDG)
 FEATURE_KEYBOARD ?= $(PROFILE_FEATURE_KEYBOARD)
 FEATURE_I2C ?= $(PROFILE_FEATURE_I2C)
 VDG_VRAM_CONFIG ?= $(PROFILE_VDG_VRAM_CONFIG)
-SDFS3_LOAD_BASE ?=
-SDFS3_LOAD_LIMIT ?=
 
 VALID_MEMORY_CONFIGS := base8k ram64_c000_work ram64_a000_work ram64_4000_work
 VALID_BOARD_IO := none sbcio
@@ -265,7 +257,7 @@ endif
 
 ASL_INCLUDE := $(CURDIR)/$(OUTDIR)$(ASL_PATHSEP)$(CURDIR)/include$(ASL_PATHSEP)$(CURDIR)/src
 
-.PHONY: all clean bin test check-rom-size srec ihex stage1 sdfs sdfs3 sdfs3sys sdfs-tools sdfs-tools-srec sdfs-tools-com check-stage1-config rombin rombin-27c64 rombin-27c128 rombin-27c256 rombin-28c256 rombin-w27c512 program verify readback program-27c64 program-27c128 program-27c256 program-28c256 program-w27c512 program-upd28c256 FORCE
+.PHONY: all clean bin test check-rom-size srec ihex stage1 sdfs sdfs3 sdfs3sys sdfs-tools sdfs-tools-srec sdfs-tools-com check-stage1-config check-sdfs3-config rombin rombin-27c64 rombin-27c128 rombin-27c256 rombin-28c256 rombin-w27c512 program verify readback program-27c64 program-27c128 program-27c256 program-28c256 program-w27c512 program-upd28c256 FORCE
 
 all: check-rom-size srec ihex
 
@@ -273,7 +265,7 @@ $(OUTDIR):
 	$(MKDIR_P)
 
 $(CONFIG_INC): FORCE tools/generate_monitor_config.py | $(OUTDIR)
-	"$(PYTHON)" tools/generate_monitor_config.py --output "$(CONFIG_INC)" --monitor-profile "$(MONITOR_PROFILE)" --memory-config "$(MEMORY_CONFIG)" --board-io "$(BOARD_IO)" --feature-sd "$(FEATURE_SD)" --feature-fat "$(FEATURE_FAT)" --feature-vdg "$(FEATURE_VDG)" --feature-keyboard "$(FEATURE_KEYBOARD)" --feature-i2c "$(FEATURE_I2C)" --vdg-vram-config "$(VDG_VRAM_CONFIG)" --sdfs3-load-base "$(SDFS3_LOAD_BASE)" --sdfs3-load-limit "$(SDFS3_LOAD_LIMIT)"
+	"$(PYTHON)" tools/generate_monitor_config.py --output "$(CONFIG_INC)" --monitor-profile "$(MONITOR_PROFILE)" --memory-config "$(MEMORY_CONFIG)" --board-io "$(BOARD_IO)" --feature-sd "$(FEATURE_SD)" --feature-fat "$(FEATURE_FAT)" --feature-vdg "$(FEATURE_VDG)" --feature-keyboard "$(FEATURE_KEYBOARD)" --feature-i2c "$(FEATURE_I2C)" --vdg-vram-config "$(VDG_VRAM_CONFIG)"
 
 $(OBJ): FORCE $(TOPSRC) include/hardware.inc include/mikbug.inc $(CONFIG_INC) src/acia6850.asm src/sdcard.asm src/fat32.asm | $(OUTDIR)
 	"$(ASL)" -q -L -olist $(LST) -o $(OBJ) -i $(ASL_INCLUDE_ARG) $(TOPSRC)
@@ -304,12 +296,17 @@ stage1: check-stage1-config $(STAGE1_BIN)
 
 sdfs: check-stage1-config $(SDFS_BIN)
 
-sdfs3: check-stage1-config $(SDFS3_BIN)
+sdfs3: check-sdfs3-config $(SDFS3_BIN)
 
-sdfs3sys: check-stage1-config $(SDFS3SYS_BIN)
+sdfs3sys: check-sdfs3-config $(SDFS3SYS_BIN)
 
 check-stage1-config:
 	"$(PYTHON)" -c "import sys; sd='$(FEATURE_SD)'; board='$(BOARD_IO)'; memory='$(MEMORY_CONFIG)'; ok = sd == '1' and board == 'sbcio' and memory in ('ram64_c000_work', 'ram64_a000_work', 'ram64_4000_work'); sys.exit(0 if ok else 1)" || (echo "stage1 target requires FEATURE_SD=1 BOARD_IO=sbcio and MEMORY_CONFIG=ram64_c000_work, ram64_a000_work or ram64_4000_work" && exit 1)
+
+# v3(案 B)は低位 RAM の $6400-$7FFF に置くので、USER_RAM_END=$7FFF の構成だけで作る。
+# 4000 work 構成(sbcio_4000・k6802_4000)は v2 用で、v3 の対象外(#310 の決定 11)。
+check-sdfs3-config: check-stage1-config
+	"$(PYTHON)" -c "import sys; sys.exit(0 if '$(MEMORY_CONFIG)' in ('ram64_c000_work', 'ram64_a000_work') else 1)" || (echo "SDFS/68 v3 requires MEMORY_CONFIG=ram64_c000_work or ram64_a000_work (MONITOR_PROFILE=sbcio_vdg or k6802_vdg); 4000 work profiles are v2 only" && exit 1)
 
 $(STAGE1_OBJ): FORCE $(STAGE1_TOPSRC) include/hardware.inc $(CONFIG_INC) src/sdcard.asm src/fat32.asm | $(OUTDIR)
 	"$(ASL)" -q -L -olist $(STAGE1_LST) -o $(STAGE1_OBJ) -i $(ASL_INCLUDE_ARG) $(STAGE1_TOPSRC)
@@ -323,7 +320,7 @@ $(SDFS_OBJ): FORCE $(SDFS_TOPSRC) include/hardware.inc $(CONFIG_INC) | $(OUTDIR)
 $(SDFS_BIN): $(SDFS_OBJ)
 	"$(P2BIN)" $(SDFS_OBJ) $(SDFS_BIN) -q
 
-$(SDFS3_OBJ): FORCE $(SDFS3_TOPSRC) include/hardware.inc $(CONFIG_INC) | $(OUTDIR)
+$(SDFS3_OBJ): FORCE $(SDFS3_TOPSRC) include/hardware.inc include/sdfs3_layout.inc $(CONFIG_INC) | $(OUTDIR)
 	"$(ASL)" -q -L -olist $(SDFS3_LST) -o $(SDFS3_OBJ) -i $(ASL_INCLUDE_ARG) $(SDFS3_TOPSRC)
 
 $(SDFS3_BIN): $(SDFS3_OBJ)

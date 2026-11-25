@@ -175,20 +175,26 @@ def _split_bytes_source(rest):
     return nbytes, rest.strip()
 
 
+DATA_DIRECTIVES = ("fcb", "fdb", "fcc", "rmb", "db", "dw")
+
+
 def check_core_ccp_refs(lst_path):
-    """核の範囲 [SDFS3_CORE_START, SDFS3_CCP_START) の命令・データが、CCP の範囲
-    [SDFS3_CCP_START, SDFS3_END) のラベルを参照していないか調べる。
+    """案 B の並び(#313)で、核の範囲 [SDFS3_CORE_START, SDFS3_END) の命令・データが、
+    CCP の範囲 [SDFS3_CCP_START, SDFS3_CCP_END) のラベルを参照していないか調べる。
 
     返り値: (違反リスト, 情報dict)。違反は (行番号, アドレス, ソース, 参照先名)。
-    情報dictには核の範囲と、境界直前の最後の命令(フォールスルー検査用)を入れる。
-    ジャンプテーブルと API ヘッダは CORE_START より前にあるので対象外。"""
+    核の先頭にある SDFS3API ヘッダとジャンプテーブルも検査に入る(slot が CCP を指すと違反)。
+    情報dictには範囲と、CCP の最後の命令(データ行を除く。空き領域への落ち込み検査用)を入れる。"""
     syms = parse_symbol_table(lst_path)
-    for need in ("SDFS3_CORE_START", "SDFS3_CCP_START", "SDFS3_END"):
+    for need in ("SDFS3_CCP_START", "SDFS3_CCP_END", "SDFS3_CORE_START", "SDFS3_END"):
         if need not in syms:
             raise ValueError(f"missing symbol in listing: {need}")
-    core = int(syms["SDFS3_CORE_START"][0], 16)
     ccp = int(syms["SDFS3_CCP_START"][0], 16)
+    ccp_end = int(syms["SDFS3_CCP_END"][0], 16)
+    core = int(syms["SDFS3_CORE_START"][0], 16)
     end = int(syms["SDFS3_END"][0], 16)
+    if not (ccp < ccp_end <= core < end):
+        raise ValueError(f"unexpected layout: CCP ${ccp:04X}-${ccp_end:04X} core ${core:04X}-${end:04X}")
     ccp_labels = {}
     for name, (value, flag, _unused) in syms.items():
         if flag != "C":
@@ -197,10 +203,10 @@ def check_core_ccp_refs(lst_path):
             addr = int(value, 16)
         except ValueError:
             continue
-        if ccp <= addr < end:
+        if ccp <= addr < ccp_end:
             ccp_labels[name] = addr
     violations = []
-    last_src = None
+    last_ccp_insn = None
     scanned = 0
     for lineno, line in enumerate(Path(lst_path).read_text(errors="replace").splitlines(), 1):
         if "Symbol Table" in line:
@@ -210,29 +216,40 @@ def check_core_ccp_refs(lst_path):
             continue
         addr = int(m.group(2), 16)
         nbytes, src = _split_bytes_source(m.group(3))
-        if nbytes == 0 or not (core <= addr < ccp):
+        if nbytes == 0:
             continue
-        scanned += 1
         code = src.split(";", 1)[0]
         code = re.sub(r'"[^"]*"', '""', code)
         code = re.sub(r"'.'", "''", code)
         code = re.sub(r"^[A-Za-z_][A-Za-z0-9_.$]*:", "", code.strip()).strip()
-        if code:
-            last_src = code
+        if ccp <= addr < ccp_end:
+            if code and code.split()[0].lower() not in DATA_DIRECTIVES:
+                last_ccp_insn = code
+            continue
+        if not (core <= addr < end):
+            continue
+        scanned += 1
         for name in IDENT.findall(code):
             if name in ccp_labels:
                 violations.append((lineno, addr, src, name))
-    info = {"core": core, "ccp": ccp, "end": end, "scanned": scanned, "last_core_insn": last_src}
+    info = {
+        "ccp": ccp,
+        "ccp_end": ccp_end,
+        "core": core,
+        "end": end,
+        "scanned": scanned,
+        "last_ccp_insn": last_ccp_insn,
+    }
     return violations, info
 
 
 def check_core_ccp_main(lst_path):
     violations, info = check_core_ccp_refs(lst_path)
-    print(f"核 ${info['core']:04X}-${info['ccp'] - 1:04X} / CCP ${info['ccp']:04X}-${info['end'] - 1:04X}"
-          f" (走査 {info['scanned']} 行)")
-    last = (info["last_core_insn"] or "").split()
+    print(f"CCP ${info['ccp']:04X}-${info['ccp_end'] - 1:04X} / 核 ${info['core']:04X}-${info['end'] - 1:04X}"
+          f" (核を {info['scanned']} 行走査)")
+    last = (info["last_ccp_insn"] or "").split()
     if not last or last[0].lower() not in ("rts", "rti", "jmp", "bra"):
-        print(f"違反: 核の末尾が {info['last_core_insn']!r} で、CCP へ落ち込む可能性")
+        print(f"違反: CCP の最後の命令が {info['last_ccp_insn']!r} で、空き領域へ落ち込む可能性")
         return 1
     for lineno, addr, src, name in violations:
         print(f"違反: {lineno}行 ${addr:04X} `{src}` が CCP の {name} を参照")

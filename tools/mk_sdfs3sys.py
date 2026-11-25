@@ -155,19 +155,24 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
+        # 案 B(#310 の 1-5): load = CCP の先頭、+$10 = CCP 入口表、+$12 = 核の先頭(SDFS3API ヘッダ)
         symbols = load_symbols(
             args.listing,
-            "SDFS3_LOAD_BASE",
-            "SDFS3_LOAD_LIMIT",
-            "SDFS3_GET_INFO",
-            "SDFS3_JUMP_TABLE",
+            "SDFS3_CCP_BASE",
+            "USER_RAM_END",
+            "SDFS3_CCP_VECTORS",
+            "SDFS3_API_HEADER",
+            "SDFS3_API_MAJOR",
+            "SDFS3_API_MINOR",
         )
         image = build_sdfs3sys_image(
             resident_data=args.input.read_bytes(),
-            load_address=symbols["SDFS3_LOAD_BASE"],
-            load_limit=symbols["SDFS3_LOAD_LIMIT"],
-            entry_address=symbols["SDFS3_GET_INFO"],
-            api_table_address=symbols["SDFS3_JUMP_TABLE"],
+            load_address=symbols["SDFS3_CCP_BASE"],
+            load_limit=symbols["USER_RAM_END"],
+            entry_address=symbols["SDFS3_CCP_VECTORS"],
+            api_table_address=symbols["SDFS3_API_HEADER"],
+            abi_major=symbols["SDFS3_API_MAJOR"],
+            abi_minor=symbols["SDFS3_API_MINOR"],
         )
         parse_sdfs3sys_header(image)
         args.output.write_bytes(image)

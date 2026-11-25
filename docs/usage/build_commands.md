@@ -105,10 +105,12 @@ ROM_CODE_LIMIT=0 make bin
 | SDFS/68本体 | `MONITOR_PROFILE=sbcio_vdg make sdfs` | `build/SDFS-sbcio-vdg.BIN` |
 | SDFS/68 stage1 (16k) | `MONITOR_PROFILE=sbcio_4000 make stage1` | `build/stage1-sbcio-4000.bin` |
 | SDFS/68本体 (16k) | `MONITOR_PROFILE=sbcio_4000 make sdfs` | `build/SDFS-sbcio-4000.BIN` |
-| SDFS/68 v3 resident system image (16k) | `MONITOR_PROFILE=sbcio_4000 make sdfs3sys` | `build/SDFS3SYS-sbcio-4000.BIN` |
 | SDFS/68 stage1 (k6802-16k) | `MONITOR_PROFILE=k6802_4000 make stage1` | `build/stage1-k6802-4000.bin` |
 | SDFS/68本体 (k6802-16k) | `MONITOR_PROFILE=k6802_4000 make sdfs` | `build/SDFS-k6802-4000.BIN` |
-| SDFS/68 v3 resident system image (k6802-16k) | `MONITOR_PROFILE=k6802_4000 make sdfs3sys` | `build/SDFS3SYS-k6802-4000.BIN` |
+| SDFS/68 v3 resident system image | `MONITOR_PROFILE=sbcio_vdg make sdfs3sys` | `build/SDFS3SYS-sbcio-vdg.BIN` |
+| SDFS/68 v3 resident system image (k6802) | `MONITOR_PROFILE=k6802_vdg make sdfs3sys` | `build/SDFS3SYS-k6802-vdg.BIN` |
+
+SDFS/68 v3（案 B）は `sbcio_vdg`・`k6802_vdg` だけで作る。4000 work 構成（`sbcio_4000`・`k6802_4000`）では `make sdfs3sys` がエラーで止まる（v2 専用。#310 の決定 11）。
 
 成果物の所属は次の通り。
 

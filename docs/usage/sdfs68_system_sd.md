@@ -4,7 +4,7 @@
 ここに書く `DIR`、`TYPE`、`RUN`、`LOAD`、`L`、`EXIT` は、ROMモニタの `] ` プロンプトで使うコマンドではなく、SDFS/68起動後の `SDFS> ` プロンプトで使うコマンドである。
 
 SDFS/68 は、ROM モニタの `BOOT` から起動する第2段システムである。ROM は固定LBAからstage1 loaderを読み、stage1がFAT root の `SDFS.BIN` を読み込む。
-SDFS/68 v3 resident は `BOOT3` でも起動できる。`BOOT3` は fixed LBA `64` の `SDFS3SYS` をROMが直接読み、resident payloadを `SDFS3_LOAD_BASE` へロードしてからROM monitorへ戻る。
+SDFS/68 v3 resident は `BOOT3` でも起動できる。`BOOT3` は fixed LBA `64` の `SDFS3SYS` をROMが直接読み、ヘッダの `load`（`$6400`）へ置いてから、v3 の DOS のプロンプト `SDFS3> ` に入る（案 B、#313）。v3 のコマンドはこのプロンプトで打つ。`EXIT` でモニタへ、モニタの `DOS` で `SDFS3> ` へ戻る。
 ROM単体ではメモリ変更、メモリダンプ、指定アドレス実行、マシン語デバッグを行い、通常のSDファイル操作はSDFS/68へ寄せる。
 
 ```mermaid
@@ -13,7 +13,8 @@ flowchart TD
     BOOT["] BOOT"]
     BOOT3["] BOOT3"]
     SDFS["SDFS>"]
-    CMD["] CMD DIR"]
+    SDFS3["SDFS3>"]
+    DOS["] DOS"]
     DIR["DIR"]
     RUN["RUN addr"]
     DEBUG["デバッグ運用"]
@@ -21,10 +22,11 @@ flowchart TD
     ROM["] M / D / U / B / R"]
 
     NORMAL --> BOOT --> SDFS --> DIR --> RUN
-    NORMAL --> BOOT3 --> CMD
+    NORMAL --> BOOT3 --> SDFS3
     DEBUG --> EXIT --> ROM
     ROM --> BOOT
     ROM --> BOOT3
+    ROM --> DOS --> SDFS3
 ```
 
 ## 基本方針
@@ -37,15 +39,49 @@ flowchart TD
 - SDFS/68はROMモニタの拡張コマンドではなく、小さい第2段DOSとして扱う。
 - ROMモニタは救命具、デバッガ、復旧口として残し、SDFS/68内にモニタ機能を再実装しない。
 
+## SDFS/68 v3（案 B）の使い方
+
+v3 は `sbcio_vdg` と `k6802_vdg` で作る。4000 work 構成（`sbcio_4000`・`k6802_4000`）は v2 専用で、`make sdfs3sys` はエラーで止まる（#310 の決定 11）。`SDFS3_LOAD_BASE` などの上書きは要らない（#313 で仕組みを消した）。
+
+```console
+make bin sdfs3sys MONITOR_PROFILE=k6802_vdg
+```
+
+`build/SDFS3SYS-k6802-vdg.BIN` を SD の physical LBA `64` に置き、FAT32 partition を LBA `128` 以降に置く。
+
+```text
+] BOOT3
+SDFS/68 V3 02.00
+BASE=6400 END=7C3E
+SDFS3> DIR
+HELLO.COM A 00000020
+SDFS3> HELLO.COM
+HELLO COM
+SDFS3> EXIT
+] DOS
+SDFS3>
+```
+
+| 操作 | 動き |
+| --- | --- |
+| `BOOT3` | `SDFS3SYS` を検証して `$6400-$7FFF` に置き、CCP と核の和を ROM の BIOS 区画に控えて、CCP の cold 入口（Welcome あり）へ入る。古い resident（API major 1）や壊れたイメージは `?` |
+| `SDFS3> ` の内蔵コマンド | `DIR [path]`、`TYPE path`、`LOAD file`、`RUN addr`、`RUN file`、`EXIT`。それ以外の `<名前>.COM` は `.COM` として起動する |
+| `.COM` | `$0100` に読み、`BIOS_EXEC` で起動する。`RTS` は ROM の WBOOT（`$E0E6`）に戻り、CCP と核を検査してから `SDFS3> ` に戻る（Welcome なし）。大きさの上限は `$6300` バイト（#315 で `$6F00` に広がる） |
+| `RUN` | `RUN addr`・`RUN file` とも `BIOS_EXEC` で起動する。プログラムの `RTS` は `SDFS3> ` に戻る。`SWI` で止めたあとはモニタにいるので、`DOS` で戻る |
+| `EXIT` | モニタの `] ` へ。RAM の CCP と核はそのまま残る |
+| モニタの `DOS` | CCP と核の和が `BOOT3` のときと同じなら、CCP の warm 入口（Welcome なし）へ。モニタで CCP や核を書き換えた、`BOOT3` していない、v2 の `BOOT` をした、のどれかなら `?`（#313 では SD から読み直さない。読み直しは #314） |
+
+v3 の配置（#313 の暫定）: `$0100-$63FF` TPA、`$6400-$6FFF` CCP（入口表 +0 cold／+3 warm）、`$7000-$7FFF` 核（SDFS3API ヘッダ、`GET_MEMTOP` = `$6FFF`）。CCP の先頭は、LOAD と RUN を CCP から外す #316 で `$6C00` に戻る。
+
 ## system SD が必要な範囲
 
 | 操作 | system SD | 所属 |
 | --- | --- | --- |
 | ROMモニタ起動、`D` / `M` / `G` / `L` / `B` / `C` / `R` / `U` | 不要 | ROMモニタ |
 | ROM `BOOT` でSDFS/68へ移行 | 必要 | ROM入口 + stage1 |
-| ROM `BOOT3` でv3 residentをロード | 必要 | ROM入口 + fixed `SDFS3SYS` |
+| ROM `BOOT3` でv3 residentをロードし、`SDFS3> ` に入る | 必要 | ROM入口 + fixed `SDFS3SYS` |
 | SDFS/68の `DIR` / `TYPE` / `RUN` / `LOAD` / `EXIT` | 必要 | SDFS/68 |
-| ROM `CMD <tail>` でv3 residentを呼ぶ | `BOOT3` または別手段でresidentロード済みなら必要 | ROM入口 + v3 resident |
+| ROM `DOS` で v3 の `SDFS3> ` へ戻る | `BOOT3` 済みなら不要（RAM 上の CCP と核の和が合えば、SD を読まずに入る） | ROM入口 + v3 resident |
 | 直接指定ROMのROM常駐FAT `DIR` / `LF` | SDFS/68用system SDは不要。ただしFAT32 SDカードは必要 | ROM互換FAT |
 
 ROM常駐FATは `FEATURE_SD=1 FEATURE_FAT=1` を直接指定したときだけ使う互換機能であり、SDFS/68本線ではない。

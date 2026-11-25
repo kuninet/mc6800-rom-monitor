@@ -41,7 +41,7 @@ BIOS_JMP macro   addr,target
 
         BIOS_JMP BIOS_WBOOT,BIOS_WBOOT_IMPL
         BIOS_JMP BIOS_INFO,BIOS_INFO_IMPL
-        BIOS_JMP BIOS_GET_API,SDFS3_FIND_API
+        BIOS_JMP BIOS_GET_API,BIOS_GET_API_IMPL
         BIOS_JMP BIOS_EXEC,BIOS_EXEC_IMPL
         BIOS_JMP BIOS_READ_LINE,BIOS_READ_LINE_IMPL
         BIOS_JMP BIOS_MONITOR,BIOS_MONITOR_IMPL
@@ -58,11 +58,6 @@ BIOS_JMP macro   addr,target
  if * <> BIOS_TABLE_END
         error   "BIOS entry table size mismatch"
  endif
-
-; #312 では「?」を出してモニタへ戻るだけ。DOS への warm 入口は #313 で作る。
-BIOS_WBOOT_IMPL:
-        lds     #STACK_TOP
-        jmp     MAIN_LOOP_ERROR
 
 BIOS_INFO_IMPL:
         ldaa    #BIOS_VERSION
@@ -107,6 +102,8 @@ BIOS_UNIMPL:
 
 ; RAM の 16bit 加算和。入力 X = 開始番地、BB_WORK = 終端(最後のバイトの次の番地)。
 ; 出力 A:B = [X, 終端) の和、X = 終端。1 バイト 20 サイクル。
+; 開始 <= 終端であること(逆だとアドレス空間を一周し、$8000 台の I/O も読む)。
+; 区画の値を渡すときは、先に BB_CHECK_VALID を通す。
 BIOS_RAM_SUM:
         clra
         clrb
@@ -198,6 +195,14 @@ MAIN_DISPATCH_NOT_DS:
         jmp     CMD_DIR
 MAIN_DISPATCH_DUMP:
  endif
+ if MONITOR_FEATURE_SD
+ if S1_SUPPORTED
+        jsr     IS_CMD_DOS
+        bcs     MAIN_DISPATCH_NOT_DOS
+        jmp     BIOS_WBOOT_IMPL
+MAIN_DISPATCH_NOT_DOS:
+ endif
+ endif
         jmp     CMD_DUMP
 CHK_CMD_MOD:
         cmpa    #'M'
@@ -242,14 +247,6 @@ MAIN_DISPATCH_RESUME:
 CHK_CMD_CLEAR:
         cmpa    #'C'
         bne     CHK_CMD_UNASM
- if MONITOR_FEATURE_SD
- if S1_SUPPORTED
-        jsr     IS_CMD_CMD
-        bcs     MAIN_DISPATCH_CLEAR
-        jmp     CMD_SDFS3
-MAIN_DISPATCH_CLEAR:
- endif
- endif
         jmp     CMD_BREAK_CLEAR
 CHK_CMD_UNASM:
         cmpa    #'U'
@@ -416,23 +413,19 @@ IS_CMD_BOOT3_FAIL:
         sec
         rts
 
-IS_CMD_CMD:
+IS_CMD_DOS:
         ldab    LINE_LEN
-        cmpb    #4
-        blo     IS_CMD_CMD_FAIL
+        cmpb    #3
+        bne     IS_CMD_DOS_FAIL
         ldaa    LINE_BUF+1
-        cmpa    #'M'
-        bne     IS_CMD_CMD_FAIL
+        cmpa    #'O'
+        bne     IS_CMD_DOS_FAIL
         ldaa    LINE_BUF+2
-        cmpa    #'D'
-        bne     IS_CMD_CMD_FAIL
-        ldaa    LINE_BUF+3
-        cmpa    #CHR_SPACE
-        bne     IS_CMD_CMD_FAIL
-IS_CMD_CMD_OK:
+        cmpa    #'S'
+        bne     IS_CMD_DOS_FAIL
         clc
         rts
-IS_CMD_CMD_FAIL:
+IS_CMD_DOS_FAIL:
         sec
         rts
  endif
@@ -1776,6 +1769,7 @@ S1_BOOT_MAX_HI  equ (S1_LIMIT-S1_BASE+1)/$0100
 S1_BOOT_MAX_LO  equ 0
 
 CMD_BOOT:
+        clr     BB_MAGIC
         jsr     SD_INIT
         bcs     CMD_BOOT_ERROR
         jsr     BOOT_SET_LBA16
@@ -1901,6 +1895,8 @@ BOOT3_COUNT        equ FAT_DATA_LBA0
 BOOT3_SRC_PTR      equ FAT_DATA_LBA2
 BOOT3_DST_PTR      equ FAT_ROOT_CLUS0
 
+; BOOT3(cold)。SDFS3SYS を検証してヘッダの load へ置き、BIOS 区画を書いて CCP の +0 へ入る。
+; ROM は resident のスロットを呼ばない。失敗したら区画を無効にして「?」でモニタへ戻る。
 CMD_BOOT3:
         clr     BB_MAGIC
         jsr     SD_INIT
@@ -1912,22 +1908,13 @@ CMD_BOOT3:
         bcs     CMD_BOOT3_ERROR
         jsr     BOOT3_COPY_PAYLOAD
         bcs     CMD_BOOT3_ERROR
-        ldx     BOOT3_DST_PTR
-        stx     BB_WORK
-        ldx     BOOT3_EXPECTED_SUM
-        stx     BB_IMG_SUM
-        jsr     SDFS3_FIND_API
-        bcs     CMD_BOOT3_ERROR
-        stx     BB_CORE_BASE
-        ldx     12,x
-        ldx     26,x
-        jsr     0,x
-        bcs     CMD_BOOT3_ERROR
         jsr     BB_STORE
-        ldx     #TXT_OK
-        jsr     PDATA1
-        jmp     MAIN_LOOP
+        bcs     CMD_BOOT3_ERROR
+        lds     #STACK_TOP
+        ldx     BB_CCP_VEC
+        jmp     0,x
 CMD_BOOT3_ERROR:
+        clr     BB_MAGIC
         jmp     MAIN_LOOP_ERROR
 
 BOOT3_CHECK_HEADER:
@@ -1965,12 +1952,6 @@ BOOT3_CHECK_HEADER:
         ldaa    11,x
         cmpa    #1
         bne     BOOT3_HEADER_FAIL_SIG
-        ldaa    12,x
-        cmpa    #SDFS3_LOAD_BASE/$0100
-        bne     BOOT3_HEADER_FAIL_SIZE
-        ldaa    13,x
-        cmpa    #SDFS3_LOAD_BASE&$00FF
-        bne     BOOT3_HEADER_FAIL_SIZE
         ldaa    26,x
         bne     BOOT3_HEADER_FAIL_SIZE
         ldaa    27,x
@@ -1985,15 +1966,51 @@ BOOT3_CHECK_HEADER:
         bhi     BOOT3_HEADER_FAIL_SIZE
 BOOT3_CHECK_MIN:
         ldaa    14,x
-        bne     BOOT3_CHECKSUM_PREP
+        bne     BOOT3_CHECK_RANGE
         ldaa    15,x
         cmpa    #SDFS3SYS_MIN_LO
         blo     BOOT3_HEADER_FAIL_SIZE
-        bra     BOOT3_CHECKSUM_PREP
+        bra     BOOT3_CHECK_RANGE
 BOOT3_HEADER_FAIL_SIG:
         jmp     BOOT3_FAIL_SIG
 BOOT3_HEADER_FAIL_SIZE:
         jmp     BOOT3_FAIL_SIZE
+; 大きさを確かめたあとで、load が置いてよい範囲に収まるかを見る(仕様 1-5)。
+; SDFS3_RAM_FLOOR <= load、load + (size - ヘッダ) <= USER_RAM_END+1(桁あふれなし)。
+; 通ったら load・CCP 入口表・核の先頭を区画に控える(コピーでヘッダが上書きされるため)。
+BOOT3_CHECK_RANGE:
+        ldaa    13,x
+        suba    #SDFS3_RAM_FLOOR&$00FF
+        ldaa    12,x
+        sbca    #SDFS3_RAM_FLOOR/$0100
+        bcs     BOOT3_HEADER_FAIL_SIZE
+        ldab    13,x
+        addb    15,x
+        ldaa    12,x
+        adca    14,x
+        bcs     BOOT3_HEADER_FAIL_SIZE
+        subb    #SDFS3SYS_HEADER_SIZE
+        sbca    #0
+        cmpa    #(USER_RAM_END+1)/$0100
+        bhi     BOOT3_HEADER_FAIL_SIZE
+        blo     BOOT3_RANGE_OK
+        cmpb    #(USER_RAM_END+1)&$00FF
+        bhi     BOOT3_HEADER_FAIL_SIZE
+BOOT3_RANGE_OK:
+        ldaa    12,x
+        ldab    13,x
+        staa    BB_IMG_BASE
+        stab    BB_IMG_BASE+1
+        addb    17,x
+        adca    16,x
+        staa    BB_CCP_VEC
+        stab    BB_CCP_VEC+1
+        ldaa    12,x
+        ldab    13,x
+        addb    19,x
+        adca    18,x
+        staa    BB_CORE_BASE
+        stab    BB_CORE_BASE+1
 BOOT3_CHECKSUM_PREP:
         ldaa    24,x
         staa    BOOT3_EXPECTED_SUM
@@ -2046,7 +2063,7 @@ BOOT3_COPY_PAYLOAD:
 BOOT3_COPY_SIZE_OK:
         ldx     #SD_SECTOR_BUF+SDFS3SYS_HEADER_SIZE
         stx     BOOT3_SRC_PTR
-        ldx     #SDFS3_LOAD_BASE
+        ldx     BB_IMG_BASE
         stx     BOOT3_DST_PTR
         jsr     BOOT3_SET_COUNT_480
         jsr     BOOT3_COPY_CURRENT
@@ -2199,74 +2216,109 @@ BOOT3_FAIL_A:
         sec
         rts
 
-SDFS3_API_MAJOR    equ 1
-SDFS3_API_MIN_COUNT equ 14
+SDFS3_API_MAJOR    equ 2
 
-SDFS3_FIND_API:
-        ldx     #SDFS3_LOAD_BASE
+; 核の先頭(BB_CORE_BASE)の SDFS3API ヘッダを確かめる。C=0 で X = 核の先頭。
+; 区画の自己検査を通したあとで呼ぶ。署名と major の 9 バイトがイメージの中にあることを
+; 先に確かめ、壊れたヘッダで $8000 台の I/O を読まないようにする。
+BB_CHECK_API:
+        ldab    BB_IMG_LAST+1
+        subb    BB_CORE_BASE+1
+        ldaa    BB_IMG_LAST
+        sbca    BB_CORE_BASE
+        bne     BB_CHECK_API_ROOM
+        cmpb    #8
+        blo     BB_CHECK_API_FAIL
+BB_CHECK_API_ROOM:
+        ldx     BB_CORE_BASE
         ldaa    0,x
         cmpa    #'S'
-        bne     SDFS3_FIND_API_FAIL
+        bne     BB_CHECK_API_FAIL
         ldaa    1,x
         cmpa    #'D'
-        bne     SDFS3_FIND_API_FAIL
+        bne     BB_CHECK_API_FAIL
         ldaa    2,x
         cmpa    #'F'
-        bne     SDFS3_FIND_API_FAIL
+        bne     BB_CHECK_API_FAIL
         ldaa    3,x
         cmpa    #'S'
-        bne     SDFS3_FIND_API_FAIL
+        bne     BB_CHECK_API_FAIL
         ldaa    4,x
         cmpa    #'3'
-        bne     SDFS3_FIND_API_FAIL
+        bne     BB_CHECK_API_FAIL
         ldaa    5,x
         cmpa    #'A'
-        bne     SDFS3_FIND_API_FAIL
+        bne     BB_CHECK_API_FAIL
         ldaa    6,x
         cmpa    #'P'
-        bne     SDFS3_FIND_API_FAIL
+        bne     BB_CHECK_API_FAIL
         ldaa    7,x
         cmpa    #'I'
-        bne     SDFS3_FIND_API_FAIL
+        bne     BB_CHECK_API_FAIL
         ldaa    8,x
         cmpa    #SDFS3_API_MAJOR
-        bne     SDFS3_FIND_API_FAIL
-        ldaa    10,x
-        cmpa    #SDFS3_API_MIN_COUNT
-        blo     SDFS3_FIND_API_FAIL
-        ldx     #SDFS3_LOAD_BASE
+        bne     BB_CHECK_API_FAIL
         clc
         rts
-SDFS3_FIND_API_FAIL:
+BB_CHECK_API_FAIL:
         sec
         rts
 
-; BIOS 区画を書く(BOOT3 の成功時)。BB_WORK にイメージの終端(最後の次)、
-; BB_IMG_SUM にヘッダ +$18、BB_CORE_BASE に SDFS3API ヘッダの番地が入っていること。
-; 今の resident は API ヘッダが先頭にあり CCP の区切りが ROM から見えないので、
-; 和は SUM_CORE の 1 本だけ、SUM_CCP は 0、CCP_VEC は IMG_BASE にする(#313 で 2 本に分ける)。
+; BIOS 区画を仕上げる(BOOT3 の成功時)。C=0 で成功、C=1 で失敗(区画は呼び手が無効にする)。
+; 入る前に IMG_BASE・CCP_VEC・CORE_BASE はヘッダから控えてあり、BOOT3_DST_PTR は
+; イメージの終端(最後の次)、BOOT3_EXPECTED_SUM はヘッダ +$18。
+; 和はいったん 0 で CHECK を付けて自己検査し、範囲が正しいと分かってから取る。
 BB_STORE:
-        ldx     #SDFS3_LOAD_BASE
-        stx     BB_IMG_BASE
-        stx     BB_CCP_VEC
-        jsr     BIOS_RAM_SUM
-        staa    BB_SUM_CORE
-        stab    BB_SUM_CORE+1
+        ldx     BOOT3_DST_PTR
         dex
         stx     BB_IMG_LAST
-        clr     BB_SUM_CCP
-        clr     BB_SUM_CCP+1
+        ldx     BOOT3_EXPECTED_SUM
+        stx     BB_IMG_SUM
         ldx     #SDFS3SYS_FIXED_LBA
         stx     BB_SLOT_LBA
+        ldx     #0
+        stx     BB_SUM_CCP
+        stx     BB_SUM_CORE
         clr     BB_STATE
         ldaa    #BB_MAGIC_HI
         staa    BB_MAGIC
         ldaa    #BB_MAGIC_LO
         staa    BB_MAGIC+1
+        jsr     BB_SET_CHECK
+        jsr     BB_CHECK_VALID
+        bcs     BB_STORE_DONE
+        jsr     BB_CHECK_API
+        bcs     BB_STORE_DONE
+        jsr     BB_RAM_SUM_CCP
+        staa    BB_SUM_CCP
+        stab    BB_SUM_CCP+1
+        jsr     BB_RAM_SUM_CORE
+        staa    BB_SUM_CORE
+        stab    BB_SUM_CORE+1
+        jsr     BB_SET_CHECK
+        clc
+BB_STORE_DONE:
+        rts
+
+BB_SET_CHECK:
         jsr     BB_SUM8
         nega
         staa    BB_CHECK
         rts
+
+; RAM 上の CCP [IMG_BASE, CORE_BASE) と核 [CORE_BASE, IMG_LAST] の和を A:B に返す。
+; 区画の自己検査を通したあとで呼ぶ。BB_WORK を使う。
+BB_RAM_SUM_CCP:
+        ldx     BB_CORE_BASE
+        stx     BB_WORK
+        ldx     BB_IMG_BASE
+        jmp     BIOS_RAM_SUM
+BB_RAM_SUM_CORE:
+        ldx     BB_IMG_LAST
+        inx
+        stx     BB_WORK
+        ldx     BB_CORE_BASE
+        jmp     BIOS_RAM_SUM
 
 ; 区画の +$00..+$12 の 8bit 和を A に返す。X を壊す。
 BB_SUM8:
@@ -2280,8 +2332,9 @@ BB_SUM8_LOOP:
         rts
 
 ; 区画の自己検査。C=0 有効、C=1 未ロード。区画にもほかの RAM にも書かない。A・X を壊す。
-; #312 では CCP が無いので IMG_BASE <= CORE_BASE、IMG_BASE <= CCP_VEC <= CORE_BASE で見る
-; (#313 で仕様 1-3 どおり < にする)。
+; SDFS3_RAM_FLOOR <= IMG_BASE < CORE_BASE <= IMG_LAST <= USER_RAM_END、
+; IMG_BASE <= CCP_VEC < CORE_BASE(仕様 1-3)。16bit の大小は suba/sbca の借りで見る。
+; 「a < b」は b-1 から a を引くかわりに、a から b を引いて借りが出ること(bcc で弾く)で見る。
 BB_CHECK_VALID:
         ldaa    BB_MAGIC
         cmpa    #BB_MAGIC_HI
@@ -2297,11 +2350,11 @@ BB_CHECK_VALID:
         ldaa    BB_IMG_BASE
         sbca    #SDFS3_RAM_FLOOR/$0100
         bcs     BB_INVALID
-        ldaa    BB_CORE_BASE+1         ; IMG_BASE <= CORE_BASE
-        suba    BB_IMG_BASE+1
-        ldaa    BB_CORE_BASE
-        sbca    BB_IMG_BASE
-        bcs     BB_INVALID
+        ldaa    BB_IMG_BASE+1          ; IMG_BASE < CORE_BASE
+        suba    BB_CORE_BASE+1
+        ldaa    BB_IMG_BASE
+        sbca    BB_CORE_BASE
+        bcc     BB_INVALID
         ldaa    BB_IMG_LAST+1          ; CORE_BASE <= IMG_LAST
         suba    BB_CORE_BASE+1
         ldaa    BB_IMG_LAST
@@ -2317,54 +2370,47 @@ BB_CHECK_VALID:
         ldaa    BB_CCP_VEC
         sbca    BB_IMG_BASE
         bcs     BB_INVALID
-        ldaa    BB_CORE_BASE+1         ; CCP_VEC <= CORE_BASE
-        suba    BB_CCP_VEC+1
-        ldaa    BB_CORE_BASE
-        sbca    BB_CCP_VEC
-        bcs     BB_INVALID
+        ldaa    BB_CCP_VEC+1           ; CCP_VEC < CORE_BASE
+        suba    BB_CORE_BASE+1
+        ldaa    BB_CCP_VEC
+        sbca    BB_CORE_BASE
+        bcc     BB_INVALID
         clc
         rts
 BB_INVALID:
         sec
         rts
 
-CMD_SDFS3:
-        ldab    LINE_LEN
-        cmpb    #4
-        blo     CMD_SDFS3_ERROR
-        ldaa    LINE_BUF+3
-        cmpa    #CHR_SPACE
-        bne     CMD_SDFS3_ERROR
-        ldx     #LINE_BUF+4
-        subb    #4
-        bra     CMD_SDFS3_CALL
-CMD_SDFS3_CALL:
-        stx     ARG_PTR
-        stab    ARG_LEN
-        jsr     SDFS3_FIND_API
-        bcs     CMD_SDFS3_ERROR
-        ldx     12,x
-        ldx     2,x
-        stx     SDFS3_DISPATCH
-        ldx     #CMD_SDFS3_RETURN
-        stx     SDFS3_RETURN
-        ldaa    SDFS3_RETURN+1
-        psha
-        ldaa    SDFS3_RETURN
-        psha
-        ldaa    SDFS3_DISPATCH+1
-        psha
-        ldaa    SDFS3_DISPATCH
-        psha
-        ldx     ARG_PTR
-        ldab    ARG_LEN
-        clra
-        rts
-CMD_SDFS3_RETURN:
-        bcs     CMD_SDFS3_ERROR
-        jmp     MAIN_LOOP
-CMD_SDFS3_ERROR:
+; BIOS_WBOOT とモニタの DOS(DOS へ warm で入る門)。区画の自己検査と、CCP・核の和の照合に
+; 通ったら CCP の +3 へ。通らなければ「?」でモニタへ(読み直しは #314)。
+; 区画の MAGIC〜CHECK には書かない(BB_WORK だけ使う)。
+BIOS_WBOOT_IMPL:
+        lds     #STACK_TOP
+        jsr     BB_CHECK_VALID
+        bcs     BIOS_WBOOT_FAIL
+        jsr     BB_RAM_SUM_CCP
+        cmpa    BB_SUM_CCP
+        bne     BIOS_WBOOT_FAIL
+        cmpb    BB_SUM_CCP+1
+        bne     BIOS_WBOOT_FAIL
+        jsr     BB_RAM_SUM_CORE
+        cmpa    BB_SUM_CORE
+        bne     BIOS_WBOOT_FAIL
+        cmpb    BB_SUM_CORE+1
+        bne     BIOS_WBOOT_FAIL
+        ldx     BB_CCP_VEC
+        jmp     3,x
+BIOS_WBOOT_FAIL:
         jmp     MAIN_LOOP_ERROR
+
+; X = SDFS3API ヘッダ(区画の CORE_BASE)、C=0。区画が無効なら C=1。和は見ない。B は保つ。
+BIOS_GET_API_IMPL:
+        jsr     BB_CHECK_VALID
+        bcs     BIOS_GET_API_DONE
+        ldx     BB_CORE_BASE
+        clc
+BIOS_GET_API_DONE:
+        rts
  endif
  endif
  if MONITOR_FEATURE_FAT
@@ -3149,17 +3195,17 @@ TXT_WELCOME:    fcc     "MC6800 MONITOR"
 TXT_HELP:
  if MONITOR_FEATURE_FAT
  if MONITOR_FEATURE_VDG
-                fcc     "D DS DIR M MAP RAMTEST G L LF BOOT BOOT3 CMD B C R U UW H F"
+                fcc     "D DS DIR M MAP RAMTEST G L LF BOOT BOOT3 DOS B C R U UW H F"
  else
-                fcc     "D DIR M MAP RAMTEST G L LF BOOT BOOT3 CMD B C R U H F"
+                fcc     "D DIR M MAP RAMTEST G L LF BOOT BOOT3 DOS B C R U H F"
  endif
  else
  if MONITOR_FEATURE_SD
  if S1_SUPPORTED
  if MONITOR_FEATURE_VDG
-                fcc     "D DS M MAP RAMTEST G L BOOT BOOT3 CMD B C R U UW H F"
+                fcc     "D DS M MAP RAMTEST G L BOOT BOOT3 DOS B C R U UW H F"
  else
-                fcc     "D M MAP RAMTEST G L BOOT BOOT3 CMD B C R U H F"
+                fcc     "D M MAP RAMTEST G L BOOT BOOT3 DOS B C R U H F"
  endif
  else
  if MONITOR_FEATURE_VDG

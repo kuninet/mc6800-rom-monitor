@@ -209,14 +209,14 @@ def test_help_command():
     stdout, stderr, rc = run_emu("H\r\r")
     if is_fat_build():
         if is_vdg_build():
-            expected = "D DS DIR M MAP RAMTEST G L LF BOOT BOOT3 CMD B C R U UW H F"
+            expected = "D DS DIR M MAP RAMTEST G L LF BOOT BOOT3 DOS B C R U UW H F"
         else:
-            expected = "D DIR M MAP RAMTEST G L LF BOOT BOOT3 CMD B C R U H F"
+            expected = "D DIR M MAP RAMTEST G L LF BOOT BOOT3 DOS B C R U H F"
     elif is_sd_build():
         if is_vdg_build():
-            expected = "D DS M MAP RAMTEST G L BOOT BOOT3 CMD B C R U UW H F"
+            expected = "D DS M MAP RAMTEST G L BOOT BOOT3 DOS B C R U UW H F"
         else:
-            expected = "D M MAP RAMTEST G L BOOT BOOT3 CMD B C R U H F"
+            expected = "D M MAP RAMTEST G L BOOT BOOT3 DOS B C R U H F"
     else:
         if is_vdg_build():
             expected = "D DS M MAP RAMTEST G L B C R U UW H F"

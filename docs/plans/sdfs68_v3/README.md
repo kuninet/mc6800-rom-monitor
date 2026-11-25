@@ -38,3 +38,6 @@ v3 は、現行の `BOOT -> stage1 -> SDFS.BIN -> SDFS> ` 方式を単純に拡�
 | #298 | [issue-298_init_welcome.md](issue-298_init_welcome.md) | resident INIT API と Welcome 表示 |
 | #300 | [issue-300_system_slot_layout.md](issue-300_system_slot_layout.md) | system slot A/Bとactive marker形式 |
 | #310 | [issue-310_plan_b_abi.md](issue-310_plan_b_abi.md) | 案 B（CP/M 式の完全分離）の配置とROM/resident ABI。#311〜#318 の正 |
+| #311 | [issue-311_resident_vars_out.md](issue-311_resident_vars_out.md) | resident の書き換わる変数をイメージの外へ出し、核から CCP への参照をなくす |
+| #312 | [issue-312_rom_bios_entries.md](issue-312_rom_bios_entries.md) | ROM に BIOS 入口表・RAM の和のルーチン・BIOS 区画を追加する |
+| #313 | [issue-313_plan_b_layout.md](issue-313_plan_b_layout.md) | v3 を案 B の配置へ切り替え、CCP を DOS のプロンプトとして独立させる |
