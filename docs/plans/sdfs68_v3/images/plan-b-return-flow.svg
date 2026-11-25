@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="760" viewBox="0 0 1080 760" font-family="'Noto Sans CJK JP','Noto Sans JP',sans-serif">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#3e4c59"/>
+    </marker>
+    <style>
+      .t{font-size:13px;fill:#1f2933}
+      .s{font-size:11px;fill:#52606d}
+      .h{font-size:16px;font-weight:bold;fill:#1f2933}
+      .h2{font-size:14px;font-weight:bold;fill:#1f2933}
+      .ln{stroke:#3e4c59;stroke-width:1.4;fill:none;marker-end:url(#ar)}
+      .yes{font-size:11px;fill:#2b8a3e;font-weight:bold}
+      .no{font-size:11px;fill:#c92a2a;font-weight:bold}
+    </style>
+  </defs>
+  <rect width="1080" height="760" fill="#ffffff"/>
+  <text x="20" y="30" class="h">図 2　プログラムから戻るときの流れ（検査 → 必要なら再ロード → CCP）</text>
+  <text x="20" y="50" class="s">秒数は E クロック 1MHz の推測。検査と再ロードはすべて ROM が行い、RAM 上の DOS のコードは検査に通るまで実行しない</text>
+
+  <!-- column titles -->
+  <text x="150" y="82" class="h2" text-anchor="middle">起動（cold）</text>
+  <text x="530" y="82" class="h2" text-anchor="middle">DOS へ戻る（warm）</text>
+  <text x="910" y="82" class="h2" text-anchor="middle">モニタへ戻る</text>
+
+  <!-- ===== cold column ===== -->
+  <rect x="50" y="96" width="200" height="40" rx="6" fill="#e3f5e9" stroke="#2b8a3e"/>
+  <text x="150" y="121" class="t" text-anchor="middle">モニタで BOOT3</text>
+  <path d="M150 136 v24" class="ln"/>
+  <rect x="40" y="162" width="220" height="62" rx="4" fill="#f5f7fa" stroke="#3e4c59"/>
+  <text x="150" y="184" class="t" text-anchor="middle">slot を選んで 1 回読み</text>
+  <text x="150" y="202" class="s" text-anchor="middle">ヘッダ検査 + コピー + 和の照合</text>
+  <text x="150" y="217" class="s" text-anchor="middle">約 4 秒 + SD_INIT（推測）</text>
+  <path d="M150 224 v24" class="ln"/>
+  <rect x="40" y="250" width="220" height="62" rx="4" fill="#f5f7fa" stroke="#3e4c59"/>
+  <text x="150" y="272" class="t" text-anchor="middle">RAM 上で CCP と核の和を取り</text>
+  <text x="150" y="290" class="t" text-anchor="middle">BIOS 区画に保存</text>
+  <text x="150" y="306" class="s" text-anchor="middle">配置・slot・自己検査バイトも</text>
+  <path d="M150 312 v24" class="ln"/>
+  <rect x="40" y="338" width="220" height="62" rx="4" fill="#d3f9d8" stroke="#2b8a3e"/>
+  <text x="150" y="360" class="t" text-anchor="middle">CCP の cold 入口（+0）</text>
+  <text x="150" y="378" class="s" text-anchor="middle">Welcome を出す</text>
+  <text x="150" y="393" class="s" text-anchor="middle">（#304 の AUTOEXEC.COM はここだけ）</text>
+  <path d="M150 400 v24" class="ln"/>
+  <rect x="50" y="426" width="200" height="40" rx="20" fill="#2b8a3e"/>
+  <text x="150" y="451" class="t" text-anchor="middle" style="fill:#fff">DOS のプロンプト</text>
+  <text x="50" y="498" class="s">1 回読みで失敗したら（ヘッダ不正・和の不一致）</text>
+  <text x="50" y="514" class="s">BIOS 区画を無効にし、? とコードを出してモニタへ</text>
+
+  <!-- ===== warm column ===== -->
+  <rect x="330" y="96" width="400" height="58" rx="6" fill="#e7f0fd" stroke="#1f6feb"/>
+  <text x="530" y="116" class="t" text-anchor="middle">.COM の RTS／jmp $E0E6（WBOOT）</text>
+  <text x="530" y="134" class="t" text-anchor="middle">RUN で動かしたプログラムの RTS／モニタの DOS</text>
+  <text x="530" y="149" class="s" text-anchor="middle">戻り番地は ROM。RAM 上の CCP には戻らない</text>
+  <path d="M530 154 v22" class="ln"/>
+  <polygon points="530,178 650,212 530,246 410,212" fill="#fff9db" stroke="#3e4c59"/>
+  <text x="530" y="208" class="t" text-anchor="middle">BIOS 区画は正しい？</text>
+  <text x="530" y="224" class="s" text-anchor="middle">自己検査・範囲検査</text>
+  <path d="M650 212 h40 v330" class="ln"/>
+  <text x="656" y="204" class="no">いいえ</text>
+  <path d="M530 246 v20" class="ln"/>
+  <text x="538" y="260" class="yes">はい</text>
+  <rect x="400" y="268" width="260" height="46" rx="4" fill="#f5f7fa" stroke="#3e4c59"/>
+  <text x="530" y="288" class="t" text-anchor="middle">CCP と核の和を計算</text>
+  <text x="530" y="305" class="s" text-anchor="middle">約 0.09 秒。作業は BIOS 区画とレジスタだけ</text>
+  <path d="M530 314 v20" class="ln"/>
+  <polygon points="530,336 640,366 530,396 420,366" fill="#fff9db" stroke="#3e4c59"/>
+  <text x="530" y="370" class="t" text-anchor="middle">両方一致？</text>
+  <path d="M420 366 h-40 v226 h80" class="ln"/>
+  <text x="384" y="358" class="yes">はい</text>
+  <path d="M530 396 v20" class="ln"/>
+  <text x="538" y="410" class="no">いいえ</text>
+  <rect x="400" y="418" width="260" height="62" rx="4" fill="#fff0f0" stroke="#c92a2a"/>
+  <text x="530" y="438" class="t" text-anchor="middle">壊れた区画だけ SD から静かに読む</text>
+  <text x="530" y="456" class="s" text-anchor="middle">CCP だけなら約 1.2 秒、核なら約 3.1 秒</text>
+  <text x="530" y="471" class="s" text-anchor="middle">Welcome は出さない</text>
+  <path d="M530 480 v18" class="ln"/>
+  <polygon points="530,500 640,526 530,552 420,526" fill="#fff9db" stroke="#3e4c59"/>
+  <text x="530" y="530" class="t" text-anchor="middle">読み直した和が一致？</text>
+  <path d="M530 552 v26" class="ln"/>
+  <text x="538" y="570" class="yes">はい</text>
+  <path d="M640 526 h50" class="ln"/>
+  <text x="646" y="518" class="no">いいえ</text>
+  <rect x="460" y="580" width="140" height="0" fill="none"/>
+  <rect x="440" y="580" width="180" height="46" rx="4" fill="#d3f9d8" stroke="#2b8a3e"/>
+  <text x="530" y="600" class="t" text-anchor="middle">CCP の warm 入口（+3）</text>
+  <text x="530" y="617" class="s" text-anchor="middle">保留中のエラーがあれば ?</text>
+  <path d="M530 626 v20" class="ln"/>
+  <rect x="440" y="648" width="180" height="40" rx="20" fill="#2b8a3e"/>
+  <text x="530" y="673" class="t" text-anchor="middle" style="fill:#fff">DOS のプロンプト</text>
+
+  <rect x="692" y="530" width="0" height="0"/>
+  <rect x="660" y="542" width="0" height="0"/>
+  <rect x="610" y="700" width="0" height="0"/>
+  <rect x="676" y="544" width="150" height="76" rx="4" fill="#fff0f0" stroke="#c92a2a"/>
+  <text x="751" y="564" class="t" text-anchor="middle">BIOS 区画を無効</text>
+  <text x="751" y="582" class="s" text-anchor="middle">? とエラーコード</text>
+  <text x="751" y="598" class="s" text-anchor="middle">→ モニタへ</text>
+  <text x="751" y="613" class="s" text-anchor="middle">（次は BOOT3 が要る）</text>
+
+  <!-- ===== monitor column ===== -->
+  <rect x="820" y="96" width="220" height="74" rx="6" fill="#f1f3f5" stroke="#52606d"/>
+  <text x="930" y="116" class="t" text-anchor="middle">jmp $E0E3（CONTRL）</text>
+  <text x="930" y="134" class="t" text-anchor="middle">jmp $E20D（v2 の EXIT）</text>
+  <text x="930" y="152" class="t" text-anchor="middle">SWI／G のあとの RTS</text>
+  <text x="930" y="166" class="s" text-anchor="middle">DOS の EXIT もここへ</text>
+  <path d="M930 170 v24" class="ln"/>
+  <rect x="820" y="196" width="220" height="62" rx="4" fill="#f5f7fa" stroke="#3e4c59"/>
+  <text x="930" y="216" class="t" text-anchor="middle">BIOS 区画が正しければ</text>
+  <text x="930" y="234" class="t" text-anchor="middle">和を検査だけする</text>
+  <text x="930" y="251" class="s" text-anchor="middle">読み直さない（R で再開できるように）</text>
+  <path d="M930 258 v24" class="ln"/>
+  <rect x="820" y="284" width="220" height="46" rx="4" fill="#f5f7fa" stroke="#3e4c59"/>
+  <text x="930" y="304" class="t" text-anchor="middle">壊れていたら注意を 1 行</text>
+  <text x="930" y="321" class="s" text-anchor="middle">結果は BIOS 区画に記録</text>
+  <path d="M930 330 v24" class="ln"/>
+  <rect x="830" y="356" width="200" height="40" rx="20" fill="#52606d"/>
+  <text x="930" y="381" class="t" text-anchor="middle" style="fill:#fff">モニタのプロンプト（] ）</text>
+  <rect x="820" y="420" width="220" height="104" rx="4" fill="#fff9db" stroke="#e0b400"/>
+  <text x="832" y="442" class="s">モニタにいる間に M・F・L・RAMTEST</text>
+  <text x="832" y="458" class="s">で壊れることもあるので、DOS に</text>
+  <text x="832" y="474" class="s">入るときにもう一度検査する。</text>
+  <text x="832" y="494" class="s">モニタの DOS コマンドは左の warm の</text>
+  <text x="832" y="510" class="s">流れに入る（BOOT3 は常に cold）。</text>
+  <path d="M820 470 C 760 470, 760 125, 732 125" class="ln" stroke-dasharray="4 3"/>
+</svg>

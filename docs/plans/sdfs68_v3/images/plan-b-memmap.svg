@@ -1,0 +1,159 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="660" viewBox="0 0 1040 660" font-family="'Noto Sans CJK JP','Noto Sans JP',sans-serif">
+  <defs>
+    <style>
+      .t{font-size:13px;fill:#1f2933}
+      .s{font-size:11px;fill:#52606d}
+      .a{font-size:11px;fill:#3e4c59;font-family:'DejaVu Sans Mono',monospace}
+      .h{font-size:16px;font-weight:bold;fill:#1f2933}
+      .h2{font-size:14px;font-weight:bold;fill:#1f2933}
+      .box{stroke:#3e4c59;stroke-width:1}
+    </style>
+  </defs>
+  <rect width="1040" height="660" fill="#ffffff"/>
+  <text x="20" y="30" class="h">図 1　案 B のメモリマップ（sbcio_vdg と k6802_vdg）</text>
+  <text x="20" y="50" class="s">高さは模式。番地とバイト数は本文 4 章が正。破線の枠は「プログラムが潰してよい」区画</text>
+
+  <!-- column headers -->
+  <text x="185" y="76" class="h2" text-anchor="middle">sbcio_vdg</text>
+  <text x="365" y="76" class="h2" text-anchor="middle">k6802_vdg</text>
+
+  <!-- rows: y positions -->
+  <!-- ROM -->
+  <rect x="110" y="86" width="150" height="56" fill="#52606d" class="box"/>
+  <rect x="290" y="86" width="150" height="56" fill="#52606d" class="box"/>
+  <text x="185" y="112" class="t" text-anchor="middle" fill="#fff" style="fill:#fff">ROM 8KB</text>
+  <text x="185" y="130" class="s" text-anchor="middle" style="fill:#e4e7eb">BIOS 役 + モニタ</text>
+  <text x="365" y="112" class="t" text-anchor="middle" style="fill:#fff">ROM 8KB</text>
+  <text x="365" y="130" class="s" text-anchor="middle" style="fill:#e4e7eb">BIOS 役 + モニタ</text>
+  <text x="100" y="92" class="a" text-anchor="end">$FFFF</text>
+  <text x="100" y="140" class="a" text-anchor="end">$E000</text>
+
+  <!-- C000 -->
+  <rect x="110" y="142" width="150" height="56" fill="#f9c784" class="box"/>
+  <rect x="290" y="142" width="150" height="56" fill="#d9dde3" class="box"/>
+  <text x="185" y="168" class="t" text-anchor="middle">作業窓 8KB</text>
+  <text x="185" y="186" class="s" text-anchor="middle">データ専用（右の拡大図）</text>
+  <text x="365" y="168" class="t" text-anchor="middle">VDG の VRAM</text>
+  <text x="365" y="186" class="s" text-anchor="middle">K68-VDG</text>
+  <text x="100" y="196" class="a" text-anchor="end">$C000</text>
+
+  <!-- A000 -->
+  <rect x="110" y="198" width="150" height="56" fill="#d9dde3" class="box"/>
+  <rect x="290" y="198" width="150" height="56" fill="#f9c784" class="box"/>
+  <text x="185" y="224" class="t" text-anchor="middle">VDG の VRAM</text>
+  <text x="185" y="242" class="s" text-anchor="middle">VRAM は $A000</text>
+  <text x="365" y="224" class="t" text-anchor="middle">作業窓 8KB</text>
+  <text x="365" y="242" class="s" text-anchor="middle">データ専用（右の拡大図）</text>
+  <text x="100" y="252" class="a" text-anchor="end">$A000</text>
+
+  <!-- I/O -->
+  <rect x="110" y="254" width="150" height="40" fill="#eef0f3" class="box"/>
+  <rect x="290" y="254" width="150" height="40" fill="#eef0f3" class="box"/>
+  <text x="185" y="279" class="t" text-anchor="middle">I/O など</text>
+  <text x="365" y="279" class="t" text-anchor="middle">I/O など</text>
+  <text x="100" y="292" class="a" text-anchor="end">$8000</text>
+
+  <!-- core -->
+  <rect x="110" y="294" width="150" height="58" fill="#c3b5f5" class="box"/>
+  <rect x="290" y="294" width="150" height="58" fill="#c3b5f5" class="box"/>
+  <text x="185" y="317" class="t" text-anchor="middle">核（BDOS 相当）</text>
+  <text x="185" y="335" class="s" text-anchor="middle">枠 4KB。先頭に SDFS3API</text>
+  <text x="365" y="317" class="t" text-anchor="middle">核（BDOS 相当）</text>
+  <text x="365" y="335" class="s" text-anchor="middle">枠 4KB。先頭に SDFS3API</text>
+  <text x="100" y="350" class="a" text-anchor="end">$7000</text>
+
+  <!-- CCP -->
+  <rect x="110" y="352" width="150" height="40" fill="#b7e4c7" class="box" stroke-dasharray="5 3"/>
+  <rect x="290" y="352" width="150" height="40" fill="#b7e4c7" class="box" stroke-dasharray="5 3"/>
+  <text x="185" y="370" class="t" text-anchor="middle">CCP 1KB</text>
+  <text x="185" y="386" class="s" text-anchor="middle">DIR・TYPE・.COM・EXIT</text>
+  <text x="365" y="370" class="t" text-anchor="middle">CCP 1KB</text>
+  <text x="365" y="386" class="s" text-anchor="middle">DIR・TYPE・.COM・EXIT</text>
+  <text x="100" y="390" class="a" text-anchor="end">$6C00</text>
+
+  <!-- transient high -->
+  <rect x="110" y="392" width="150" height="40" fill="#e3f5e9" class="box" stroke-dasharray="5 3"/>
+  <rect x="290" y="392" width="150" height="40" fill="#e3f5e9" class="box" stroke-dasharray="5 3"/>
+  <text x="185" y="410" class="t" text-anchor="middle">上端の一時区画 1KB</text>
+  <text x="185" y="426" class="s" text-anchor="middle">LOAD/RUN の本体が動く</text>
+  <text x="365" y="410" class="t" text-anchor="middle">上端の一時区画 1KB</text>
+  <text x="365" y="426" class="s" text-anchor="middle">LOAD/RUN の本体が動く</text>
+  <text x="100" y="430" class="a" text-anchor="end">$6800</text>
+
+  <!-- TPA -->
+  <rect x="110" y="432" width="150" height="150" fill="#cfe5f7" class="box" stroke-dasharray="5 3"/>
+  <rect x="290" y="432" width="150" height="150" fill="#cfe5f7" class="box" stroke-dasharray="5 3"/>
+  <text x="185" y="500" class="t" text-anchor="middle">TPA 本体 25.75KB</text>
+  <text x="185" y="518" class="s" text-anchor="middle">.COM は $0100 から</text>
+  <text x="365" y="500" class="t" text-anchor="middle">TPA 本体 25.75KB</text>
+  <text x="365" y="518" class="s" text-anchor="middle">.COM は $0100 から</text>
+  <text x="100" y="580" class="a" text-anchor="end">$0100</text>
+
+  <!-- ZP -->
+  <rect x="110" y="582" width="150" height="20" fill="#f5f7fa" class="box"/>
+  <rect x="290" y="582" width="150" height="20" fill="#f5f7fa" class="box"/>
+  <text x="185" y="596" class="s" text-anchor="middle">ゼロページ</text>
+  <text x="365" y="596" class="s" text-anchor="middle">ゼロページ</text>
+  <text x="100" y="604" class="a" text-anchor="end">$0000</text>
+
+  <!-- brackets on the right of column 2 -->
+  <path d="M448 352 h8 v230 h-8" fill="none" stroke="#1f6feb" stroke-width="1.5"/>
+  <text x="462" y="456" class="s" style="fill:#1f6feb">GET_MEMTOP</text>
+  <text x="462" y="471" class="a" style="fill:#1f6feb">= $6FFF</text>
+  <text x="462" y="486" class="s" style="fill:#1f6feb">.COM の上限</text>
+  <path d="M448 294 h18 v98 h-18" fill="none" stroke="#7b2cbf" stroke-width="1.5"/>
+  <text x="472" y="330" class="s" style="fill:#7b2cbf">SD 上の</text>
+  <text x="472" y="345" class="s" style="fill:#7b2cbf">1 本のイメージ</text>
+  <text x="472" y="360" class="s" style="fill:#7b2cbf">（和は CCP と</text>
+  <text x="472" y="375" class="s" style="fill:#7b2cbf">　核で別々）</text>
+  <text x="110" y="628" class="s">S-record の書き込み先（LOAD/RUN）: $0000〜$67FF。窓・核・ROM には書かせない</text>
+  <text x="110" y="646" class="s">低位 RAM の配置は 2 プロファイルで同じ。違うのは作業窓と VRAM の入れ替わりだけ</text>
+
+  <!-- window zoom -->
+  <text x="600" y="76" class="h2">作業窓 8KB の区画（v3 モード）</text>
+  <text x="600" y="94" class="s">W = $C000（sbcio_vdg）／ $A000（k6802_vdg）</text>
+  <g>
+    <rect x="680" y="106" width="250" height="44" fill="#fde2b8" class="box"/>
+    <text x="805" y="124" class="t" text-anchor="middle">スタック 512B</text>
+    <text x="805" y="141" class="s" text-anchor="middle">STACK_TOP = W+$1FFF（現状どおり）</text>
+    <text x="672" y="112" class="a" text-anchor="end">W+$1FFF</text>
+    <text x="672" y="148" class="a" text-anchor="end">W+$1E00</text>
+
+    <rect x="680" y="150" width="250" height="70" fill="#fff4e0" class="box"/>
+    <text x="805" y="180" class="t" text-anchor="middle">一時データ 4.5KB（将来）</text>
+    <text x="805" y="198" class="s" text-anchor="middle">BASIC SAVE の staging など。コードは置かない</text>
+    <text x="672" y="218" class="a" text-anchor="end">W+$0C00</text>
+
+    <rect x="680" y="220" width="250" height="56" fill="#fff4e0" class="box"/>
+    <text x="805" y="244" class="t" text-anchor="middle">バッファプール 2KB（将来）</text>
+    <text x="805" y="262" class="s" text-anchor="middle">FAT キャッシュ・ストリーム用</text>
+    <text x="672" y="274" class="a" text-anchor="end">W+$0400</text>
+
+    <rect x="680" y="276" width="250" height="44" fill="#f9c784" class="box" stroke="#b54708" stroke-width="2"/>
+    <text x="805" y="294" class="t" text-anchor="middle">resident ワーク 224B（新）</text>
+    <text x="805" y="311" class="s" text-anchor="middle">イメージから出した 7B の変数ほか</text>
+    <text x="672" y="318" class="a" text-anchor="end">W+$0320</text>
+
+    <rect x="680" y="320" width="250" height="44" fill="#f4a259" class="box" stroke="#b54708" stroke-width="2"/>
+    <text x="805" y="338" class="t" text-anchor="middle">BIOS 区画 32B（新、ROM 専用）</text>
+    <text x="805" y="355" class="s" text-anchor="middle">配置・期待値（和）・slot・自己検査</text>
+    <text x="672" y="362" class="a" text-anchor="end">W+$0300</text>
+
+    <rect x="680" y="364" width="250" height="44" fill="#e4e7eb" class="box"/>
+    <text x="805" y="382" class="t" text-anchor="middle">ROM モニタページ（凍結）</text>
+    <text x="805" y="399" class="s" text-anchor="middle">LINE_BUF・SD_*・FAT_*。VDG は +$F9〜</text>
+    <text x="672" y="406" class="a" text-anchor="end">W+$0200</text>
+
+    <rect x="680" y="408" width="250" height="56" fill="#e4e7eb" class="box"/>
+    <text x="805" y="430" class="t" text-anchor="middle">セクタバッファ 512B</text>
+    <text x="805" y="448" class="s" text-anchor="middle">ROM の再ロードと resident が共用</text>
+    <text x="672" y="462" class="a" text-anchor="end">W+$0000</text>
+  </g>
+  <rect x="600" y="490" width="420" height="120" fill="#f5f7fa" stroke="#cbd2d9"/>
+  <text x="614" y="512" class="t">v2 モードでは窓を今までどおりに使う（モード排他）</text>
+  <text x="614" y="532" class="s">・v2 の stage1 は W+$0400〜、v2 SDFS は W+$1000〜</text>
+  <text x="614" y="550" class="s">・v2 の BOOT は BIOS 区画を無効にしてから始める</text>
+  <text x="614" y="570" class="t">ROM が守る範囲</text>
+  <text x="614" y="590" class="s">・W+$0300〜$031F は ROM だけが書く。resident も使わない</text>
+  <text x="614" y="606" class="s">・RAMTEST2 で壊れても、自己検査で「未ロード」と判定する</text>
+</svg>

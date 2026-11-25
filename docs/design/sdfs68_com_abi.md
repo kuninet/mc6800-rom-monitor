@@ -1,5 +1,7 @@
 # SDFS/68 .COM トランジェントコマンドABI
 
+> この文書の本文は SDFS/68 v2 の仕様である。v3 案 B での変更は末尾の「SDFS/68 v3 案 B での変更（#310）」を参照。
+
 ## 対象
 
 - Issue: #191
@@ -220,6 +222,22 @@ SDFS/68 は初期実装では `.COM` が低RAM内のどの領域を使うかま�
 - `.COM` 以外の未定義入力は従来どおり `?` を表示する。
 - `RUN HELLO.S`、`RUN addr`、`LOAD filename`、`DIR`、`EXIT` の既存動作を維持する。
 - `make sdfs MONITOR_PROFILE=sbcio_vdg` と `make sdfs MONITOR_PROFILE=k6802_vdg` で `SDFS_LOAD_LIMIT` を超えない。
+
+## SDFS/68 v3 案 B での変更（#310）
+
+SDFS/68 v3（案 B）では、このABIのうち次が変わる。それ以外（`$0100` 固定ロード、`A`=0・`X`=引数テール・`B`=長さのエントリ規約、`SWI` を正常終了に使わないこと）は同じである。詳細は [../plans/sdfs68_v3/issue-310_plan_b_abi.md](../plans/sdfs68_v3/issue-310_plan_b_abi.md) を正とする。
+
+| 項目 | v2（この文書の本文） | v3 案 B |
+| --- | --- | --- |
+| `RTS` の戻り先 | resident の `jsr $0100` の直後 | ROM の WBOOT（`BIOS_EXEC` が戻り番地として積む）。ROM が CCP と核を検査し、必要なら読み直して CCP の warm 入口へ入る |
+| 明示的な終了 | `RTS` | `RTS` または `jmp $E0E6`（WBOOT） |
+| プログラムのスタック | `STACK_TOP` | `W+$1F7F` から（モニタは `W+$1F80-$1FFF`。決定 16） |
+| メモリ上限 | `USER_RAM_END`（`$7FFF`）。最大 `$7F00` バイト | `GET_MEMTOP` = `$6FFF`。最大 `$6F00` バイト（`$0100-$6FFF`） |
+| API の見つけ方 | なし | ROM の `BIOS_GET_API`（`$E0EC`）。窓の番地は持たせない |
+| 起動の仕組み | resident のコマンド解釈部が `JSR $0100` | 核の `LOAD_PATH`（flags bit0）が読み込み、`BIOS_EXEC` で起動して戻らない |
+| 暗黙の検索 | なし（`.COM` 明示） | 拡張子なしの語は `<語>.COM` をルート → `/BIN` の順に探す（決定 5） |
+| プロンプト | `SDFS> ` | `SDFS3> ` |
+| LOAD・RUN | 内蔵コマンド | `/BIN/LOAD.COM`・`RUN.COM` + `XLDR.OVL`（`$6800`）。S-record の書き込み範囲は `$0000-$67FF`。`LOAD` のあとの `RUN addr` は `$0100-$014F`（推測）を上書きするので、`$0100` から始まるプログラムは `RUN file` かモニタの `G` で起動する（決定 6） |
 
 ## 関連ドキュメント
 

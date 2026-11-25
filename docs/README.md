@@ -71,6 +71,7 @@ ROM常駐FATを確認したい場合は、profileではなく直接構成軸で 
 - [plans/sdfs68_v3/issue-279_memtop_caps.md](plans/sdfs68_v3/issue-279_memtop_caps.md): SDFS/68 v3 GET_MEMTOP / GET_CAPS API
 - [plans/sdfs68_v3/issue-276_cmd_gateway.md](plans/sdfs68_v3/issue-276_cmd_gateway.md): SDFS/68 v3 ROM CMD gateway
 - [plans/sdfs68_v3/issue-278_sdfs3sys_image.md](plans/sdfs68_v3/issue-278_sdfs3sys_image.md): SDFS/68 v3 SDFS3SYS system image生成
+- [plans/sdfs68_v3/issue-310_plan_b_abi.md](plans/sdfs68_v3/issue-310_plan_b_abi.md): SDFS/68 v3 案 B（CP/M 式の完全分離）の配置とROM/resident ABI
 - [plans/issue-141_sdfs68_load.md](plans/issue-141_sdfs68_load.md): SDFS/68 LOAD正式化
 - [plans/issue-149_sdfs68_run_addr.md](plans/issue-149_sdfs68_run_addr.md): SDFS/68 RUN addr
 - [plans/issue-150_sdfs68_run_file.md](plans/issue-150_sdfs68_run_file.md): SDFS/68 RUN filename

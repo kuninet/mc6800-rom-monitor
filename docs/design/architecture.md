@@ -91,6 +91,16 @@ ROM 制約が厳しいので、初版ではここを切り離して考える。
 - コマンド処理とローダ処理は共通の 16 進変換を使う
 - ROM 制約が厳しいため、重い機能はフェーズごとに追加する
 
+## SDFS/68 v3 案 B の層構成（#310）
+
+SDFS/68 v3 では、ROM モニタが持つのは固定番地の BIOS 入口表（`$E0E6` から 16 本）、窓の BIOS 区画、SDFS3SYS ヘッダの読み方だけにする。DOS 側は RAM 上で次の 3 層に分かれる。
+
+- CCP（`$6C00`）: DOS のプロンプト `SDFS3> `、`DIR`・`TYPE`・`EXIT`、`.COM` の起動要求
+- 核（`$7000`）: FAT32、パス解決、ファイル API（API major 2）
+- `.COM`: `LOAD.COM`・`RUN.COM` を含む外部コマンド。戻り先は ROM の WBOOT
+
+プログラムからの戻りは必ず ROM を通り、ROM が CCP と核の和を検査して、壊れた区画だけを SD から読み直す。詳細は [../plans/sdfs68_v3/issue-310_plan_b_abi.md](../plans/sdfs68_v3/issue-310_plan_b_abi.md) を参照。
+
 ## 今後の分離候補
 
 - `src/platform/` へのボード依存部の分離

@@ -313,3 +313,14 @@ PR前の `make test` は、ドキュメントのみの変更として省略で�
 - #260: メモリマップとBank RAM利用方針。
 - #261: BASIC SAVE/LOAD連携方式。
 - #245: stage1 API拡張とSDFS/68 FATコードdedup。
+
+## 案 B での変更（#310）
+
+2026-11-25 に決定した案 B（CP/M 式の完全分離）で、この文書の API は次のとおり変わる。この節は追記であり、上の本文は #259 時点の設計として書き換えない。正は [issue-310_plan_b_abi.md](issue-310_plan_b_abi.md) の 2-3 と 5 章である。
+
+- API を **major 2** に上げる（決定 9）。ROM は major だけを見て、スロット数は検査しない
+- **slot 1 を予約に戻す**。旧 `CMD_DISPATCH` は、CCP が壊れたときに ROM が RAM のコードを実行する危険があるため外す。`NOT_IMPLEMENTED` を返す。ROM の CMD ゲートウェイも消える
+- **slot 13 `INIT` を「出力なしの核の初期化」にする**。Welcome 表示は CCP の cold 入口へ移る。ROM は INIT を呼ばない（#298 の「ロードした側が呼ぶ」契約は、ROM から CCP の cold 入口に変わる）
+- slot 2 `LOAD_PATH` は、パラメータブロックで生のファイルを `load`〜`limit` に読み、`flags` の bit0 で `BIOS_EXEC` による起動までを行う形にする。slot 3〜5 のストリーム読みは LOAD.COM・RUN.COM・`XLDR.OVL` が使うため、保留から採用に変える
+- slot 7 `GET_MEMTOP` は `$6FFF`（`SDFS3_CORE_BASE - 1`）を返す。slot 14・15 はディレクトリ列挙用に予約する。slot 9〜12 の予約は今のまま
+- `SDFS3_LAST_ERROR` などの resident の変数は窓の `W+$0320` 以降へ移る（#311）
