@@ -528,40 +528,406 @@ def test_sdfs3_cmd_load_run_and_com_read_fat_files() -> None:
     print("[PASS] test_sdfs3_cmd_load_run_and_com_read_fat_files")
 
 
-def test_dos_gate_checks_ccp_and_core_sums() -> None:
-    """EXIT してモニタで CCP や核を 1 バイト変えると、DOS は「?」でモニタに残る。戻すと入れる。"""
-    config = _v3("k6802_vdg")
-    payload = config["sdfs3sys"][HEADER_SIZE:]
-    ccp_addr, core_addr = V3_CCP_BASE + 0x10, V3_CORE_BASE + 0x100
-    ccp_orig = payload[ccp_addr - V3_CCP_BASE]
-    core_orig = payload[core_addr - V3_CCP_BASE]
+# ---------------------------------------------------------------------------
+# #314 戻り口の検査と静かな再ロード、BOOT3 の 1 回読み、モニタの門、スタックの分離
+# ---------------------------------------------------------------------------
 
-    def poke(address: int, value: int) -> str:
-        return f"M{address:04X}\r{value:02X}\r.\r"
+# $6400-$6FFF を $00 で埋めて RTS(大きな .COM が CCP を潰した代わり)
+ZAPCCP_COM = bytes(
+    [0xCE, V3_CCP_BASE >> 8, V3_CCP_BASE & 0xFF, 0x6F, 0x00, 0x08,
+     0x8C, V3_CORE_BASE >> 8, V3_CORE_BASE & 0xFF, 0x26, 0xF8, 0x39]
+)
+ZAPCORE_ADDR = V3_CORE_BASE + 0x100
+# 核の 1 バイトを反転して RTS
+ZAPCORE_COM = bytes([0xB6, ZAPCORE_ADDR >> 8, ZAPCORE_ADDR & 0xFF, 0x43,
+                     0xB7, ZAPCORE_ADDR >> 8, ZAPCORE_ADDR & 0xFF, 0x39])
+SWI_DATA_ADDR = V3_CCP_BASE + 0x100
+SWI_BREAK_ADDR = 0x0105
+# $0100: CCP の $6500 に $5A を置き、$0105 の NOP(ここに B で SWI を置く)、$6500 を $0210 へ
+# 写して RTS。モニタの SWI はブレークポイントとして扱われ(R は SWI の番地から再開する)、
+# B が置いた SWI だけが元の命令に戻るので、止める SWI は B で置く。
+SWI_PROG = bytes([0x86, 0x5A, 0xB7, SWI_DATA_ADDR >> 8, SWI_DATA_ADDR & 0xFF, 0x01,
+                  0xB6, SWI_DATA_ADDR >> 8, SWI_DATA_ADDR & 0xFF, 0xB7, 0x02, 0x10, 0x39])
 
-    out = _v3_run(
-        config,
-        "BOOT3\rEXIT\r"
-        + poke(ccp_addr, ccp_orig ^ 0x01)
-        + "DOS\r"
-        + poke(ccp_addr, ccp_orig)
-        + "DOS\rEXIT\r"
-        + poke(core_addr, core_orig ^ 0x80)
-        + "DOS\r"
-        + poke(core_addr, core_orig)
-        + "DOS\r\r",
-        sd_image=_build_sdfs3sys_sd_image(config["sdfs3sys"]),
-        max_cycles=400_000_000,
-        timeout=90,
+
+def _v3_run_sd(
+    config: dict,
+    input_text: str,
+    *,
+    sd_image: bytes,
+    fail_from: int | None = None,
+    swap_image: bytes | None = None,
+    swap_at: int | None = None,
+    stack_watch: int | None = None,
+    dump_range: str = "0200-0211",
+    max_cycles: int = 900_000_000,
+    timeout: int = 240,
+) -> tuple[str, list[tuple[int, int, int, int]], str]:
+    """エミュレータを SD の記録付きで動かす。(\\r を残した出力, CMD17 の記録, stderr) を返す。
+    記録は (番号, LBA, R1, その時点の送信済みバイト数)。送信済みバイト数は出力の位置と同じ。"""
+    TEMP_ROOT.mkdir(parents=True, exist_ok=True)
+    log_path = TEMP_ROOT / f"sdlog-{uuid4().hex}.txt"
+    swap_path = TEMP_ROOT / f"swap-{uuid4().hex}.img"
+    args = ["--sd-log", str(log_path)]
+    if fail_from is not None:
+        args += ["--sd-fail-cmd17-from", str(fail_from)]
+    if swap_image is not None:
+        swap_path.write_bytes(swap_image)
+        args += ["--sd-swap-image", str(swap_path), "--sd-swap-at", str(swap_at)]
+    if stack_watch is not None:
+        args += ["--stack-watch", f"{stack_watch:04X}"]
+    try:
+        stdout, stderr, rc = _run_emu(
+            rom_path=config["rom"],
+            input_text=input_text,
+            max_cycles=max_cycles,
+            sd_image=sd_image,
+            dump_range=dump_range,
+            timeout=timeout,
+            extra_args=args,
+            keep_cr=True,
+        )
+        log = [
+            tuple(int(v, 16) if i == 2 else int(v) for i, v in enumerate(line.split()))
+            for line in log_path.read_text(encoding="ascii").splitlines()
+        ]
+    finally:
+        log_path.unlink(missing_ok=True)
+        swap_path.unlink(missing_ok=True)
+    assert rc == 0 and "[TIMEOUT]" not in stderr and "サイクル上限" not in stderr, (
+        f"{config['profile']}: emulator failed: rc={rc} stderr={stderr[-400:]!r}"
     )
-    dos = [part for part in out.split("] DOS\n")[1:]]
-    assert len(dos) == 4, f"expected four DOS commands: {out!r}"
-    assert dos[0].startswith("?\n] "), f"broken CCP should be rejected: {dos[0][:80]!r}"
-    assert dos[1].startswith(PROMPT), f"restored CCP should enter DOS: {dos[1][:80]!r}"
-    assert dos[2].startswith("?\n] "), f"broken core should be rejected: {dos[2][:80]!r}"
-    assert dos[3].startswith(PROMPT), f"restored core should enter DOS: {dos[3][:80]!r}"
-    assert out.count(WELCOME) == 1
-    print("[PASS] test_dos_gate_checks_ccp_and_core_sums")
+    return stdout, log, stderr
+
+
+def _segment(raw: str, marker: str, nth: int = 0, end: str = PROMPT) -> tuple[int, int]:
+    """raw の nth 番目の marker の直後から、次の end の手前までの位置を返す。"""
+    pos = -1
+    for _ in range(nth + 1):
+        pos = raw.index(marker, pos + 1)
+    start = pos + len(marker)
+    return start, raw.index(end, start)
+
+
+def _reads(log: list, start: int, stop: int, *, system_only: bool = False) -> list[int]:
+    """出力の位置 start〜stop(両端を含む)の間に起きた CMD17 の LBA。system_only なら SDFS3SYS の
+    範囲だけ。記録の送信済みバイト数は「その時点までに出した文字数」なので、stop の文字(次の
+    プロンプトの先頭)を出す前の読み出しは tx == stop になる。"""
+    return [
+        lba
+        for _n, lba, _r1, tx in log
+        if start <= tx <= stop
+        and (not system_only or SDFS3SYS_FIXED_LBA <= lba < SDFS3SYS_FAT_PARTITION_LBA)
+    ]
+
+
+def _system_sectors(config: dict) -> dict[str, list[int]]:
+    """SDFS3SYS のセクタの LBA。ccp・core は読み直しで読むはずの LBA(先頭セクタは 1 回)。"""
+    size = len(config["sdfs3sys"])
+    last = SDFS3SYS_FIXED_LBA + (size - 1) // SECTOR_SIZE
+    ccp_end = HEADER_SIZE + (V3_CORE_BASE - V3_CCP_BASE)  # ファイル上の CCP の終端(最後の次)
+    ccp = list(range(SDFS3SYS_FIXED_LBA, SDFS3SYS_FIXED_LBA + (ccp_end - 1) // SECTOR_SIZE + 1))
+    core_first = SDFS3SYS_FIXED_LBA + ccp_end // SECTOR_SIZE
+    core = [SDFS3SYS_FIXED_LBA, *range(core_first, last + 1)]
+    return {"all": list(range(SDFS3SYS_FIXED_LBA, last + 1)), "ccp": ccp, "core": core}
+
+
+def _wboot_sd_image(config: dict) -> bytes:
+    return _build_sdfs3sys_fat_sd_image(
+        config["sdfs3sys"],
+        [
+            _file("README.TXT", b"HELLO FROM README\r\n"),
+            _file("HELLO.COM", config["hello_com"]),
+            _file("ZAPCCP.COM", ZAPCCP_COM),
+            _file("ZAPCORE.COM", ZAPCORE_COM),
+            _file("SWI.S", _srec_file(0x0100, SWI_PROG, entry_address=0x0100)),
+        ],
+    )
+
+
+def _reset_address(config: dict) -> int:
+    rom = config["rom"].read_bytes()
+    return (rom[-2] << 8) | rom[-1]
+
+
+def test_rom_boot3_reads_image_once() -> None:
+    """BOOT3 は SDFS3SYS のセクタを 64 から 1 回ずつ読む(2 回読みならセクタ数の 2 倍)。"""
+    for profile in V3_PROFILES:
+        config = _v3(profile)
+        sectors = _system_sectors(config)
+        raw, log, _ = _v3_run_sd(config, "BOOT3\rDIR\r\r", sd_image=_wboot_sd_image(config))
+        start, stop = _segment(raw, "] BOOT3")
+        reads = _reads(log, start, stop)
+        assert reads == sectors["all"], f"{profile}: BOOT3 should read each sector once: {reads}"
+        assert len(reads) == -(-len(config["sdfs3sys"]) // SECTOR_SIZE)
+        assert "README.TXT" in _dos(raw.replace("\r", ""), "DIR")
+    print("[PASS] test_rom_boot3_reads_image_once")
+
+
+def test_wboot_reloads_only_broken_parts() -> None:
+    """健全な戻りは SD を読まない。CCP だけ・核だけが壊れたら、その範囲のセクタだけを
+    何も表示せずに読み直す。SWI で止めたときは注意だけ出して読み直さず、R で再開した
+    プログラムの RTS が WBOOT に着いてから CCP を読み直す(シナリオ 1・2・3・5)。"""
+    for profile in V3_PROFILES:
+        config = _v3(profile)
+        sectors = _system_sectors(config)
+        payload = config["sdfs3sys"][HEADER_SIZE:]
+        swi_orig = payload[SWI_DATA_ADDR - V3_CCP_BASE]
+        assert swi_orig != 0x5A
+        raw, log, _ = _v3_run_sd(
+            config,
+            "BOOT3\rHELLO.COM\rZAPCCP.COM\rDIR\rZAPCORE.COM\rDIR\rLOAD SWI.S\rEXIT\r"
+            f"B{SWI_BREAK_ADDR:04X}\rDOS\rRUN 0100\rR\rDIR\rEXIT\r"
+            f"D0210-0210\rD{SWI_DATA_ADDR:04X}-{SWI_DATA_ADDR:04X}\r\r",
+            sd_image=_wboot_sd_image(config),
+        )
+        out = raw.replace("\r", "")
+        # 1. 健全な戻り: HELLO.COM の出力からプロンプトまで SD を読まない
+        start, stop = _segment(raw, PROMPT + "HELLO.COM")
+        done = raw.index("HELLO COM", start) + len("HELLO COM")
+        assert _reads(log, start, done), f"{profile}: HELLO.COM should be read from FAT"
+        assert _reads(log, start, done, system_only=True) == []
+        assert _reads(log, done, stop) == [], f"{profile}: healthy return must not touch SD"
+        # 2. CCP が潰れた: CCP のセクタだけを、何も出さずに読み直す
+        start, stop = _segment(raw, PROMPT + "ZAPCCP.COM")
+        assert raw[start:stop] == "\r\n", f"{profile}: reload must be silent: {raw[start:stop]!r}"
+        reads = _reads(log, start, stop, system_only=True)
+        assert reads == sectors["ccp"], f"{profile}: CCP reload read {reads}, want {sectors['ccp']}"
+        assert "README.TXT" in _dos(out, "DIR")
+        # 3. 核が壊れた: 先頭セクタ(ヘッダの照合)と核のセクタだけ
+        start, stop = _segment(raw, PROMPT + "ZAPCORE.COM")
+        assert raw[start:stop] == "\r\n", f"{profile}: core reload must be silent: {raw[start:stop]!r}"
+        reads = _reads(log, start, stop, system_only=True)
+        assert reads == sectors["core"], f"{profile}: core reload read {reads}, want {sectors['core']}"
+        before = out[: out.index("LOAD SWI.S")]
+        assert before.count("README.TXT A 00000013") == 2, f"{profile}: DIR after reloads: {before[-900:]!r}"
+        # 5. SWI(B で置いたブレークポイント): 注意を 1 行出すが読み直さない。R のあとの RTS で
+        #    WBOOT に着き、CCP を読み直す
+        start, stop = _segment(raw, PROMPT + "RUN 0100", end="] R\r\n")
+        brk = raw[start:stop].replace("\r", "")
+        assert re.search(r"\nBRK 0105 A=5A [^\n]*\n\*SDFS3 CCP\n$", brk), f"{profile}: SWI: {brk!r}"
+        assert _reads(log, raw.index("BRK 0105", start), stop) == [], f"{profile}: SWI must not reload"
+        start, stop = _segment(raw, "] R\r\n")
+        assert raw[start:stop] == "", f"{profile}: resume and reload must be silent: {raw[start:stop]!r}"
+        reads = _reads(log, start, stop)
+        assert reads == sectors["ccp"], f"{profile}: reload after R read {reads}"
+        assert _dump_bytes(_after(out, "] D0210-0210\n"), 0x0210) == [0x5A], (
+            f"{profile}: the resumed program must see its data in the CCP area"
+        )
+        assert out.count("README.TXT A 00000013") == 3, f"{profile}: DIR after the resumed program"
+        restored = _dump_bytes(_after(out, f"] D{SWI_DATA_ADDR:04X}-{SWI_DATA_ADDR:04X}\n"), SWI_DATA_ADDR)
+        assert restored == [swi_orig], f"{profile}: CCP should be reloaded after the program ended"
+        assert out.count(WELCOME) == 1, f"{profile}: reloads must not print Welcome"
+        assert out.count("*SDFS3") == 1, f"{profile}: only the SWI stop should warn: {out!r}"
+        assert "\n?\n" not in out, f"{profile}: no command should fail: {out[-900:]!r}"
+    print("[PASS] test_wboot_reloads_only_broken_parts")
+
+
+def test_wboot_reload_fails_without_card_or_after_swap() -> None:
+    """CCP が壊れた状態で SD が読めない(抜いた)とき、カードが別の版に替わったときは、
+    読み直しをやめて「?」でモニタへ。区画は無効になり、DOS も「?」。差し替えでは RAM に
+    書かない(シナリオ 6・7)。"""
+    for profile in V3_PROFILES:
+        config = _v3(profile)
+        payload = config["sdfs3sys"][HEADER_SIZE:]
+        sd_image = _wboot_sd_image(config)
+        core_dump = f"D{V3_CORE_BASE:04X}-{V3_CORE_BASE + 15:04X}"
+        input_text = f"BOOT3\rHELLO.COM\rZAPCCP.COM\rDOS\rD{V3_CCP_BASE:04X}-{V3_CCP_BASE + 15:04X}\r{core_dump}\r\r"
+        raw, log, _ = _v3_run_sd(config, input_text, sd_image=sd_image)
+        start, _stop = _segment(raw, PROMPT + "ZAPCCP.COM")
+        first_reload = next(n for n, lba, _r1, tx in log if tx >= start and lba == SDFS3SYS_FIXED_LBA)
+
+        swapped = bytearray(config["sdfs3sys"])
+        swapped[HEADER_SIZE + 0x0200] ^= 0x01
+        _refresh_checksum(swapped)
+        assert swapped[CHECKSUM_OFFSET : CHECKSUM_OFFSET + 2] != config["sdfs3sys"][CHECKSUM_OFFSET : CHECKSUM_OFFSET + 2]
+        swap_image = bytearray(sd_image)
+        base = SDFS3SYS_FIXED_LBA * SECTOR_SIZE
+        swap_image[base : base + len(swapped)] = swapped
+
+        for label, kwargs in (
+            ("no card", {"fail_from": first_reload}),
+            ("swapped", {"swap_image": bytes(swap_image), "swap_at": first_reload}),
+        ):
+            raw, log, _ = _v3_run_sd(config, input_text, sd_image=sd_image, **kwargs)
+            out = raw.replace("\r", "")
+            assert f"{PROMPT}ZAPCCP.COM\n?\n] DOS\n?\n] " in out, f"{profile} {label}: {out[-600:]!r}"
+            late = [(lba, r1) for n, lba, r1, _tx in log if n >= first_reload]
+            if label == "no card":
+                assert late and late[0] == (SDFS3SYS_FIXED_LBA, 0x04), f"{profile}: {late}"
+            else:
+                assert late == [(SDFS3SYS_FIXED_LBA, 0x00)], f"{profile}: swapped card should stop at the header: {late}"
+            ccp = _dump_range_bytes(_after(out, f"] D{V3_CCP_BASE:04X}"), V3_CCP_BASE, 16)
+            assert ccp == [0] * 16, f"{profile} {label}: RAM must not be written: {ccp}"
+            core = _dump_range_bytes(_after(out, f"] {core_dump}\n"), V3_CORE_BASE, 16)
+            assert bytes(core) == payload[V3_CORE_OFFSET : V3_CORE_OFFSET + 16], f"{profile} {label}: core changed"
+    print("[PASS] test_wboot_reload_fails_without_card_or_after_swap")
+
+
+def test_monitor_gate_warns_and_dos_after_reset_and_ramtest() -> None:
+    """モニタ行きの門($E20D・G の RTS)は検査して STATE に記録し、注意を 1 行出すが読み直さない。
+    リセットと RAMTEST のあとの DOS は読み直さずに入り、F で CCP と核を潰したあとの DOS は
+    両方を読み直す(シナリオ 4・8・11)。リセットは G でリセットの番地へ飛んで代える。"""
+    for profile in V3_PROFILES:
+        config = _v3(profile)
+        symbols = config["symbols"]
+        block = symbols["BIOS_BLOCK"]
+        sectors = _system_sectors(config)
+        payload = config["sdfs3sys"][HEADER_SIZE:]
+        ccp_addr, core_addr = V3_CCP_BASE + 0x10, V3_CORE_BASE + 0x100
+        ccp_orig, core_orig = payload[ccp_addr - V3_CCP_BASE], payload[core_addr - V3_CCP_BASE]
+        dump_block = f"D{block:04X}-{block + BB_SIZE - 1:04X}"
+
+        def poke(address: int, value: int) -> str:
+            return f"M{address:04X}\r{value:02X}\r.\r"
+
+        raw, log, _ = _v3_run_sd(
+            config,
+            "BOOT3\rEXIT\rM0180\r39\r.\r"
+            + poke(ccp_addr, ccp_orig ^ 0x01)
+            + f"GE20D\r{dump_block}\r"
+            + poke(core_addr, core_orig ^ 0x80)
+            + f"G0180\r{dump_block}\r"
+            + poke(ccp_addr, ccp_orig)
+            + poke(core_addr, core_orig)
+            + f"G0180\r{dump_block}\r"
+            + f"G{_reset_address(config):04X}\rDOS\rEXIT\rRAMTEST 0100-7FFF\rDOS\rEXIT\r"
+            + "F0100-7FFF 00\rDOS\rDIR\r\r",
+            sd_image=_wboot_sd_image(config),
+        )
+        out = raw.replace("\r", "")
+        gates = out.split(f"] {dump_block}\n")
+        assert len(gates) == 4, f"{profile}: {out[-900:]!r}"
+        assert gates[0].endswith("] GE20D\n*SDFS3 CCP\n"), f"{profile}: $E20D gate: {gates[0][-200:]!r}"
+        assert gates[1].endswith("] G0180\n*SDFS3 CCP CORE\n"), f"{profile}: G RTS gate: {gates[1][-200:]!r}"
+        assert gates[2].endswith("] G0180\n"), f"{profile}: healthy gate must be quiet: {gates[2][-200:]!r}"
+        for index, want_state in ((1, 0x01), (2, 0x03), (3, 0x00)):
+            data = _dump_range_bytes(gates[index], block, BB_SIZE)
+            assert data[0x12] == want_state, f"{profile}: STATE after gate {index}: {data[0x12]:02X}"
+            assert sum(data[: BB_CHECK_OFFSET + 1]) & 0xFF == 0, f"{profile}: CHECK not refreshed"
+            assert data[0] == 0xB3, f"{profile}: the gate must keep the block valid"
+        # モニタ行きの門は読み直さない
+        start = raw.index("] GE20D")
+        stop = raw.index("] G" + f"{_reset_address(config):04X}")
+        assert _reads(log, start, stop) == [], f"{profile}: monitor gates must not read SD"
+        # 8. リセットのあと: 読み直しなしで DOS に入る
+        assert out.count("MC6800 MONITOR") == 2, f"{profile}: reset did not restart the monitor"
+        start, stop = _segment(raw, "] DOS")
+        assert raw[start:stop] == "\r\n" and _reads(log, start, stop) == [], (
+            f"{profile}: DOS after reset should enter without reload: {raw[start:stop]!r}"
+        )
+        # 4. RAMTEST は 1 バイトごとに元の値を書き戻すので、正常な RAM では読み直さずに入る。
+        #    F で CCP と核を潰したあとは、両方を読み直す(先頭セクタは 1 回)
+        assert "] RAMTEST 0100-7FFF\nRAMTEST 0100-7FFF\nOK\n" in out, f"{profile}: {out[-700:]!r}"
+        start, stop = _segment(raw, "] DOS", nth=1)
+        assert raw[start:stop] == "\r\n" and _reads(log, start, stop) == [], f"{profile}: DOS after RAMTEST"
+        start, stop = _segment(raw, "] DOS", nth=2)
+        assert raw[start:stop] == "\r\n", f"{profile}: reload after F must be silent"
+        reads = _reads(log, start, stop)
+        assert reads == sectors["all"], f"{profile}: reload after F read {reads}"
+        assert "README.TXT A 00000013" in _dos(out, "DIR")
+        assert out.count(WELCOME) == 1
+    print("[PASS] test_monitor_gate_warns_and_dos_after_reset_and_ramtest")
+
+
+def test_v2_boot_exit_returns_to_monitor_and_disables_dos() -> None:
+    """v3 のあとに v2 を起動すると、v2 の EXIT($E20D)は今までどおりモニタに戻り、注意は出ない。
+    区画は無効なので DOS は「?」(シナリオ 9)。"""
+    from mk_sdfs_image import build_sdfs_image
+
+    for profile in V3_PROFILES:
+        config = _v3(profile)
+        suffix = config["suffix"]
+        block = config["symbols"]["BIOS_BLOCK"]
+        _run_make(profile, "stage1")
+        _run_make(profile, "sdfs")
+        stage1 = (PROJECT_ROOT / "build" / f"stage1{suffix}.bin").read_bytes()
+        image = bytearray(
+            build_sdfs_image(
+                stage1_data=stage1,
+                sdfs_data=(PROJECT_ROOT / "build" / f"SDFS{suffix}.BIN").read_bytes(),
+                extra_files=[],
+                partition_start_lba=SDFS3SYS_FAT_PARTITION_LBA,
+                total_volume_sectors=256,
+            )
+        )
+        stage1_end = 16 + -(-len(stage1) // SECTOR_SIZE)
+        system_end = SDFS3SYS_FIXED_LBA + -(-len(config["sdfs3sys"]) // SECTOR_SIZE)
+        assert stage1_end <= SDFS3SYS_FIXED_LBA and system_end <= SDFS3SYS_FAT_PARTITION_LBA
+        base = SDFS3SYS_FIXED_LBA * SECTOR_SIZE
+        assert not any(image[base : system_end * SECTOR_SIZE]), "SDFS3SYS slot must be free in the v2 image"
+        image[base : base + len(config["sdfs3sys"])] = config["sdfs3sys"]
+        raw, _log, _ = _v3_run_sd(
+            config,
+            f"BOOT3\rEXIT\rBOOT\rEXIT\rDOS\rD{block:04X}-{block + 1:04X}\r\r",
+            sd_image=bytes(image),
+            dump_range=f"{block:04X}-{block + 1:04X}",
+        )
+        out = raw.replace("\r", "")
+        assert "SDFS> EXIT\n] DOS\n?\n] " in out, f"{profile}: v2 EXIT / DOS: {out[-600:]!r}"
+        assert "*SDFS3" not in out, f"{profile}: v2 mode must not warn"
+        assert _dump_bytes(_after(out, f"] D{block:04X}"), block)[0] == 0, f"{profile}: BOOT must clear BB_MAGIC"
+    print("[PASS] test_v2_boot_exit_returns_to_monitor_and_disables_dos")
+
+
+def test_monitor_stack_fits_in_128_bytes() -> None:
+    """決定 16: モニタ(SWI で止めたあとを含む)が使うスタックが W+$1F80-$1FFF の 128B に収まる。
+    DOS(CCP・核)はプログラムが止まっていないときだけ動くので、数字は別に出すだけ。"""
+    results = []
+    for profile in V3_PROFILES:
+        config = _v3(profile)
+        symbols = config["symbols"]
+        block = symbols["BIOS_BLOCK"]
+        stack_top = block - 0x0300 + 0x1FFF
+        floor = stack_top - 0x7F
+        header = config["sdfs3sys"][:HEADER_SIZE]
+        # 形と和が正しい偽の区画($5000-$5FFF は 0 の RAM)。+$18 は本物と同じにして、
+        # DOS の読み直しで SD_INIT・ヘッダ・範囲の読み込みまで通す(和が合わずに「?」で終わる)
+        fake = _bb_block(img_base=0x5000, core_base=0x5800, img_last=0x5FFF, ccp_vec=0x5000)
+        fake[0x08:0x0C] = bytes(4)
+        fake[0x10:0x12] = header[CHECKSUM_OFFSET : CHECKSUM_OFFSET + 2]
+        fake[BB_CHECK_OFFSET] = (-sum(fake[:BB_CHECK_OFFSET])) & 0xFF
+        srec = _srec_file(0x0200, b"STACK").decode("ascii").replace("\r\n", "\r")
+        # $0180: lds #$3FFF / nop / jmp $E20D。プログラムのスタックを窓の外に置き、モニタだけを測る。
+        # $0183 の NOP に B で SWI を置いて止め、止めたままモニタのコマンドを打ってから R で再開する
+        prog = bytes([0x8E, 0x3F, 0xFF, 0x01, 0x7E, 0xE2, 0x0D])
+        monitor_cmds = (
+            f"M{block:04X}\r{_hex_bytes(fake)}\r.\r"
+            f"M0180\r{_hex_bytes(prog)}\r.\r"
+            "M5000\r01\r.\r"
+            "GE20D\r"
+            "B0183\rG0180\r"
+            "H\rD0100-013F\rD\rDS0100\rU0180\rMAP\rB\rUW\rF0300-030F AA\r"
+            "RAMTEST 0300-03FF\r" + f"L\r{srec}"
+            "R\r"
+            "DOS\r"
+            "M5000\r00\r.\r"
+            "B0183\rG0180\rH\rD0100\rR\rB0190\rC\r\r"
+        )
+        _raw, _log, stderr = _v3_run_sd(
+            config, monitor_cmds, sd_image=_wboot_sd_image(config), stack_watch=floor
+        )
+        out = _raw.replace("\r", "")
+        assert out.count("BRK 0183") == 2 and "] DOS\n?\n" in out, f"{profile}: {out[-900:]!r}"
+        assert out.count("*SDFS3 CCP") == 3, f"{profile}: $E20D, BRK and the resumed jmp $E20D should warn"
+        match = re.search(r"\[EMU\] stack-watch rom_min=(\S+) ram_min=(\S+)", stderr)
+        assert match and match.group(2) == "none", f"{profile}: {stderr[-300:]!r}"
+        monitor_min = int(match.group(1)[1:], 16)
+        _raw, _log, stderr = _v3_run_sd(
+            config,
+            "BOOT3\rDIR\rTYPE README.TXT\rHELLO.COM\rZAPCCP.COM\rZAPCORE.COM\rEXIT\rDOS\rDIR\r\r",
+            sd_image=_wboot_sd_image(config),
+            stack_watch=floor,
+        )
+        match = re.search(r"\[EMU\] stack-watch rom_min=(\S+) ram_min=(\S+)", stderr)
+        assert match, f"{profile}: {stderr[-300:]!r}"
+        dos_min = min(int(v[1:], 16) for v in match.groups() if v != "none")
+        assert monitor_min >= floor, f"{profile}: monitor stack reaches {monitor_min:04X} (< {floor:04X})"
+        results.append(
+            f"{profile}: モニタ {stack_top - monitor_min + 1}B(最小 SP ${monitor_min:04X})、"
+            f"DOS を含む {stack_top - dos_min + 1}B(最小 SP ${dos_min:04X})"
+        )
+    print("[PASS] test_monitor_stack_fits_in_128_bytes: " + " / ".join(results))
 
 
 def test_dos_gate_rejects_unloaded_block_without_writing() -> None:
@@ -583,7 +949,9 @@ def test_dos_gate_rejects_unloaded_block_without_writing() -> None:
         prefix = "" if block_data is None else f"M{block:04X}\r{_hex_bytes(block_data)}\r.\r"
         out = _v3_run(
             config,
-            prefix + f"M{V3_CCP_BASE:04X}\r{_hex_bytes(marker)}\r.\rDOS\r\r",
+            prefix
+            + f"M{V3_CCP_BASE:04X}\r{_hex_bytes(marker)}\r.\rDOS\r"
+            + f"D{V3_CCP_BASE:04X}-{V3_CCP_BASE + 15:04X}\r\r",
             sd_image=sd_image,
             dump_range=f"{block:04X}-{block + BB_SIZE - 1:04X}",
             max_cycles=100_000_000,
@@ -591,10 +959,21 @@ def test_dos_gate_rejects_unloaded_block_without_writing() -> None:
         )
         assert "] DOS\n?\n] " in out, f"{label}: DOS without a valid block should fail: {out[-300:]!r}"
         assert PROMPT not in out
+        assert bytes(_dump_range_bytes(_after(out, "] DOS\n"), V3_CCP_BASE, 16)) == marker, (
+            f"{label}: DOS must not write the CCP area"
+        )
         final = bytes(_dump_range_bytes(_final_dump(out, block), block, BB_SIZE))
         want = bytes(BB_SIZE) if block_data is None else block_data
-        checked = BB_SIZE if label != "bad sums" else BB_CHECK_OFFSET + 1  # 和の照合は BB_WORK だけ使う
-        assert final[:checked] == want[:checked], f"{label}: DOS must not write the block: {final.hex()}"
+        if label != "bad sums":
+            assert final == want, f"{label}: DOS must not write the block: {final.hex()}"
+        else:
+            # 形の正しい区画は検査に通るので、STATE(両方の不一致)を記録して読み直しに進み、
+            # SD のヘッダ +$18 が IMG_SUM と違う(カードが替わった扱い)ので MAGIC を消して「?」
+            header_sum = config["sdfs3sys"][CHECKSUM_OFFSET : CHECKSUM_OFFSET + 2]
+            assert want[0x10:0x12] != header_sum
+            assert final[0] == 0 and final[1:0x12] == want[1:0x12] and final[0x12] == 0x03, (
+                f"{label}: DOS should record STATE and clear MAGIC: {final.hex()}"
+            )
     out = _v3_run(
         config,
         f"M{V3_CCP_BASE:04X}\r{_hex_bytes(marker)}\r.\rDOS\rD{V3_CCP_BASE:04X}-{V3_CCP_BASE + 15:04X}\r\r",
@@ -992,7 +1371,7 @@ def test_rom_bios_entry_table_layout() -> None:
             "BIOS_GAP_END",
             "MIKBUG_INEEE",
             "MONITOR_REENTRY_AT",
-            "MAIN_LOOP",
+            "MON_GATE",
         )
         read = _rom_byte_reader(rom)
         for index, (name, address, target) in enumerate(BIOS_ENTRY_TARGETS):
@@ -1007,9 +1386,9 @@ def test_rom_bios_entry_table_layout() -> None:
         )
         assert read(symbols["BIOS_UNIMPL"], 2) == b"\x0D\x39", f"{profile}: BIOS_UNIMPL is not sec;rts"
         assert symbols["MONITOR_REENTRY_AT"] == 0xE20D, f"{profile}: MONITOR_REENTRY_AT moved"
-        main_loop = symbols["MAIN_LOOP"]
-        assert read(0xE20D, 3) == bytes([0x7E, main_loop >> 8, main_loop & 0xFF]), (
-            f"{profile}: $E20D is no longer jmp MAIN_LOOP"
+        gate = symbols["MON_GATE"]
+        assert read(0xE20D, 3) == bytes([0x7E, gate >> 8, gate & 0xFF]), (
+            f"{profile}: $E20D should be jmp MON_GATE (#314)"
         )
     print("[PASS] test_rom_bios_entry_table_layout")
 
@@ -2271,6 +2650,8 @@ def _run_emu(
     dump_range: str = "0200-0202",
     sd_image: bytes | None = None,
     timeout: int = 10,
+    extra_args: list[str] | None = None,
+    keep_cr: bool = False,
 ) -> tuple[str, str, int]:
     TEMP_ROOT.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", encoding="ascii", delete=False, dir=TEMP_ROOT) as f:
@@ -2295,6 +2676,16 @@ def _run_emu(
         ]
         if sd_path is not None:
             cmd.extend(["--sd", str(sd_path)])
+        if extra_args:
+            cmd.extend(extra_args)
+        if keep_cr:
+            # 出力を 1 文字 = 送信 1 バイトのまま受け取る(text モードは \r\n を \n に変える)
+            result_bytes = subprocess.run(cmd, cwd=PROJECT_ROOT, capture_output=True, timeout=timeout)
+            return (
+                result_bytes.stdout.decode("latin-1"),
+                result_bytes.stderr.decode("utf-8", errors="replace"),
+                result_bytes.returncode,
+            )
         result = subprocess.run(
             cmd,
             cwd=PROJECT_ROOT,
@@ -2403,7 +2794,12 @@ def main() -> None:
         test_rom_boot3_enters_dos_and_com_returns_through_wboot,
         test_sdfs3_cmd_dir_and_type_read_fat_files,
         test_sdfs3_cmd_load_run_and_com_read_fat_files,
-        test_dos_gate_checks_ccp_and_core_sums,
+        test_rom_boot3_reads_image_once,
+        test_wboot_reloads_only_broken_parts,
+        test_wboot_reload_fails_without_card_or_after_swap,
+        test_monitor_gate_warns_and_dos_after_reset_and_ramtest,
+        test_v2_boot_exit_returns_to_monitor_and_disables_dos,
+        test_monitor_stack_fits_in_128_bytes,
         test_dos_gate_rejects_unloaded_block_without_writing,
         test_rom_boot3_rejects_bad_images,
         test_sdfs3_cmd_dispatch_parser_classifies_stub_commands,
