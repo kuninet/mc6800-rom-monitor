@@ -683,6 +683,201 @@ def test_rom_boot3_loads_sdfs3sys_and_enables_cmd() -> None:
     print("[PASS] test_rom_boot3_loads_sdfs3sys_and_enables_cmd")
 
 
+def test_sdfs3_mutable_vars_live_outside_image() -> None:
+    """#311: 書き換わる変数は窓の resident ワーク(W+$0320)にあり、イメージの外。"""
+    for profile, expected in EXPECTED.items():
+        _run_make(profile, "sdfs3")
+        lst = PROJECT_ROOT / "build" / f"SDFS3{expected['suffix']}.lst"
+        names = (
+            "SDFS3_WORK_BASE",
+            "MIKBUG_VAR_BASE",
+            "SDFS3_LAST_ERROR",
+            "SDFS3_PARSE_PTR",
+            "SDFS3_PARSE_LEN",
+            "SDFS3_TOKEN_PTR",
+            "SDFS3_TOKEN_LEN",
+            "SDFS3_LOAD_BASE",
+            "SDFS3_END",
+        )
+        symbols = _load_symbols(lst, *names)
+        work = symbols["SDFS3_WORK_BASE"]
+        assert work == symbols["MIKBUG_VAR_BASE"] + 0x20, f"{profile}: WORK_BASE != W+$0320"
+        assert symbols["SDFS3_LAST_ERROR"] == work
+        assert symbols["SDFS3_PARSE_PTR"] == work + 1
+        assert symbols["SDFS3_PARSE_LEN"] == work + 3
+        assert symbols["SDFS3_TOKEN_PTR"] == work + 4
+        assert symbols["SDFS3_TOKEN_LEN"] == work + 6
+        for name in names[2:7]:
+            assert not (symbols["SDFS3_LOAD_BASE"] <= symbols[name] < symbols["SDFS3_END"]), (
+                f"{profile}: {name} is inside the resident image"
+            )
+    print("[PASS] test_sdfs3_mutable_vars_live_outside_image")
+
+
+def test_sdfs3_core_does_not_reference_ccp() -> None:
+    """#311: 核の範囲から CCP の範囲への参照が 0 件。わざと足すと検査が失敗する。"""
+    import lst_analyze
+
+    profile = "sbcio_4000"
+    expected = EXPECTED[profile]
+    lst = PROJECT_ROOT / "build" / f"SDFS3{expected['suffix']}.lst"
+    bin_path = PROJECT_ROOT / "build" / f"SDFS3{expected['suffix']}.BIN"
+    original_source = PROJECT_ROOT / "src" / "sdfs68_v3" / "resident_stub.asm"
+    try:
+        _run_make(profile, "sdfs3")
+        violations, info = lst_analyze.check_core_ccp_refs(lst)
+        assert info["core"] < info["ccp"] < info["end"], f"bad boundary order: {info}"
+        assert info["scanned"] > 500, f"core range looks empty (vacuous check): {info}"
+        assert violations == [], f"core references CCP: {violations}"
+        assert info["last_core_insn"].split()[0] in ("rts", "jmp", "bra", "rti"), (
+            f"core may fall through into CCP: {info['last_core_insn']!r}"
+        )
+        # ジャンプテーブルは検査の対象外。今の ROM が slot 1(CMD_DISPATCH)を呼ぶので、
+        # CCP を指してよいのは slot 1 と slot 13(INIT)だけ。#313 で解消する。
+        symbols = _load_symbols(lst, "SDFS3_LOAD_BASE", "SDFS3_JUMP_TABLE", "SDFS3_CCP_START")
+        data = bin_path.read_bytes()
+        table = symbols["SDFS3_JUMP_TABLE"] - symbols["SDFS3_LOAD_BASE"]
+        ccp_slots = [
+            slot
+            for slot in range(data[10])
+            if _word(data, table + 2 * slot) >= symbols["SDFS3_CCP_START"]
+        ]
+        assert ccp_slots == [1, 13], f"unexpected jump table slots pointing into CCP: {ccp_slots}"
+
+        # 負の対照: 核の先頭に CCP への参照を 1 行足した複製ソースで検査が失敗する
+        mutations = {
+            "jmp": "        jmp     SDFS3_CMD_DIR",
+            "ldx": "        ldx     #SDFS3_CMD_DIR",
+            "fdb": "        fdb     SDFS3_CMD_DIR",
+        }
+        text = original_source.read_text(encoding="utf-8")
+        assert "SDFS3_CORE_START:\n" in text
+        with _temporary_directory() as tmp:
+            for kind, line in mutations.items():
+                mutated = Path(tmp) / f"mutated_{kind}.asm"
+                mutated.write_text(
+                    text.replace("SDFS3_CORE_START:\n", "SDFS3_CORE_START:\n" + line + "\n", 1),
+                    encoding="utf-8",
+                )
+                _run_make(profile, "sdfs3", extra_args=[f"SDFS3_TOPSRC={mutated}"])
+                violations, _ = lst_analyze.check_core_ccp_refs(lst)
+                assert [v[3] for v in violations] == ["SDFS3_CMD_DIR"], (
+                    f"{kind}: deliberate core->CCP reference was not detected: {violations}"
+                )
+                rc = lst_analyze.check_core_ccp_main(lst)
+                assert rc == 1, f"{kind}: check CLI should fail"
+    finally:
+        _run_make(profile, "sdfs3")  # 通常ビルドに戻す
+    print("[PASS] test_sdfs3_core_does_not_reference_ccp")
+
+
+def _boot3_resident_config() -> dict:
+    profile = "k6802_vdg"
+    suffix = "-k6802-vdg-sdfs3-5000"
+    extra_args = [
+        "SDFS3_LOAD_BASE=0x5000",
+        "SDFS3_LOAD_LIMIT=0x7EFF",
+        "BUILD_CONFIG_NAME=k6802-vdg-sdfs3-5000",
+    ]
+    _run_make(profile, "bin", extra_args=extra_args)
+    _run_make(profile, "sdfs3sys", extra_args=extra_args)
+    resident = _load_symbols(
+        PROJECT_ROOT / "build" / f"SDFS3{suffix}.lst",
+        "SDFS3_LOAD_BASE",
+        "SDFS3_END",
+        "SDFS3_LAST_ERROR",
+        "SDFS3_GET_ERROR",
+        "SDFS3_ERR_COM",
+    )
+    return {
+        "suffix": suffix,
+        "rom": PROJECT_ROOT / "build" / f"mc6800-monitor{suffix}.bin",
+        "sdfs3sys": (PROJECT_ROOT / "build" / f"SDFS3SYS{suffix}.BIN").read_bytes(),
+        "symbols": resident,
+    }
+
+
+def _get_error_harness_input(get_error: int) -> str:
+    # jsr GET_ERROR ; staa $0200 ; swi
+    code = bytes([0xBD, get_error >> 8, get_error & 0xFF, 0xB7, 0x02, 0x00, 0x3F])
+    return f"M0300\r{_hex_bytes(code)}\r.\rG0300\rD0200-0200\r"
+
+
+def test_sdfs3_resident_image_unchanged_after_commands() -> None:
+    """#311: コマンドを実行してもイメージの範囲の RAM が SDFS3SYS のペイロードと一致する。"""
+    _run_make("sbcio_4000", "sdfs-tools")
+    config = _boot3_resident_config()
+    symbols = config["symbols"]
+    sdfs3sys = config["sdfs3sys"]
+    payload = sdfs3sys[HEADER_SIZE:]
+    base = symbols["SDFS3_LOAD_BASE"]
+    end = symbols["SDFS3_END"]
+    assert len(payload) == end - base
+    hello_com = (PROJECT_ROOT / "build" / "HELLO.COM").read_bytes()
+    sd_image = _build_sdfs3sys_fat_sd_image(
+        sdfs3sys,
+        [
+            _file("HELLO.S", _srec_file(0x0200, b"S")),
+            _file("README.TXT", b"HELLO FROM README\r\n"),
+            _file("HELLO.COM", hello_com),
+        ],
+    )
+    last_error = symbols["SDFS3_LAST_ERROR"]
+    stdout, stderr, rc = _run_emu(
+        rom_path=config["rom"],
+        input_text=(
+            "BOOT3\r"
+            "CMD DIR\r"
+            "CMD TYPE README.TXT\r"
+            "CMD LOAD HELLO.S\r"
+            "CMD HELLO.COM\r"
+            "CMD NOFILE.COM\r"
+            f"D{last_error:04X}-{last_error:04X}\r"
+            + _get_error_harness_input(symbols["SDFS3_GET_ERROR"])
+            + "\r"
+        ),
+        max_cycles=600_000_000,
+        sd_image=sd_image,
+        dump_range=f"{base:04X}-{end - 1:04X}",
+        timeout=120,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert "HELLO.S A " in stdout, f"CMD DIR did not run: {stdout!r}"
+    assert "HELLO COM" in stdout, f"CMD HELLO.COM did not run: {stdout!r}"
+    assert stdout.count("\n?\n") == 1, f"NOFILE.COM should fail exactly once: {stdout!r}"
+    image = bytes(_dump_range_bytes(stdout, base, end - base))
+    assert image == payload, "resident image in RAM changed after running commands"
+    last_failure = symbols["SDFS3_ERR_COM"]
+    assert _dump_bytes(stdout, last_error)[0] == last_failure, (
+        f"LAST_ERROR should hold the last failure: {stdout!r}"
+    )
+    assert _dump_bytes(stdout, 0x0200)[0] == last_failure, f"GET_ERROR mismatch: {stdout!r}"
+    print("[PASS] test_sdfs3_resident_image_unchanged_after_commands")
+
+
+def test_sdfs3_init_clears_last_error() -> None:
+    """#311: LAST_ERROR はイメージの外にあり初期値を持たないので、INIT(BOOT3 が呼ぶ)で 0 にする。"""
+    config = _boot3_resident_config()
+    symbols = config["symbols"]
+    last_error = symbols["SDFS3_LAST_ERROR"]
+    sd_image = _build_sdfs3sys_sd_image(config["sdfs3sys"])
+    stdout, stderr, rc = _run_emu(
+        rom_path=config["rom"],
+        input_text=(
+            f"M{last_error:04X}\rFF\r.\r"
+            "BOOT3\r"
+            + _get_error_harness_input(symbols["SDFS3_GET_ERROR"])
+            + "\r"
+        ),
+        max_cycles=260_000_000,
+        sd_image=sd_image,
+        timeout=40,
+    )
+    assert rc == 0 and "[TIMEOUT]" not in stderr, f"emulator failed: rc={rc} stderr={stderr!r}"
+    assert _dump_bytes(stdout, 0x0200)[0] == 0, f"GET_ERROR after BOOT3 should be 0: {stdout!r}"
+    print("[PASS] test_sdfs3_init_clears_last_error")
+
+
 def test_rom_boot3_rejects_bad_sdfs3sys() -> None:
     profile = "k6802_vdg"
     suffix = "-k6802-vdg-sdfs3-5000"
@@ -1685,6 +1880,10 @@ def main() -> None:
         test_sdfs3_cmd_load_run_and_com_read_fat_files,
         test_fixed_lba_loader_harness_rejects_bad_sdfs3sys,
         test_rom_boot3_rejects_bad_sdfs3sys,
+        test_sdfs3_mutable_vars_live_outside_image,
+        test_sdfs3_core_does_not_reference_ccp,
+        test_sdfs3_resident_image_unchanged_after_commands,
+        test_sdfs3_init_clears_last_error,
     ]
     passed = 0
     failed = 0
