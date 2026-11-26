@@ -1701,7 +1701,9 @@ SDFS3_FAIL_A:
 FAT32_INCLUDE_FIND_API equ 1
 FAT32_INCLUDE_FILE_API equ 1
 
-        include "sdcard.asm"
+; SD ドライバは持たず、ROM の BIOS 入口を呼ぶ(#310 の 1-6、決定 8)。変数 SD_* は ROM と共通。
+SD_INIT          equ BIOS_SD_INIT
+SD_READ_SECTOR   equ BIOS_SD_READ
         include "fat32.asm"
 
 SDFS3_END:
