@@ -72,9 +72,14 @@ marker の書き込みの途中で止まったうえに旧 slot が世代 0 な�
 - `test_rom_boots_updated_slot`（エミュ）: 開発用イメージ → A、更新 1 回目 → B、2 回目 → A
 - `test_rom_boots_old_slot_after_failed_update`（エミュ）: slot の書きかけ（3 セクタ）と読み戻し不一致では旧 A。marker なしで B の書きかけ（世代 2）なら、ROM は B を全部読んでから A に戻る
 - `test_rom_after_torn_marker`（エミュ）: 旧 slot が世代 0 なら A、世代 2/3 なら B
+- `test_rom_agrees_when_marker_slot_is_bad_and_on_generation_edges`（エミュ）: marker が A を指し A の和が壊れ B が有効なら、ROM もツールも B とみなし、ツールは A を更新して B に触れない（更新後は A から起動）。marker なしで両方有効な世代 0/5 → A、5/5 → A、3/4 → B
 
 ## 後続への引き継ぎ
 
 - #303（実機側の更新）: 同じ手順（slot → 読み戻し → marker → 読み戻し）と、判断 2・5・6 を引き継ぐ。世代 `$FFFF` の扱いはここで決め直す
 - #299（SD 生成ツールの正式化）: 生成時に slot A へ世代 1 と marker（active=A）を書いておけば、最初の更新のあとに marker が壊れても新しい slot から起動する（上の表の 3 行目）
+- 残件（レビューのマイナー指摘。この Issue では直していない）
+  - 有効な marker も slot もないイメージにも「初回の導入」として書く。v3 のカードでないイメージ（区画が LBA 2048 から始まる普通のディスクなど）を間違えて渡すと、LBA 48 と 64〜95 を上書きする。`--init` がなければ拒否する、などを足す
+  - 途中で失敗したとき、カードの今の状態（「marker は書き換えていないので旧 slot で起動する」など）を表示しない。`SlotUpdateError` の docstring も `stage="marker"` の意味と合っていない
+  - 世代が `$FFFF` のときの案内がない（#303 で扱いを決めるまでは SD を作り直す）
 - 物理 SD への直接書き込みは入れていない。入れるときは、対象のデバイスの確認（大きさ、MBR、既存の marker）を `--dry-run` と同じ報告で見せてから書く

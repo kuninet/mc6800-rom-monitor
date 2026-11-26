@@ -490,6 +490,30 @@ def test_rom_after_torn_marker() -> None:
     print("[PASS] test_rom_after_torn_marker")
 
 
+def test_rom_agrees_when_marker_slot_is_bad_and_on_generation_edges() -> None:
+    """marker が A を指し、A の和が壊れ、B が有効なとき、ROM もツールも B で起動するとみなし、
+    ツールは A を更新する(更新後は A から起動する)。marker がなく両方有効なときの世代の端
+    (0/5、5/5、3/4)も ROM と突き合わせる。"""
+    for profile in v3.V3_PROFILES:
+        config = v3._v3(profile)
+        broken_a = bytearray(v3._slot_image(config, 5))
+        broken_a[-1] ^= 0x01  # ペイロードだけ壊す(和は付け直さない)
+        slot_b = v3._slot_image(config, 2, tag=v3.SLOT_TAG)
+        before = v3._slots_sd_image(config, bytes(broken_a), slot_b, su.build_marker(0, 4))
+        assert _boot(config, before, "marker A, A broken") == 1
+        after, plan, error = update(before, config["sdfs3sys"])
+        assert error is None and plan.current == 1 and plan.target == 0 and plan.slot_generation == 3
+        assert changed_ranges(before, after) <= allowed_sectors(0), "slot B must not be touched"
+        assert _boot(config, after, "after updating A") == 0
+
+        for gen_a, gen_b, want in ((0, 5, 0), (5, 5, 0), (3, 4, 1)):
+            image = v3._slots_sd_image(
+                config, v3._slot_image(config, gen_a), v3._slot_image(config, gen_b, tag=v3.SLOT_TAG), None
+            )
+            assert _boot(config, image, f"no marker, generations {gen_a}/{gen_b}") == want
+    print("[PASS] test_rom_agrees_when_marker_slot_is_bad_and_on_generation_edges")
+
+
 def main() -> None:
     print("=" * 50)
     print("SDFS/68 v3 system slot update tool tests")
@@ -506,6 +530,7 @@ def main() -> None:
         test_rom_boots_updated_slot,
         test_rom_boots_old_slot_after_failed_update,
         test_rom_after_torn_marker,
+        test_rom_agrees_when_marker_slot_is_bad_and_on_generation_edges,
     ]
     if os.environ.get("SLOT302_SKIP_EMU"):
         tests = tests[:8]
