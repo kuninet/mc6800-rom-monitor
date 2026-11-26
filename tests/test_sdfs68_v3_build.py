@@ -4290,10 +4290,14 @@ BLOCKS:
 
 
 def _sdw_run(
-    config: dict, com: bytes, extra_args: list[str] | None = None
+    config: dict, com: bytes, extra_args: list[str] | None = None, prefill: bytes | None = None
 ) -> tuple[str, bytes, bytes, list[tuple[int, int, str]]]:
-    """BOOT3 → SDW.COM → DIR。出力、前と終わりの SD イメージ、CMD24 の記録を返す。"""
+    """BOOT3 → SDW.COM → DIR。出力、前と終わりの SD イメージ、CMD24 の記録を返す。
+    prefill なら、走らせる前の LBA SDW_DATA_LBA の中身をそれにする。"""
     image = _sdw_sd_image(config, com)
+    if prefill is not None:
+        start = SDW_DATA_LBA * SECTOR_SIZE
+        image = image[:start] + prefill + image[start + SECTOR_SIZE :]
     TEMP_ROOT.mkdir(parents=True, exist_ok=True)
     tag = uuid4().hex
     save = TEMP_ROOT / f"sdw-{tag}.img"
@@ -4400,8 +4404,10 @@ def test_sd_write_writes_verifies_and_keeps_stream() -> None:
     print("[PASS] test_sd_write_writes_verifies_and_keeps_stream")
 
 
+# パターンと 512 バイトすべて違う前の中身(受理して書かないカードの検出に使う)
+SDW_ALL_DIFFER = bytes((b + 1) & 0xFF for b in SDW_PATTERN)
 SDW_FAULTS = [
-    # (エミュレータの引数, 期待する (C, A, B)、None なら B は見ない, イメージが変わってよいか)
+    # (エミュレータの引数, 期待する (C, A, B)、None なら B は見ない, イメージが変わってよいか, 前の中身)
     (["--sd-fail-cmd24", "r1"], (1, SDW_ERR_CMD, 0x04), False),
     (["--sd-fail-cmd24", "noresp"], (1, SDW_ERR_CMD, 0xFF), False),
     (["--sd-fail-cmd24", "crc"], (1, SDW_ERR_DATA, 0xEB), False),
@@ -4410,19 +4416,29 @@ SDW_FAULTS = [
     (["--sd-fail-cmd24", "corrupt"], (1, SDW_ERR_VERIFY, 0x00), True),
     (["--sd-cmd24-resp-delay", "7"], (0, 0, None), True),
     (["--sd-cmd24-resp-delay", "8"], (1, SDW_ERR_DATA, 0xFF), True),  # カードは受理している
+    # 読み戻しの不一致は数えずに立てる。256 個・512 個違っても、全部 $FF が返っても 14(#303 の 1 周目 B1)
+    (["--sd-fail-cmd24", "corrupt256"], (1, SDW_ERR_VERIFY, 0x00), True),
+    (["--sd-fail-cmd24", "drop"], (1, SDW_ERR_VERIFY, 0x00), False, SDW_ALL_DIFFER),
+    (["--sd-fail-cmd24", "readff"], (1, SDW_ERR_VERIFY, 0x00), True),
+    # busy が長いカード。書き込みエラーのあとも busy が解けるまで待ってから離す(待たないと続く DIR の
+    # CMD17 が busy の $00 を R1 と取り違える。1 周目 m1・m2)
+    (["--sd-cmd24-busy-bytes", "300"], (0, 0, None), True),
+    (["--sd-fail-cmd24", "wrerr", "--sd-cmd24-busy-bytes", "300"], (1, SDW_ERR_DATA, 0xED), False),
 ]
 
 
 def test_sd_write_failures_return_codes() -> None:
     """シナリオ 3: 注入した失敗ごとに C=1・コード・カードの生のバイトが返り、GET_ERROR も同じ。
     拒んだときイメージは変わらず、どの場合も DESELECT 済みで続く DIR が動く。応答が 7 バイト
-    遅れても通り、8 バイト遅れたら無応答(12・$FF)。"""
+    遅れても通り、8 バイト遅れたら無応答(12・$FF)。読み戻しは 256 個・512 個違っても、全部 $FF が
+    返っても 14。busy が 300 バイト続いても通り、書き込みエラーのあとの busy も待ってから離す。"""
     for profile in V3_PROFILES:
         config = _v3(profile)
         with _temporary_directory() as tmp:
             com = _sdw_com(Path(tmp), [(SDW_DATA_LBA, SDW_VERIFY, "PAT")], stream=False)
-        for args, (c, code, raw), may_change in SDW_FAULTS:
-            out, before, after, log = _sdw_run(config, com, args)
+        for args, (c, code, raw), may_change, *rest in SDW_FAULTS:
+            prefill = rest[0] if rest else None
+            out, before, after, log = _sdw_run(config, com, args, prefill)
             results, last_error, _strm, _end = _sdw_results(out, 1)
             got = results[0]
             assert got[0] == c and got[1] == code, f"{profile} {args}: result {got}"

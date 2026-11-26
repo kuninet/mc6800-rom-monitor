@@ -194,10 +194,12 @@ class SDCard:
         self.write_lba = None
         self.write_number = None
         self.busy_stuck = False      # True の間は CS が上がるまで $00(busy)を返し続ける
-        self.fail_cmd24 = None       # r1・noresp・crc・wrerr・busy・corrupt
+        self.busy_left = 0           # 書き込みの busy の残りバイト数。CS を上げても残る(実カードと同じ)
+        self.readff_lba = None       # この LBA の次の CMD17 はデータを全部 $FF で返す(readff の注入)
+        self.fail_cmd24 = None       # r1・noresp・crc・wrerr・busy・corrupt・corrupt256・drop・readff
         self.fail_cmd24_at = None    # 失敗させる CMD24 の番号(None なら全部)
         self.cmd24_resp_delay = 0    # データ応答の前に挟む $FF の数(0 なら CRC の直後のバイト)
-        self.cmd24_busy_bytes = 2    # 受理のあと busy($00)を返すバイト数
+        self.cmd24_busy_bytes = 2    # 受理(と書き込みエラー)のあと busy($00)を返すバイト数
 
     @classmethod
     def from_file(cls, path):
@@ -231,6 +233,11 @@ class SDCard:
         if self.response:
             return self.response.pop(0)
         if self.busy_stuck:
+            return 0x00
+        if self.busy_left > 0:
+            # busy の間はコマンドを受け付けず、$00 を返す
+            self.busy_left -= 1
+            self.command = []
             return 0x00
 
         if self.command:
@@ -287,6 +294,9 @@ class SDCard:
                 self.cmd17_log.append((number, arg, 0x04, tx))
                 return [0x04]
             self.cmd17_log.append((number, arg, 0x00, tx))
+            if self.readff_lba == arg:
+                self.readff_lba = None
+                sector = bytes([0xFF]) * self.SECTOR_SIZE
             return [0x00, 0xFE] + list(sector) + [0xFF, 0xFF]
 
         if cmd == 24:
@@ -331,22 +341,27 @@ class SDCard:
             token = 0xED              # 書き込みエラー
         else:
             token = 0xE5              # 受理
-            if mode == "corrupt":
+            if mode in ("corrupt", "corrupt256"):
                 data = bytearray(data)
-                data[0x123] ^= 0xFF   # 黙って化ける(読み戻しで見つかるはず)
+                if mode == "corrupt":
+                    data[0x123] ^= 0xFF   # 黙って 1 バイト化ける(読み戻しで見つかるはず)
+                else:
+                    for i in range(256):  # 256 バイト化ける(数えると 0 に戻る個数)
+                        data[i] ^= 0xFF
                 data = bytes(data)
-            offset = lba * self.SECTOR_SIZE
-            image = bytearray(self.image)
-            image[offset : offset + self.SECTOR_SIZE] = data
-            self.image = bytes(image)
+            if mode == "readff":
+                self.readff_lba = lba     # 書けたが、読み戻しは全部 $FF が返る
+            if mode != "drop":            # drop は受理を返して書かない(前の中身が残る)
+                offset = lba * self.SECTOR_SIZE
+                image = bytearray(self.image)
+                image[offset : offset + self.SECTOR_SIZE] = data
+                self.image = bytes(image)
         self.cmd24_log.append((number, lba, mode or "ok"))
-        queue = [0xFF] * self.cmd24_resp_delay + [token]
-        if token == 0xE5:
-            if mode == "busy":
-                self.busy_stuck = True
-            else:
-                queue += [0x00] * self.cmd24_busy_bytes
-        self.response.extend(queue)
+        self.response.extend([0xFF] * self.cmd24_resp_delay + [token])
+        if mode == "busy":
+            self.busy_stuck = True
+        elif token in (0xE5, 0xED):
+            self.busy_left = self.cmd24_busy_bytes
         return self.response.pop(0)
 
 
@@ -2036,13 +2051,17 @@ def main():
     parser.add_argument("--sd-write-log",
                         help="CMD24 ごとに「番号 LBA 結果」を書くファイル")
     parser.add_argument("--sd-fail-cmd24",
-                        choices=["r1", "noresp", "crc", "wrerr", "busy", "corrupt"],
+                        choices=["r1", "noresp", "crc", "wrerr", "busy", "corrupt", "corrupt256",
+                                 "drop", "readff"],
                         help="CMD24 の失敗の注入(R1 エラー、R1 なし、データ応答の CRC・書き込みエラー、"
-                             "busy の張り付き、黙って化ける書き込み)")
+                             "busy の張り付き、1 バイト・256 バイト化ける、受理して書かない、"
+                             "読み戻しが全部 $FF)")
     parser.add_argument("--sd-fail-cmd24-at", type=int,
                         help="--sd-fail-cmd24 を N 回目(1 始まり)の CMD24 だけに掛ける")
     parser.add_argument("--sd-cmd24-resp-delay", type=int, default=0,
                         help="CMD24 のデータ応答の前に挟む $FF の数")
+    parser.add_argument("--sd-cmd24-busy-bytes", type=int, default=2,
+                        help="CMD24 の受理(と書き込みエラー)のあと busy を返すバイト数。CS を上げても残る")
     parser.add_argument("--input-hold-pc",
                         help="1st ACIA の入力で CR を渡したら、この番地(16 進)を実行するまで次の入力を見せない")
     parser.add_argument("--key-input-hold-pc",
@@ -2080,6 +2099,7 @@ def main():
         sdcard.fail_cmd24 = args.sd_fail_cmd24
         sdcard.fail_cmd24_at = args.sd_fail_cmd24_at
         sdcard.cmd24_resp_delay = args.sd_cmd24_resp_delay
+        sdcard.cmd24_busy_bytes = args.sd_cmd24_busy_bytes
         if args.sd_swap_image is not None:
             with open(args.sd_swap_image, "rb") as f:
                 sdcard.swap_image = f.read()

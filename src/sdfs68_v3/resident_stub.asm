@@ -62,7 +62,7 @@ SDFS3_SDW_END    equ SDFS3_WORK_BASE+$49  ; 2B
 SDFS3_SDW_PTR    equ SDFS3_WORK_BASE+$4B  ; 2B
 SDFS3_SDW_FLAGS  equ SDFS3_WORK_BASE+$4D  ; 1B
 SDFS3_SDW_COUNT  equ SDFS3_WORK_BASE+$4E  ; 2B
-SDFS3_SDW_BAD    equ SDFS3_WORK_BASE+$50  ; 1B。読み戻しで違ったら 0 以外
+SDFS3_SDW_BAD    equ SDFS3_WORK_BASE+$50  ; 1B。読み戻しで 1 バイトでも違ったら 1
 SDFS3_WORK_USED  equ $51
  if SDFS3_WORK_USED > $E0
         error   "SDFS/68 v3 resident work overflows W+$0320-$03FF"
@@ -935,8 +935,17 @@ SDFS3_SDW_RESP_GOT:
         tab
         anda    #$1F
         cmpa    #$05
-        beq     SDFS3_SDW_BUSY_PREP
+        beq     SDFS3_SDW_ACCEPTED
+        pshb                            ; 拒まれても、カードが busy なら解けるまで待つ(結果は見ない)。
+        bsr     SDFS3_SDW_WAIT_BUSY     ; 待たずに離すと、次の CMD17 が busy の $00 を R1 と取り違える
+        pulb
         ldaa    #SDFS3_ERR_WR_DATA
+        bra     SDFS3_SDW_DESELECT_FAIL
+SDFS3_SDW_ACCEPTED:
+        bsr     SDFS3_SDW_WAIT_BUSY
+        bcc     SDFS3_SDW_WRITTEN
+        clrb
+        ldaa    #SDFS3_ERR_WR_BUSY
         bra     SDFS3_SDW_DESELECT_FAIL
 
 ; 小さな部品。SDW_CMD: A = コマンドで SELECT → SEND_CMD(C=1 なら R1 なし、A = R1。A・B を壊す)。
@@ -955,19 +964,22 @@ SDFS3_SDW_REWIND:
         stx     SDFS3_SDW_PTR
         rts
 
-SDFS3_SDW_BUSY_PREP:
+; busy($00)が解けて $FF が来るまで、BUSY_LIMIT 回まで待つ。C=0 で解けた、C=1 で上限。A・X を壊す。
+SDFS3_SDW_WAIT_BUSY:
         ldx     #SDFS3_SDW_BUSY_LIMIT
         stx     SDFS3_SDW_COUNT
 SDFS3_SDW_BUSY_LOOP:
         bsr     SDFS3_SDW_FF
-        cmpa    #$FF
-        beq     SDFS3_SDW_WRITTEN
+        cmpa    #$FF                    ; 等しければ C=0
+        beq     SDFS3_SDW_BUSY_RET
         ldx     SDFS3_SDW_COUNT
         dex
         stx     SDFS3_SDW_COUNT
         bne     SDFS3_SDW_BUSY_LOOP
-        clrb
-        ldaa    #SDFS3_ERR_WR_BUSY
+        sec
+SDFS3_SDW_BUSY_RET:
+        rts
+
 SDFS3_SDW_DESELECT_FAIL:
         psha
         pshb
@@ -1011,7 +1023,8 @@ SDFS3_SDW_CMP_LOOP:
         ldx     SDFS3_SDW_PTR
         cmpa    0,x
         beq     SDFS3_SDW_CMP_NEXT
-        inc     SDFS3_SDW_BAD
+        ldab    #1                      ; 数えずに立てる(inc だと 256 個違うと 0 に戻る)
+        stab    SDFS3_SDW_BAD
 SDFS3_SDW_CMP_NEXT:
         inx
         stx     SDFS3_SDW_PTR
