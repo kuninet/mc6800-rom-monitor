@@ -48,3 +48,4 @@ v3 は、現行の `BOOT -> stage1 -> SDFS.BIN -> SDFS> ` 方式を単純に拡�
 | #317 | [issue-317_resident_bios_sd.md](issue-317_resident_bios_sd.md) | v3 resident の SD ドライバを ROM の BIOS 入口へ寄せる |
 | #315 | [issue-315_file_api.md](issue-315_file_api.md) | v3 のファイル API（slot 2〜5）を実装し、`.COM` の起動を核へ移す |
 | #316 | [issue-316_xldr.md](issue-316_xldr.md) | LOAD.COM・RUN.COM・XLDR.OVL を作り、CCP から LOAD と RUN を外す |
+| #304 | [issue-304_autoexec.md](issue-304_autoexec.md) | AUTOEXEC.COM を CCP の cold 入口で自動実行する（抑止は受信済みの文字） |

@@ -596,6 +596,7 @@ def _v3_run_sd(
     swap_image: bytes | None = None,
     swap_at: int | None = None,
     stack_watch: int | None = None,
+    extra_args: list[str] | None = None,
     dump_range: str = "0200-0211",
     max_cycles: int = 900_000_000,
     timeout: int = 240,
@@ -617,6 +618,8 @@ def _v3_run_sd(
         args += ["--sd-swap-image", str(swap_path), "--sd-swap-at", str(swap_at)]
     if stack_watch is not None:
         args += ["--stack-watch", f"{stack_watch:04X}"]
+    if extra_args:
+        args += extra_args
     try:
         stdout, stderr, rc = _run_emu(
             rom_path=config["rom"],
@@ -3836,6 +3839,186 @@ def test_xldr_overlapping_ccp_reloads_only_ccp() -> None:
     print("[PASS] test_xldr_overlapping_ccp_reloads_only_ccp")
 
 
+# ---------------------------------------------------------------------------
+# #304 AUTOEXEC.COM(CCP の cold 入口でだけ、核の SDFS3_AUTOEXEC が LOAD_PATH の exec で起動する)
+# ---------------------------------------------------------------------------
+
+AE_MARK_ADDR = 0x0300
+AE_TEXT = b"AUTOEXEC RAN"
+# stab $0300 / ldx #$010A / jsr PDATA1 / rts / CR LF text CR LF EOT。B(引数の長さ)を $0300 に残す
+AUTOEXEC_COM = bytes([0xF7, 0x03, 0x00, 0xCE, 0x01, 0x0A, 0xBD, 0xE0, 0x7E, 0x39,
+                      0x0D, 0x0A, *AE_TEXT, 0x0D, 0x0A, 0x04])
+FAT_FIRST_LBA = SDFS3SYS_FAT_PARTITION_LBA
+
+
+def _ae_symbols(config: dict) -> dict[str, int]:
+    """入力の保留に使う番地。ROM の CONSOLE_GETC と、CCP の cold 入口。"""
+    if "ae" not in config:
+        build = PROJECT_ROOT / "build"
+        rom = _load_symbols(build / f"mc6800-monitor{config['suffix']}.lst", "CONSOLE_GETC")
+        resident = _load_symbols(build / f"SDFS3{config['suffix']}.lst", "SDFS3_CCP_COLD")
+        config["ae"] = {**rom, **resident}
+    return config["ae"]
+
+
+def _ae_hold(config: dict, *, key: bool = False) -> list[str]:
+    """1 行ずつ保留する(CR を渡したら次の CONSOLE_GETC まで見せない)。key なら、キーボードの
+    入力を CCP の cold 入口に着くまで見せない(BOOT3 の読み込み中に押した形)。"""
+    symbols = _ae_symbols(config)
+    args = ["--input-hold-pc", f"{symbols['CONSOLE_GETC']:04X}"]
+    if key:
+        args += ["--key-input-hold-pc", f"{symbols['SDFS3_CCP_COLD']:04X}"]
+    return args
+
+
+def _ae_sd_image(config: dict, autoexec: bytes | None) -> bytes:
+    files = [_file("README.TXT", b"HELLO FROM README\r\n"), _file("HELLO.COM", config["hello_com"])]
+    if autoexec is not None:
+        files.append(_file("AUTOEXEC.COM", autoexec))
+    return _build_sdfs3sys_fat_sd_image(config["sdfs3sys"], files)
+
+
+def _cold_segment(raw: str) -> tuple[int, int]:
+    """Welcome の 2 行目(BASE= END=)の行末から、最初の SDFS3> の手前までの位置。"""
+    start = raw.index("\r\n", raw.index(" END=")) + 2
+    return start, raw.index(PROMPT, start)
+
+
+def _fat_reads(log: list, start: int, stop: int) -> list[int]:
+    return [lba for lba in _reads(log, start, stop) if lba >= FAT_FIRST_LBA]
+
+
+def test_autoexec_runs_once_on_cold_and_returns() -> None:
+    """シナリオ 1・2: ルートの AUTOEXEC.COM は BOOT3(cold)のあと 1 回だけ動き、B=0 で起動され、
+    RTS で WBOOT → CCP の warm に戻る(SDFS3SYS は読み直さない)。.COM の戻りと DOS(warm)では動かない。"""
+    text = AE_TEXT.decode()
+    for profile in V3_PROFILES:
+        config = _v3(profile)
+        input_text = (
+            f"M{AE_MARK_ADDR:04X}\r55\r.\r"
+            "BOOT3\rDIR\rHELLO\rEXIT\r"
+            f"D{AE_MARK_ADDR:04X}-{AE_MARK_ADDR:04X}\r"
+            "DOS\rDIR\rEXIT\r\r"
+        )
+        raw, log, _ = _v3_run_sd(
+            config, input_text, sd_image=_ae_sd_image(config, AUTOEXEC_COM), extra_args=_ae_hold(config)
+        )
+        out = raw.replace("\r", "")
+        start, stop = _cold_segment(raw)
+        assert raw[start:stop] == f"\r\n{text}\r\n", f"{profile}: AUTOEXEC output: {raw[start:stop]!r}"
+        assert _fat_reads(log, start, stop), f"{profile}: AUTOEXEC.COM should be read from the FAT"
+        assert _reads(log, start, stop, system_only=True) == [], f"{profile}: RTS must not reload the system"
+        assert out.count(text) == 1, f"{profile}: AUTOEXEC must run only on cold: {out!r}"
+        assert out.count(WELCOME) == 1 and "?" not in out.replace("?S", ""), f"{profile}: {out!r}"
+        assert "*SDFS3" not in out, f"{profile}: the monitor gate should not warn: {out!r}"
+        assert out.count("README.TXT A 00000013") == 2, f"{profile}: DIR before and after DOS: {out!r}"
+        assert "HELLO" in _dos(out, "HELLO"), f"{profile}: HELLO.COM: {out[-600:]!r}"
+        mark = _dump_bytes(_after(out, f"] D{AE_MARK_ADDR:04X}-{AE_MARK_ADDR:04X}\n"), AE_MARK_ADDR)
+        assert mark == [0], f"{profile}: AUTOEXEC.COM should start with B=0: {mark}"
+        assert f"] DOS\n{PROMPT}DIR\n" in out, f"{profile}: DOS should enter the warm prompt: {out[-600:]!r}"
+    print("[PASS] test_autoexec_runs_once_on_cold_and_returns")
+
+
+def test_autoexec_absent_searches_quietly() -> None:
+    """シナリオ 3: AUTOEXEC.COM がなければ、FAT を探したうえで何も出さずにプロンプトへ。LAST_ERROR = 0。"""
+    for profile in V3_PROFILES:
+        config = _v3(profile)
+        last_error = config["symbols"]["SDFS3_LAST_ERROR"]
+        input_text = f"BOOT3\rDIR\rEXIT\rD{last_error:04X}-{last_error:04X}\r\r"
+        raw, log, _ = _v3_run_sd(
+            config, input_text, sd_image=_ae_sd_image(config, None), extra_args=_ae_hold(config)
+        )
+        out = raw.replace("\r", "")
+        start, stop = _cold_segment(raw)
+        assert raw[start:stop] == "", f"{profile}: nothing between Welcome and the prompt: {raw[start:stop]!r}"
+        assert _fat_reads(log, start, stop), f"{profile}: the cold entry should look for AUTOEXEC.COM"
+        assert _reads(log, start, stop, system_only=True) == []
+        assert "README.TXT A 00000013" in _dos(out, "DIR"), f"{profile}: DIR: {out[-600:]!r}"
+        # 最後の D は DIR のあと。DIR も LAST_ERROR を 0 にするので、cold の直後の値は下の別の実行で見る
+        assert _dump_bytes(_after(out, f"] D{last_error:04X}-{last_error:04X}\n"), last_error) == [0]
+        raw, _log, _ = _v3_run_sd(
+            config,
+            f"BOOT3\rEXIT\rD{last_error:04X}-{last_error:04X}\r\r",
+            sd_image=_ae_sd_image(config, None),
+            extra_args=_ae_hold(config),
+        )
+        out = raw.replace("\r", "")
+        assert f"{PROMPT}EXIT\n" in out, f"{profile}: {out[-600:]!r}"
+        assert _dump_bytes(_after(out, f"] D{last_error:04X}-{last_error:04X}\n"), last_error) == [0], (
+            f"{profile}: a missing AUTOEXEC.COM must leave LAST_ERROR = 0"
+        )
+    print("[PASS] test_autoexec_absent_searches_quietly")
+
+
+def test_autoexec_skipped_by_pending_key() -> None:
+    """シナリオ 4・5: AUTOEXEC を探す時点でコンソール(ACIA1、キーボードの ACIA2)に文字が届いて
+    いれば、SD を読まずに飛ばす。文字は読まずに残り、プロンプトの最初の入力になる(Enter なら空行)。"""
+    text = AE_TEXT.decode()
+    for profile in V3_PROFILES:
+        config = _v3(profile)
+        sd_image = _ae_sd_image(config, AUTOEXEC_COM)
+        cases = [
+            # ACIA1: 保留しないので、BOOT3 の直後の Enter が読み込み中から届いている
+            ("acia1", "BOOT3\r\rDIR\rEXIT\r\r", []),
+            # キーボード: ACIA1 は 1 行ずつ保留し、キーボードの Enter は cold 入口に着くまで見せない
+            ("keyboard", "BOOT3\rDIR\rEXIT\r\r", _ae_hold(config, key=True)),
+        ]
+        for label, input_text, extra in cases:
+            if label == "keyboard":
+                with tempfile.NamedTemporaryFile("wb", delete=False, dir=TEMP_ROOT) as f:
+                    f.write(b"\r")
+                    key_path = Path(f.name)
+                extra = [*extra, "--key-input", str(key_path)]
+            try:
+                raw, log, _ = _v3_run_sd(config, input_text, sd_image=sd_image, extra_args=extra)
+            finally:
+                if label == "keyboard":
+                    key_path.unlink(missing_ok=True)
+            out = raw.replace("\r", "")
+            start, stop = _cold_segment(raw)
+            assert raw[start:stop] == "", f"{profile} {label}: {raw[start:stop]!r}"
+            assert _reads(log, start, stop) == [], f"{profile} {label}: a pending key must skip the SD"
+            assert text not in out, f"{profile} {label}: AUTOEXEC must be skipped: {out!r}"
+            assert f"{PROMPT}\n{PROMPT}DIR\n" in out, f"{profile} {label}: Enter should be an empty line: {out!r}"
+            assert "README.TXT A 00000013" in _dos(out, "DIR"), f"{profile} {label}: DIR: {out[-600:]!r}"
+            assert "?" not in out.replace("?S", ""), f"{profile} {label}: {out!r}"
+    print("[PASS] test_autoexec_skipped_by_pending_key")
+
+
+def test_autoexec_failures_show_one_error() -> None:
+    """シナリオ 6: 大きすぎる AUTOEXEC.COM は読み込みの前に「?」。読み込みの途中で SD が 1 回失敗したら、
+    WBOOT → warm が「?」を 1 回出す。どちらも続く DIR が動き、AUTOEXEC を繰り返さない。"""
+    for profile in V3_PROFILES:
+        config = _v3(profile)
+        input_text = "BOOT3\rDIR\rEXIT\r\r"
+        hold = _ae_hold(config)
+        # 大きすぎる: 読み込みの前に C=1 → CCP が「?」
+        raw, log, _ = _v3_run_sd(config, input_text, sd_image=_ae_sd_image(config, TOOBIG_COM), extra_args=hold)
+        out = raw.replace("\r", "")
+        start, stop = _cold_segment(raw)
+        assert raw[start:stop] == "?\r\n", f"{profile} toobig: {raw[start:stop]!r}"
+        assert 1 <= len(_fat_reads(log, start, stop)) <= 3, f"{profile} toobig: must not read the file data"
+        assert "README.TXT A 00000013" in _dos(out, "DIR"), f"{profile} toobig: DIR: {out[-600:]!r}"
+        # 4KB(先頭が RTS)は黙って戻る。その読み出しの番号から、データの途中の 1 回を失敗させる
+        sd_image = _ae_sd_image(config, FOURK_COM)
+        raw, log, _ = _v3_run_sd(config, input_text, sd_image=sd_image, extra_args=hold)
+        start, stop = _cold_segment(raw)
+        assert raw[start:stop] == "", f"{profile} fourk: {raw[start:stop]!r}"
+        numbers = _numbers(log, start, stop)
+        assert len(numbers) >= 6, f"{profile} fourk reads: {numbers}"
+        raw, log, _ = _v3_run_sd(
+            config, input_text, sd_image=sd_image, extra_args=hold, fail_from=numbers[5], fail_count=1
+        )
+        out = raw.replace("\r", "")
+        start, stop = _cold_segment(raw)
+        assert raw[start:stop] == "?\r\n", f"{profile} mid-load: {raw[start:stop]!r}"
+        assert len([1 for _n, _lba, r1, _tx in log if r1 != 0]) == 1, f"{profile} mid-load: one failed read"
+        assert _reads(log, start, stop, system_only=True) == [], f"{profile} mid-load: CCP is intact"
+        assert out.count(WELCOME) == 1 and out.count("?\n") == 1, f"{profile} mid-load: {out!r}"
+        assert "README.TXT A 00000013" in _dos(out, "DIR"), f"{profile} mid-load: DIR: {out[-600:]!r}"
+    print("[PASS] test_autoexec_failures_show_one_error")
+
+
 def main() -> None:
     print("=" * 50)
     print("SDFS/68 v3 build tests")
@@ -3890,6 +4073,10 @@ def main() -> None:
         test_xldr_missing_or_in_root,
         test_ccp_implicit_com_search,
         test_xldr_overlapping_ccp_reloads_only_ccp,
+        test_autoexec_runs_once_on_cold_and_returns,
+        test_autoexec_absent_searches_quietly,
+        test_autoexec_skipped_by_pending_key,
+        test_autoexec_failures_show_one_error,
     ]
     passed = 0
     failed = 0

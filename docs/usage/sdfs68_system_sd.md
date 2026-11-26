@@ -54,7 +54,7 @@ LOAD と RUN は `.COM` なので、`build/LOAD.COM`・`build/RUN.COM`・`build/
 ```text
 ] BOOT3
 SDFS/68 V3 02.00
-BASE=6C00 END=7AD8
+BASE=6C00 END=7B0C
 SDFS3> DIR
 HELLO.COM A 00000020
 HELLO.S A 0000008C
@@ -77,6 +77,7 @@ SDFS3>
 | 操作 | 動き |
 | --- | --- |
 | `BOOT3` | system slot A（LBA `64`）か B（LBA `96`）の `SDFS3SYS` を検証して `$6C00-$7FFF` に置き、起動した slot と CCP と核の和を ROM の BIOS 区画に控えて、CCP の cold 入口（Welcome あり）へ入る。LBA `48` の active marker が有効ならその slot を、無効なら世代の大きい slot を先に試し、だめなら他方を試す（#300・#301）。両方とも古い resident（API major 1）や壊れたイメージなら `?` と slot A・B の理由を 1 桁ずつ（例 `?42`。表は `docs/usage/monitor_commands.md` の「BOOT3 と DOS のエラーコード」。#307） |
+| `AUTOEXEC.COM` | `BOOT3`（cold）の Welcome のあとに、ルートの `AUTOEXEC.COM` があれば `.COM` として 1 回だけ起動する（引数なし）。`RTS` で `SDFS3> ` に戻る。`.COM` の戻りやモニタの `DOS`（warm）では動かない。なければ何も出さない。下の「AUTOEXEC.COM」（#304） |
 | `SDFS3> ` の内蔵コマンド | `DIR [path]`、`TYPE path`、`EXIT` の 3 つだけ。それ以外の語は `.COM` として探す。`HELLO.COM` のように拡張子 `.COM` が付いていればその名前のまま、`HELLO` のように拡張子がなければ `HELLO.COM` をルート → `/BIN` の順に探す（ルートで見つからなかったときだけ `/BIN` を探す。#310 の決定 5、#316）。`.COM` 以外の拡張子の語（`HELLO.S` など）は `?` |
 | `.COM` | `$0100` に読み、`BIOS_EXEC` で起動する。`RTS` は ROM の WBOOT（`$E0E6`）に戻り、CCP と核を検査してから `SDFS3> ` に戻る（Welcome なし）。読み込みは核の `LOAD_PATH` が行い、大きさの上限は `$6F00` バイト（`$0100-$6FFF`。#315）。CCP を潰す大きさでも起動でき、戻ると ROM が CCP を読み直す。読み込みの途中で SD が失敗したときは `?` を 1 回出して `SDFS3> ` に戻る |
 | `LOAD file` | `/BIN/LOAD.COM`。S-record か Intel HEX を読み込み、`OK` を出して `SDFS3> ` に戻る。書けるのは `$0000-$67FF` だけで、`$6800` 以上（本体 XLDR、CCP、核、窓、I/O、ROM）へのレコードは `?`（その手前までのレコードは書かれる）。形式はファイルの最初のレコードの先頭の文字で決める（`S` なら S-record、`:` なら Intel HEX。拡張子は見ない） |
@@ -85,6 +86,18 @@ SDFS3>
 | `LOAD`・`RUN` の本体 | 入口（`LOAD.COM`・`RUN.COM`、137B）が `/BIN/XLDR.OVL`（なければルートの `XLDR.OVL`）を `$6800` に読んで飛ぶ。`XLDR.OVL` がない・署名が違う・`GET_MEMTOP` を越えるときは `?` で `SDFS3> ` に戻る |
 | `EXIT` | モニタの `] ` へ。RAM の CCP と核はそのまま残る |
 | モニタの `DOS` | CCP と核の和が `BOOT3` のときと同じなら、CCP の warm 入口（Welcome なし）へ。`BOOT3` していない、v2 の `BOOT` をした（BIOS 区画が無効）なら `?6`。モニタで書き換えたなどで CCP や核が壊れていれば SD の起動した slot から何も出さずに読み直す。読み直せないときは `?1`（SD の初期化）・`?2`（読み出し）・`?7`（カードの差し替え）・`?5`（読み直しても和が合わない）（#314・#307） |
+
+### AUTOEXEC.COM（#304）
+
+`BOOT3` で入る CCP の cold 入口は、Welcome を出したあと、FAT のルートの `AUTOEXEC.COM` を探す。あれば普通の `.COM` と同じく `$0100` に読み（上限 `$6F00` バイト）、`BIOS_EXEC` で起動する（A=0、B=0）。`RTS` は WBOOT を通って `SDFS3> ` に戻る。探すのは cold の 1 回だけで、`.COM` から戻ったときと、モニタの `DOS` で入ったとき（warm）は探さない。`/BIN` は探さない。
+
+- **飛ばし方**: `BOOT3` の Enter を押したあと、読み込みの数秒のあいだにもう一度 Enter を押す（シリアルの端末でも、キーボードでもよい）。AUTOEXEC を探す時点で文字が届いていれば、SD を読まずに飛ばす。文字はそのまま `SDFS3> ` の最初の入力になる（Enter なら空行で、何も起きない）。飛ばしたときは何も表示しない
+- **なければ**: 何も表示せずに `SDFS3> ` へ
+- **失敗したとき**: 大きすぎる（`$6F00` バイトを越える）、FAT を読めない（FAT のないカードも含む）ときは `?` を 1 回出して `SDFS3> ` へ。読み込みの途中で SD が失敗したときも `?` を 1 回出して `SDFS3> ` へ戻り、もう一度は動かさない
+- **AUTOEXEC.COM が止まって戻らないとき**: RESET でモニタへ戻り、`DOS` と打つ（warm なので AUTOEXEC は動かない）。直すまでは `BOOT3` のたびに Enter で飛ばす
+- **飛ばされてしまうとき**（AUTOEXEC が黙って動かない）: 端末が Enter で CR と LF の両方を送ると、`BOOT3` の行の LF が残って毎回飛ばされる。端末の改行の送信を CR だけにする。`k6802_vdg` をシリアルなしで使う（ACIA1 を配線しない）と、浮いた ACIA1 が拾うゴミで飛ばされることがある
+
+`AUTOEXEC.COM` は、将来 RTC の初期化、表示の設定、環境の初期化などを、ROM を焼き直さずに SD のファイルの差し替えで足すための口にする。中身は普通の `.COM` なので、API は `BIOS_GET_API` で引き、終わったら `RTS` で戻る。
 
 v3 の配置（#316）: `$0100-$67FF` TPA（S-record の書き込み先）、`$6800-$6BFF` 上端の一時区画（XLDR.OVL が動く）、`$6C00-$6FFF` CCP（入口表 +0 cold／+3 warm）、`$7000-$7FFF` 核（SDFS3API ヘッダ、`GET_MEMTOP` = `$6FFF`）。`.COM` は `$6F00` バイトまで読めて、一時区画と CCP も使える（戻ると ROM が CCP を読み直す）。
 

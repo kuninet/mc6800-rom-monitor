@@ -66,6 +66,8 @@ SDFS3_CCP_COLD:
         jsr     SDFS3_INIT
         ldx     #SDFS3_TXT_WELCOME
         jsr     SDFS3_PRINT
+        jsr     SDFS3_AUTOEXEC      ; 核に置く(#304)。起動したら戻らない
+        bcs     SDFS3_CCP_ERROR
         bra     SDFS3_CCP_PROMPT
 SDFS3_CCP_WARM:
         clr     SDFS3_STREAM_OPEN   ; 前のプログラムの取っ手を持ち越さない
@@ -822,6 +824,43 @@ SDFS3_INIT:
         clr     SDFS3_STREAM_OPEN
         clc
         rts
+
+; AUTOEXEC(#304)。CCP の cold 入口だけが呼ぶ(warm では呼ばない)。ルートの AUTOEXEC.COM を
+; .COM と同じく LOAD_PATH(exec)で起動し、戻らない(RTS は WBOOT → CCP の warm)。
+; 抑止: コンソール(ACIA1、キーボードの ACIA2)に受信済みの文字があれば、SD を読まずに C=0 で
+; 戻る。文字は読まずに残し、プロンプトの最初の入力にする(6850 は読むと戻せないため)。
+; 見つからなければ LAST_ERROR = 0、C=0。読み込みの前のほかの失敗は C=1(LAST_ERROR はそのコード)。
+; 読み込みの途中の失敗は LOAD_PATH のとおり PENDING_ERR を立てて WBOOT へ飛ぶ。
+SDFS3_AUTOEXEC:
+        ldaa    ACIA_CTRL
+ if MONITOR_FEATURE_KEYBOARD
+        oraa    ACIA2_CTRL
+ endif
+        bita    #ACIA_STAT_RDRF
+        bne     SDFS3_AE_QUIET
+        ldx     #SDFS3_AE_BLOCK
+        jsr     SDFS3_LOAD_PATH
+        ldaa    SDFS3_LAST_ERROR
+        cmpa    #SDFS3_ERR_NOT_FOUND
+        sec
+        bne     SDFS3_AE_RTS
+        clr     SDFS3_LAST_ERROR
+SDFS3_AE_QUIET:
+        clc
+SDFS3_AE_RTS:
+        rts
+; LOAD_PATH のブロック。引数はなし(B=0)。argptr は 0 のバイト(このブロックの arg_len)を指す。
+SDFS3_AE_BLOCK:
+        fdb     SDFS3_TXT_AUTOEXEC
+        fcb     SDFS3_TXT_AUTOEXEC_END-SDFS3_TXT_AUTOEXEC
+        fdb     SDFS3_COM_BASE
+        fdb     SDFS3_MEMTOP
+        fcb     SDFS3_LP_EXEC
+        fdb     SDFS3_AE_BLOCK+10
+        fcb     0
+SDFS3_TXT_AUTOEXEC:
+        fcc     "AUTOEXEC.COM"
+SDFS3_TXT_AUTOEXEC_END:
 
 SDFS3_TO_UPPER:
         cmpa    #'a'
