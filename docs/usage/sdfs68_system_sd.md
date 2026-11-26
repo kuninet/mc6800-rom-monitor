@@ -209,7 +209,7 @@ python3 tools/mk_sdfs3_image.py --system build/SDFS3SYS-k6802-vdg.BIN --output s
 ```text
 ] BOOT3
 SDFS/68 V3 02.00
-BASE=6C00 END=7D5C
+BASE=6C00 END=7Dxx
 SDFS3> DIR
 README.TXT A 000000A2
 HELLO.S A 0000008C
@@ -230,7 +230,7 @@ HELLO COM
 SDFS3>
 ```
 
-（大きさと `SP=` はビルドとプロファイルで変わる。`sbcio_vdg` は `SP=DF7D`）
+（`END=` は resident の末尾の番地で、版によって変わる。ファイルの大きさと `SP=` はビルドとプロファイルで変わる。`sbcio_vdg` は `SP=DF7D`）
 
 - エクスプローラーでカードにファイルを足せるかは、まだ実機で確かめていない（#318）。足すときも `/BIN` の 3 本は消さない。フォーマットすると FAT の中身（`/BIN` を含む）が消え、SD Card Formatter などで区画から作り直すと system 領域（marker と slot A）も消えることがある。どちらもイメージを書き直せば戻る
 - `SDFS3SYS` だけを差し替えるときは、イメージを作り直して書き直す。#302（PR #328）のマージ後は、イメージに `tools/sdfs3_slot_update.py` をかけて非 active の slot を更新してから書く方法も使える
