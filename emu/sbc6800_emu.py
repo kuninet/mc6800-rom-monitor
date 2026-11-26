@@ -85,6 +85,11 @@ class ACIA:
         self._exit_on_eof = input_data is not None if exit_on_eof is None else exit_on_eof
         self._old_termios = None
         self.tx_count = 0  # 送信したバイト数(SD の記録と出力の位置を突き合わせる)
+        # 入力の保留(#304)。held の間は RDRF を立てず、入力が尽きても終わらない。
+        # hold_on_cr なら CR を渡すたびに保留する(人が入力を求められてから次の行を打つ形)。
+        # 解くのは CPU 側(--input-hold-pc・--key-input-hold-pc の番地を実行したとき)。
+        self.hold_on_cr = False
+        self.held = False
         if self._interactive and sys.stdin.isatty() and not _IS_WINDOWS:
             self._old_termios = termios.tcgetattr(sys.stdin)
             tty.setcbreak(sys.stdin.fileno())
@@ -96,6 +101,8 @@ class ACIA:
 
     def read_status(self):
         """ACIA ステータスレジスタを読む"""
+        if self.held:
+            return ACIA_STAT_TDRE if self._tx_ready else 0
         if self._exit_on_eof and self._input_data is not None and self._input_pos >= len(self._input_data):
             raise SystemExit(0)
         status = ACIA_STAT_TDRE if self._tx_ready else 0
@@ -110,6 +117,8 @@ class ACIA:
             if self._input_pos < len(self._input_data):
                 ch = self._input_data[self._input_pos]
                 self._input_pos += 1
+                if self.hold_on_cr and ch == 0x0D:
+                    self.held = True
                 return ch
             elif self._exit_on_eof:
                 # 入力が尽きたら終了
@@ -392,6 +401,9 @@ class MC6800:
         self.stack_watch_active = False
         self.stack_watch_rom_min = None
         self.stack_watch_ram_min = None
+
+        # 入力の保留を解く番地(#304)。空なら 1 命令ごとの検査はしない
+        self.input_hold_pcs = {}
 
     # ----- メモリアクセス -----
     def read(self, addr):
@@ -1842,7 +1854,9 @@ class MC6800:
         """メインループ"""
         self.reset()
         try:
-            if self.stack_watch_floor is not None:
+            if self.input_hold_pcs:
+                self._run_with_input_hold()
+            elif self.stack_watch_floor is not None:
                 self._run_with_stack_watch()
             while self.cycles < self.max_cycles:
                 self.step()
@@ -1881,6 +1895,23 @@ def _run_with_stack_watch(self):
 MC6800._run_with_stack_watch = _run_with_stack_watch
 
 
+def _run_with_input_hold(self):
+    """input_hold_pcs({番地: [ACIA, ...]})の番地を実行する直前に、その ACIA の保留を解く。"""
+    holds = self.input_hold_pcs
+    while self.cycles < self.max_cycles:
+        acias = holds.get(self.pc)
+        if acias:
+            for acia in acias:
+                acia.held = False
+        if self.stack_watch_floor is not None:
+            _stack_watch_step(self)
+        else:
+            self.step()
+
+
+MC6800._run_with_input_hold = _run_with_input_hold
+
+
 def _format_sp(value):
     return "none" if value is None else f"${value:04X}"
 
@@ -1913,6 +1944,10 @@ def main():
                         help="差し替えを始める CMD17 の番号(1 始まり)")
     parser.add_argument("--sd-fail-cmd0-after", type=int,
                         help="CMD17 が N 回済んだあとの CMD0 を R1 エラーにする(SD_INIT の失敗。0 なら最初から)")
+    parser.add_argument("--input-hold-pc",
+                        help="1st ACIA の入力で CR を渡したら、この番地(16 進)を実行するまで次の入力を見せない")
+    parser.add_argument("--key-input-hold-pc",
+                        help="2nd ACIA のキー入力を、この番地(16 進)を実行するまで見せない")
     parser.add_argument("--stack-watch",
                         help="モニタのスタックの下限(16 進)。lds/txs でこれ以上になった区間の最小 SP を出す")
     args = parser.parse_args()
@@ -1952,6 +1987,12 @@ def main():
     cpu.max_cycles = args.max_cycles
     if args.stack_watch:
         cpu.stack_watch_floor = int(args.stack_watch, 16)
+    if args.input_hold_pc:
+        acia.hold_on_cr = True
+        cpu.input_hold_pcs.setdefault(int(args.input_hold_pc, 16), []).append(acia)
+    if args.key_input_hold_pc:
+        acia2.held = True
+        cpu.input_hold_pcs.setdefault(int(args.key_input_hold_pc, 16), []).append(acia2)
 
     # ROM のサイズに応じて配置を決定
     # p2bin の出力は ROM_BASE からのオフセットなので、そのまま配置

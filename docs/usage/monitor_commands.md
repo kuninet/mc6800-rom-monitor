@@ -51,7 +51,7 @@ ROM単体で使える低レベル操作、復旧口、マシン語デバッグ�
 | コマンド | 用途 |
 | --- | --- |
 | `BOOT` | 固定LBAからSDFS/68 stage1 loaderを読み込んで、第2段システムへ移行する。`FEATURE_SD=1` かつ stage1対応RAM構成のROMで有効 |
-| `BOOT3` | system slot A（LBA `64`）か B（LBA `96`）の `SDFS3SYS` を 1 回読みでヘッダの `load`（`$6C00`）へ置き、置いた中身の和をヘッダと照合して、BIOS 区画に起動した slot と CCP と核の和を控えて、CCP の cold 入口（Welcome と `SDFS3> `）へ入る。先に試すのは、LBA `48` の active marker が有効ならその `active_slot`、無効なら世代（ヘッダ `+$1C`）の大きい方（決まらなければ A）。だめなら他方を試し、両方だめなら `?` と slot A・B の理由を 1 桁ずつ出す（例 `?53`。下の「BOOT3 と DOS のエラーコード」）。marker のない単一 LBA のイメージは slot A として起動する（#301）。`sbcio_vdg`・`k6802_vdg` の ROM で使う |
+| `BOOT3` | system slot A（LBA `64`）か B（LBA `96`）の `SDFS3SYS` を 1 回読みでヘッダの `load`（`$6C00`）へ置き、置いた中身の和をヘッダと照合して、BIOS 区画に起動した slot と CCP と核の和を控えて、CCP の cold 入口（Welcome と `SDFS3> `）へ入る。cold 入口は、ルートに `AUTOEXEC.COM` があれば Welcome のあとに 1 回だけ起動する（読み込み中にもう一度 Enter を押すと飛ばす。`docs/usage/sdfs68_system_sd.md` の「AUTOEXEC.COM」、#304）。先に試すのは、LBA `48` の active marker が有効ならその `active_slot`、無効なら世代（ヘッダ `+$1C`）の大きい方（決まらなければ A）。だめなら他方を試し、両方だめなら `?` と slot A・B の理由を 1 桁ずつ出す（例 `?53`。下の「BOOT3 と DOS のエラーコード」）。marker のない単一 LBA のイメージは slot A として起動する（#301）。`sbcio_vdg`・`k6802_vdg` の ROM で使う |
 | `DOS` | BIOS 区画を検査し、RAM 上の CCP と核の和が合えば CCP の warm 入口（`SDFS3> `、Welcome なし）へ入る。壊れた区画（CCP だけ、核だけ、両方）は、何も表示せずに SD から読み直してから入る。読み直すのは `BOOT3` で起動した slot で、marker は読まない。`BOOT3` していなければ `?6` でモニタに残る。SD が読めない、カードが別の版に替わった、読み直しても和が合わないときは `?` とコード 1 桁（`?1`・`?2`・`?7`・`?5`）でモニタに残り、次は `BOOT3` が要る（ROM の WBOOT `$E0E6` と同じ門） |
 
 v3 を `BOOT3` で起動したあとは、モニタへ戻るたび（DOS の `EXIT`、`$E0E3`／`$E20D` への `jmp`、SWI の停止、`G` で起動したプログラムの `RTS`）に、ROM が RAM 上の CCP と核の和を確かめる。壊れていれば、次の注意を 1 行出す。モニタにいる間は読み直さないので、SWI で止めたプログラムを `R` で再開でき、壊れた中身を `D` で調べられる。読み直しは次に `DOS` と打ったとき（またはプログラムが WBOOT に戻ったとき）に行う。
