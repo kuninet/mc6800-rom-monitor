@@ -40,7 +40,8 @@ V3_PROFILES = {
     "sbcio_vdg": "-sbcio-vdg",
     "k6802_vdg": "-k6802-vdg",
 }
-V3_CCP_BASE = 0x6400
+V3_CCP_BASE = 0x6C00
+V3_XLDR_BASE = 0x6800  # XLDR.OVL が動く上端の一時区画(#316)
 V3_CORE_BASE = 0x7000
 V3_CORE_OFFSET = V3_CORE_BASE - V3_CCP_BASE
 V3_MEMTOP = 0x6FFF
@@ -97,10 +98,28 @@ def _v3(profile: str) -> dict:
         "sdfs3sys": (build / f"SDFS3SYS{suffix}.BIN").read_bytes(),
         "hello_com": (build / "HELLO.COM").read_bytes(),
         "args_com": (build / "ARGS.COM").read_bytes(),
+        "hello_s": (build / "HELLO.S").read_bytes(),
+        "load_com": (build / "LOAD.COM").read_bytes(),
+        "run_com": (build / "RUN.COM").read_bytes(),
+        "xldr": (build / "XLDR.OVL").read_bytes(),
         "symbols": {**rom, **resident},
     }
     _V3_CACHE[profile] = config
     return config
+
+
+def _xldr_files(config: dict, *, where: str = "bin", xldr: bytes | None = None) -> list:
+    """LOAD.COM・RUN.COM は /BIN に、XLDR.OVL は where("bin"・"root"・"none")に置く(#316)。"""
+    files = [
+        _file("LOAD.COM", config["load_com"], ("BIN",)),
+        _file("RUN.COM", config["run_com"], ("BIN",)),
+    ]
+    body = config["xldr"] if xldr is None else xldr
+    if where == "bin":
+        files.append(_file("XLDR.OVL", body, ("BIN",)))
+    elif where == "root":
+        files.append(_file("XLDR.OVL", body))
+    return files
 
 
 def _v3_run(
@@ -354,15 +373,23 @@ def test_sdfs3_cmd_dispatch_parser_classifies_stub_commands() -> None:
         ("DIR", 0x03),
         (" dir ", 0x03),
         ("TYPE README.TXT", 0x03),
-        ("LoAd HELLO.S", 0x05),
-        ("RUN MISSING.S", 0x06),
+        # LOAD・RUN は CCP の内蔵ではなくなり、拡張子のない語として LOAD.COM・RUN.COM を探す(#316)
+        ("LoAd HELLO.S", 0x03),
+        ("RUN MISSING.S", 0x03),
         # .COM は核の LOAD_PATH のコードを残す(マウントの失敗は 3。#315)
         ("FOO.COM ARG", 0x03),
         ("foo.com", 0x03),
         ("", 0x02),
         ("   ", 0x02),
-        ("UNKNOWN", 0x02),
-        ("EXITX", 0x02),
+        ("UNKNOWN", 0x03),
+        ("EXITX", 0x03),
+        # 「.」のある語は、最初の「.」から後ろがちょうど .COM のときだけ .COM として扱う
+        ("HELLO.S", 0x02),
+        ("A.COMX", 0x02),
+        ("A.B.COM", 0x02),
+        # 暗黙の検索で組める語は 31 文字まで(32 文字はパスの失敗 7)
+        ("A" * 31, 0x03),
+        ("A" * 32, 0x07),
     ]
     with _temporary_directory() as tmp:
         harness = _assemble_cmd_dispatch_harness(Path(tmp), symbols, cases)
@@ -402,11 +429,12 @@ def test_rom_boot3_enters_dos_and_com_returns_through_wboot() -> None:
                 _file("ARGS.COM", config["args_com"]),
                 _file("RETADDR.COM", RETADDR_COM),
                 _file("RTS.S", _srec_file(0x0100, _print_program(b"RUN RTS", 0x39), entry_address=0x0100)),
+                *_xldr_files(config),
             ],
         )
         out = _v3_run(
             config,
-            "M0180\r3F\r.\r"
+            "M0300\r3F\r.\r"
             "BOOT3\r"
             "DIR\r"
             "TYPE README.TXT\r"
@@ -415,7 +443,7 @@ def test_rom_boot3_enters_dos_and_com_returns_through_wboot() -> None:
             "RETADDR.COM\r"
             "LOAD HELLO.S\r"
             "RUN RTS.S\r"
-            "RUN 0180\r"
+            "RUN 0300\r"
             "DOS\r"
             "EXIT\r"
             "D0200-0200\r"
@@ -426,7 +454,7 @@ def test_rom_boot3_enters_dos_and_com_returns_through_wboot() -> None:
         )
         end = symbols["SDFS3_END"] - 1
         boot = _after(out, "] BOOT3\n")
-        assert boot.startswith(f"{WELCOME}\nBASE=6400 END={end:04X}\n{PROMPT}DIR\n"), (
+        assert boot.startswith(f"{WELCOME}\nBASE={V3_CCP_BASE:04X} END={end:04X}\n{PROMPT}DIR\n"), (
             f"{profile}: BOOT3 should go straight from Welcome to the DOS prompt: {boot[:200]!r}"
         )
         assert "README.TXT A 00000013" in _dos(out, "DIR")
@@ -436,8 +464,8 @@ def test_rom_boot3_enters_dos_and_com_returns_through_wboot() -> None:
         assert "?" not in _dos(out, "RETADDR.COM")
         assert "OK" in _dos(out, "LOAD HELLO.S")
         assert "RUN RTS" in _dos(out, "RUN RTS.S"), f"{profile}: RUN file with RTS should return to DOS"
-        run_brk = _after(out, PROMPT + "RUN 0180\n")
-        assert run_brk.lstrip("\n").startswith("BRK 0180"), f"{profile}: RUN addr: {run_brk[:200]!r}"
+        run_brk = _after(out, PROMPT + "RUN 0300\n")
+        assert run_brk.lstrip("\n").startswith("BRK 0300"), f"{profile}: RUN addr: {run_brk[:200]!r}"
         assert f"] DOS\n{PROMPT}EXIT\n] D0200-0200\n0200 53" in out, (
             f"{profile}: DOS after BRK, EXIT and the monitor dump did not chain: {out[-900:]!r}"
         )
@@ -490,18 +518,19 @@ def test_sdfs3_cmd_load_run_and_com_read_fat_files() -> None:
             _file("HELLO.COM", config["hello_com"]),
             _file("ARGS.COM", config["args_com"]),
             _file("EMPTY.COM", b""),
+            *_xldr_files(config),
         ],
     )
     out = _v3_run(
         config,
-        "M0110\r3F\r.\r"
+        "M0300\r3F\r.\r"
         "BOOT3\r"
         "LOAD HELLO.S\r"
         "LOAD HELLO.HEX\r"
         "EXIT\r"
         "D0200-0201\r"
         "DOS\r"
-        "RUN 0110\r"
+        "RUN 0300\r"
         "DOS\r"
         "HELLO.COM\r"
         "ARGS.COM AAA BBB\r"
@@ -518,7 +547,7 @@ def test_sdfs3_cmd_load_run_and_com_read_fat_files() -> None:
     assert "OK" in _dos(out, "LOAD HELLO.S")
     assert "OK" in _dos(out, "LOAD HELLO.HEX")
     assert "] D0200-0201\n0200 53 49" in out, f"LOAD did not write S-record/HEX data: {out!r}"
-    assert _after(out, PROMPT + "RUN 0110\n").lstrip("\n").startswith("BRK 0110"), "RUN addr"
+    assert _after(out, PROMPT + "RUN 0300\n").lstrip("\n").startswith("BRK 0300"), "RUN addr"
     assert "HELLO COM" in _dos(out, "HELLO.COM")
     assert "ARGS AAA BBB" in _dos(out, "ARGS.COM AAA BBB")
     assert _dos(out, "NOFILE.COM") == "?\n"
@@ -547,8 +576,9 @@ ZAPCORE_ADDR = V3_CORE_BASE + 0x100
 ZAPCORE_COM = bytes([0xB6, ZAPCORE_ADDR >> 8, ZAPCORE_ADDR & 0xFF, 0x43,
                      0xB7, ZAPCORE_ADDR >> 8, ZAPCORE_ADDR & 0xFF, 0x39])
 SWI_DATA_ADDR = V3_CCP_BASE + 0x100
-SWI_BREAK_ADDR = 0x0105
-# $0100: CCP の $6500 に $5A を置き、$0105 の NOP(ここに B で SWI を置く)、$6500 を $0210 へ
+SWI_PROG_ADDR = 0x0200  # RUN.COM の入口($0100-$0188)とかぶらない番地に置く(決定 6)
+SWI_BREAK_ADDR = SWI_PROG_ADDR + 5
+# $0200: CCP の +$100 に $5A を置き、$0205 の NOP(ここに B で SWI を置く)、CCP の +$100 を $0210 へ
 # 写して RTS。モニタの SWI はブレークポイントとして扱われ(R は SWI の番地から再開する)、
 # B が置いた SWI だけが元の命令に戻るので、止める SWI は B で置く。
 SWI_PROG = bytes([0x86, 0x5A, 0xB7, SWI_DATA_ADDR >> 8, SWI_DATA_ADDR & 0xFF, 0x01,
@@ -632,12 +662,14 @@ def _reads(log: list, start: int, stop: int, *, system_only: bool = False) -> li
     ]
 
 
-def _system_sectors(config: dict, base: int = SDFS3SYS_FIXED_LBA) -> dict[str, list[int]]:
+def _system_sectors(
+    config: dict, base: int = SDFS3SYS_FIXED_LBA, ccp_base: int = V3_CCP_BASE
+) -> dict[str, list[int]]:
     """slot(先頭 LBA = base)の SDFS3SYS のセクタの LBA。ccp・core は読み直しで読むはずの
     LBA(先頭セクタは 1 回)。"""
     size = len(config["sdfs3sys"])
     last = base + (size - 1) // SECTOR_SIZE
-    ccp_end = HEADER_SIZE + (V3_CORE_BASE - V3_CCP_BASE)  # ファイル上の CCP の終端(最後の次)
+    ccp_end = HEADER_SIZE + (V3_CORE_BASE - ccp_base)  # ファイル上の CCP の終端(最後の次)
     ccp = list(range(base, base + (ccp_end - 1) // SECTOR_SIZE + 1))
     core_first = base + ccp_end // SECTOR_SIZE
     core = [base, *range(core_first, last + 1)]
@@ -652,7 +684,8 @@ def _wboot_sd_image(config: dict) -> bytes:
             _file("HELLO.COM", config["hello_com"]),
             _file("ZAPCCP.COM", ZAPCCP_COM),
             _file("ZAPCORE.COM", ZAPCORE_COM),
-            _file("SWI.S", _srec_file(0x0100, SWI_PROG, entry_address=0x0100)),
+            _file("SWI.S", _srec_file(SWI_PROG_ADDR, SWI_PROG, entry_address=SWI_PROG_ADDR)),
+            *_xldr_files(config),
         ],
     )
 
@@ -692,7 +725,7 @@ def test_wboot_reloads_only_broken_parts() -> None:
         raw, log, _ = _v3_run_sd(
             config,
             "BOOT3\rHELLO.COM\rZAPCCP.COM\rDIR\rZAPCORE.COM\rDIR\rLOAD SWI.S\rEXIT\r"
-            f"B{SWI_BREAK_ADDR:04X}\rDOS\rRUN 0100\rR\rDIR\rEXIT\r"
+            f"B{SWI_BREAK_ADDR:04X}\rDOS\rRUN {SWI_PROG_ADDR:04X}\rR\rDIR\rEXIT\r"
             f"D0210-0210\rD{SWI_DATA_ADDR:04X}-{SWI_DATA_ADDR:04X}\r\r",
             sd_image=_wboot_sd_image(config),
         )
@@ -718,10 +751,10 @@ def test_wboot_reloads_only_broken_parts() -> None:
         assert before.count("README.TXT A 00000013") == 2, f"{profile}: DIR after reloads: {before[-900:]!r}"
         # 5. SWI(B で置いたブレークポイント): 注意を 1 行出すが読み直さない。R のあとの RTS で
         #    WBOOT に着き、CCP を読み直す
-        start, stop = _segment(raw, PROMPT + "RUN 0100", end="] R\r\n")
+        start, stop = _segment(raw, PROMPT + f"RUN {SWI_PROG_ADDR:04X}", end="] R\r\n")
         brk = raw[start:stop].replace("\r", "")
-        assert re.search(r"\nBRK 0105 A=5A [^\n]*\n\*SDFS3 CCP\n$", brk), f"{profile}: SWI: {brk!r}"
-        assert _reads(log, raw.index("BRK 0105", start), stop) == [], f"{profile}: SWI must not reload"
+        assert re.search(rf"\nBRK {SWI_BREAK_ADDR:04X} A=5A [^\n]*\n\*SDFS3 CCP\n$", brk), f"{profile}: SWI: {brk!r}"
+        assert _reads(log, raw.index(f"BRK {SWI_BREAK_ADDR:04X}", start), stop) == [], f"{profile}: SWI must not reload"
         start, stop = _segment(raw, "] R\r\n")
         assert raw[start:stop] == "", f"{profile}: resume and reload must be silent: {raw[start:stop]!r}"
         reads = _reads(log, start, stop)
@@ -1439,7 +1472,8 @@ def test_rom_boot3_rejects_bad_images() -> None:
         ("api major 1", "42", patched(lambda data: data.__setitem__(core + 8, 0x01))),
         ("api signature", "42", patched(lambda data: data.__setitem__(core, ord("X")))),
         ("load below RAM floor", "32", patched(put16(0x0C, 0x3F00))),
-        ("image beyond USER_RAM_END", "32", patched(put16(0x0C, 0x6C00))),
+        # 最後のバイトが $8000 に来る load(1 バイトだけ USER_RAM_END を越える)
+        ("image beyond USER_RAM_END", "32", patched(put16(0x0C, 0x8000 - (len(good) - HEADER_SIZE) + 1))),
         ("api offset outside image", "32", patched(put16(0x12, 0x2000))),
         ("entry table outside CCP", "32", patched(put16(0x10, V3_CORE_OFFSET))),
         ("bad magic", "32", bytes(bad_magic)),
@@ -1541,7 +1575,7 @@ def test_sdfs3_core_does_not_reference_ccp() -> None:
                 )
                 assert lst_analyze.check_core_ccp_main(lst) == 1, f"{kind}: check CLI should fail"
     finally:
-        _run_make(profile, "sdfs3")  # 通常ビルドに戻す
+        _remake_sdfs3(profile, "sdfs3sys")  # 通常ビルドに戻す
     print("[PASS] test_sdfs3_core_does_not_reference_ccp")
 
 
@@ -1564,6 +1598,7 @@ def test_sdfs3_resident_image_unchanged_after_commands() -> None:
             _file("HELLO.S", _srec_file(0x0200, b"S")),
             _file("README.TXT", b"HELLO FROM README\r\n"),
             _file("HELLO.COM", config["hello_com"]),
+            *_xldr_files(config),
         ],
     )
     last_error = symbols["SDFS3_LAST_ERROR"]
@@ -1623,7 +1658,7 @@ def test_sdfs3_init_clears_errors_and_warm_shows_pending() -> None:
         timeout=90,
     )
     end = symbols["SDFS3_END"] - 1
-    assert f"] BOOT3\n{WELCOME}\nBASE=6400 END={end:04X}\n{PROMPT}EXIT\n" in out, (
+    assert f"] BOOT3\n{WELCOME}\nBASE={V3_CCP_BASE:04X} END={end:04X}\n{PROMPT}EXIT\n" in out, (
         f"cold entry should not show the pending error: {out[:600]!r}"
     )
     assert _dump_bytes(_after(out, "G0300"), 0x0200)[0] == 0, "GET_ERROR after BOOT3 should be 0"
@@ -3224,6 +3259,15 @@ def _run_make(
     return result
 
 
+def _remake_sdfs3(profile: str, target: str, extra_args: list[str] | None = None) -> None:
+    """resident を作り直す。macOS の GNU Make 3.81 は時刻を 1 秒単位で比べるので、同じ秒に
+    .p を作り直すと .BIN と SDFS3SYS が古いまま残る。先に消してから作る。"""
+    suffix = V3_PROFILES[profile]
+    for name in (f"SDFS3{suffix}.BIN", f"SDFS3SYS{suffix}.BIN"):
+        (PROJECT_ROOT / "build" / name).unlink(missing_ok=True)
+    _run_make(profile, target, extra_args=extra_args)
+
+
 def _load_symbols(path: Path, *names: str) -> dict[str, int]:
     text = path.read_text(encoding="utf-8", errors="replace")
     result: dict[str, int] = {}
@@ -3536,6 +3580,243 @@ def test_read_stream_api_from_com() -> None:
     print("[PASS] test_read_stream_api_from_com")
 
 
+# ---------------------------------------------------------------------------
+# #316 LOAD.COM・RUN.COM・XLDR.OVL(本体は $6800 で動く)と、暗黙の .COM の検索
+# ---------------------------------------------------------------------------
+
+WINDOW_MARK = 0xC3
+
+
+def _srec_data(srec: bytes) -> dict[int, int]:
+    """S1/S2 のデータを {番地: 値} にする。"""
+    result: dict[int, int] = {}
+    for line in srec.decode("ascii").split():
+        if line[:2] not in ("S1", "S2"):
+            continue
+        raw = bytes.fromhex(line[2:])
+        width = 2 if line[1] == "1" else 3
+        address = int.from_bytes(raw[1 : 1 + width], "big")
+        for i, value in enumerate(raw[1 + width : raw[0]]):
+            result[address + i] = value
+    return result
+
+
+def _srec_to_ihex(srec: bytes) -> bytes:
+    """S-record のデータを Intel HEX(00 のレコードと 01 の終わり)に写す。"""
+    data = _srec_data(srec)
+    lines = []
+    addresses = sorted(data)
+    for start in range(0, len(addresses), 16):
+        chunk = addresses[start : start + 16]
+        assert chunk[-1] - chunk[0] == len(chunk) - 1, "the sample must be contiguous"
+        values = [len(chunk), chunk[0] >> 8, chunk[0] & 0xFF, 0x00, *(data[a] for a in chunk)]
+        values.append((-sum(values)) & 0xFF)
+        lines.append(":" + "".join(f"{v:02X}" for v in values))
+    lines.append(":00000001FF")
+    return ("\r\n".join(lines) + "\r\n").encode("ascii")
+
+
+def _window_base(config: dict) -> int:
+    return config["symbols"]["SDFS3_WORK_BASE"] - 0x0320
+
+
+def test_xldr_load_run_and_write_range() -> None:
+    """シナリオ 1〜3 と受入基準: LOAD HELLO.S のあと EXIT して D0200 で中身が見え、DOS で戻れる。
+    RUN HELLO.S は HELLO を出して SWI でモニタに着く。LOAD HELLO.HEX のあと RUN 0200 で動く。
+    $6800 以上・窓・$7000 へのレコードは「?」で、本体の手前($67FF)までは書ける。どの LOAD・RUN の
+    あとも CCP と核は無傷で、SDFS3SYS を読み直さない(XLDR は $6800-$6BFF に収まる)。"""
+    for profile in V3_PROFILES:
+        config = _v3(profile)
+        symbols = config["symbols"]
+        payload = config["sdfs3sys"][HEADER_SIZE:]
+        hello = _srec_data(config["hello_s"])
+        first, last = min(hello), max(hello)
+        assert first == 0x0200, f"HELLO.S should start at $0200: {first:04X}"
+        window = _window_base(config) + 0x0C00
+        core_dump = f"D{V3_CORE_BASE:04X}-{V3_CORE_BASE + 15:04X}"
+        files = [
+            _file("HELLO.S", config["hello_s"]),
+            _file("HELLO.HEX", _srec_to_ihex(config["hello_s"])),
+            _file("BAD.S", _srec_file(V3_CORE_BASE, b"\xAA\xAA\xAA\xAA", entry_address=V3_CORE_BASE)),
+            _file("HI.S", _srec_file(V3_XLDR_BASE, b"\xAA")),
+            _file("CROSS.S", _srec_file(V3_XLDR_BASE - 2, b"\x11\x22\x33")),
+            _file("EDGE.S", _srec_file(V3_XLDR_BASE - 1, b"\x5A")),
+            _file("WIN.S", _srec_file(window, b"\xAA")),
+            _file("NOENTRY.HEX", _ihex_file(0x0300, b"\x39")),
+            *_xldr_files(config),
+        ]
+        sd_image = _build_sdfs3sys_fat_sd_image(config["sdfs3sys"], files)
+        bad = ["LOAD BAD.S", "LOAD HI.S", "LOAD CROSS.S", "LOAD WIN.S", "RUN NOENTRY.HEX", "LOAD MISSING.S", "RUN"]
+        raw, log, _ = _v3_run_sd(
+            config,
+            f"M{window:04X}\r{WINDOW_MARK:02X}\r.\r"
+            "BOOT3\r"
+            "LOAD HELLO.S\rEXIT\r"
+            f"D{first:04X}-{last:04X}\r"
+            "DOS\rRUN HELLO.S\r"
+            f"F{first:04X}-{last:04X} 00\r"
+            "DOS\rLOAD HELLO.HEX\rRUN 0200\r"
+            "DOS\r" + "".join(f"{command}\r" for command in bad) + "LOAD EDGE.S\rDIR\rEXIT\r"
+            f"D{V3_XLDR_BASE - 2:04X}-{V3_XLDR_BASE - 1:04X}\r"
+            f"D{window:04X}-{window:04X}\r"
+            f"{core_dump}\r\r",
+            sd_image=sd_image,
+            max_cycles=3_000_000_000,
+            timeout=600,
+        )
+        out = raw.replace("\r", "")
+        # 1. 読み込んで残る
+        assert _dos(out, "LOAD HELLO.S") == "OK\n", f"{profile}: LOAD HELLO.S: {out[-900:]!r}"
+        dumped = _dump_range_bytes(_after(out, f"] D{first:04X}-{last:04X}\n"), first, last - first + 1)
+        assert dumped == [hello[a] for a in range(first, last + 1)], f"{profile}: $0200 after LOAD: {dumped}"
+        # 2. 読み込んで動かす(SWI でモニタへ)。2 回目は Intel HEX を読んで RUN addr
+        assert out.count("\nHELLO SREC\n") == 2, f"{profile}: RUN HELLO.S / RUN 0200 should print HELLO: {out!r}"
+        for command in ("RUN HELLO.S", "RUN 0200"):
+            ran = _after(out, PROMPT + command + "\n")
+            assert re.match(r"\s*HELLO SREC\n+BRK 0206 ", ran), f"{profile}: {command}: {ran[:200]!r}"
+        assert _dos(out, "LOAD HELLO.HEX") == "OK\n"
+        assert f"] DOS\n{PROMPT}LOAD HELLO.HEX" in out, f"{profile}: DOS after BRK"
+        # 3. 書き込みの範囲($0000-$67FF)の外は「?」。手前までは書ける
+        for command in bad:
+            assert _dos(out, command) == "?\n", f"{profile}: {command} should fail: {_dos(out, command)!r}"
+        assert _dos(out, "LOAD EDGE.S") == "OK\n"
+        edge = _dump_range_bytes(_after(out, f"] D{V3_XLDR_BASE - 2:04X}-"), V3_XLDR_BASE - 2, 2)
+        assert edge == [0x11, 0x5A], f"{profile}: CROSS.S writes $67FE-$67FF before failing, EDGE.S $67FF: {edge}"
+        assert _dump_bytes(_after(out, f"] D{window:04X}-"), window) == [WINDOW_MARK], f"{profile}: window written"
+        core = _dump_range_bytes(_after(out, f"] {core_dump}\n"), V3_CORE_BASE, 16)
+        assert bytes(core) == payload[V3_CORE_OFFSET : V3_CORE_OFFSET + 16], f"{profile}: core written: {core}"
+        assert _dos(out, "DIR").count(" A ") == 8, f"{profile}: DIR after the failures: {_dos(out, 'DIR')!r}"
+        # 核と CCP は無傷: どの LOAD・RUN のあとも SDFS3SYS を読み直さず、モニタの門も注意を出さない
+        for command in ["LOAD HELLO.S", "LOAD HELLO.HEX", *bad, "LOAD EDGE.S", "DIR"]:
+            start, stop = _segment(raw, PROMPT + command + "\r\n")
+            assert _reads(log, start, stop, system_only=True) == [], f"{profile}: {command} reloaded the system"
+        for command in ("RUN HELLO.S", "RUN 0200"):
+            start, stop = _segment(raw, PROMPT + command + "\r\n", end="BRK")
+            assert _reads(log, start, stop, system_only=True) == [], f"{profile}: {command} reloaded the system"
+        assert "*SDFS3" not in out, f"{profile}: CCP and core must stay intact: {out!r}"
+        assert out.count(WELCOME) == 1
+        assert out.count("\n?\n") == len(bad), f"{profile}: only the bad inputs should fail: {out!r}"
+    print("[PASS] test_xldr_load_run_and_write_range")
+
+
+def test_xldr_missing_or_in_root() -> None:
+    """XLDR.OVL がないとき、署名が違うとき、memtop を越えるときは「?」で DOS のプロンプトに戻る。
+    /BIN になくルートにあれば、ルートのものを使う。"""
+    config = _v3("k6802_vdg")
+    hello = [_file("HELLO.S", config["hello_s"])]
+    cases = [
+        ("none", None, "?\n"),
+        ("bin", config["hello_com"], "?\n"),  # 署名 "XLDR" がない
+        ("bin", b"\x39" * (V3_MEMTOP - V3_XLDR_BASE + 2), "?\n"),  # memtop を 1 バイト越える
+        ("root", None, "OK\n"),
+    ]
+    for where, body, expected in cases:
+        sd_image = _build_sdfs3sys_fat_sd_image(
+            config["sdfs3sys"], [*hello, *_xldr_files(config, where=where, xldr=body)]
+        )
+        run = "RUN 0300\r" if expected == "?\n" else ""  # 本体があれば $0300 を起動してしまう
+        out = _v3_run(
+            config,
+            f"BOOT3\rLOAD HELLO.S\r{run}DIR\rEXIT\rD0200-0200\r\r",
+            sd_image=sd_image,
+            max_cycles=1_500_000_000,
+            timeout=300,
+        )
+        label = f"{where} {len(body) if body else '-'}"
+        assert _dos(out, "LOAD HELLO.S") == expected, f"{label}: {out[-900:]!r}"
+        assert "HELLO.S A " in _dos(out, "DIR"), f"{label}: DOS should keep working: {out[-900:]!r}"
+        if expected == "?\n":
+            assert _dos(out, "RUN 0300") == "?\n", f"{label}: RUN without the body: {out[-900:]!r}"
+            assert _dump_bytes(_after(out, "] D0200-0200\n"), 0x0200) != [0xCE], f"{label}: nothing loaded"
+        else:
+            assert _dump_bytes(_after(out, "] D0200-0200\n"), 0x0200) == [0xCE], f"{label}: HELLO.S loaded"
+        assert out.count(WELCOME) == 1 and "*SDFS3" not in out, f"{label}: {out[-900:]!r}"
+    print("[PASS] test_xldr_missing_or_in_root")
+
+
+def test_ccp_implicit_com_search() -> None:
+    """決定 5: 拡張子のない語は <語>.COM をルート → /BIN の順に探す。ルートで見つからない
+    (コード 4)ときだけ /BIN を探し、ルートで大きすぎる(コード 8)なら /BIN を探さない。
+    「.COM」付きの語はそのまま(/BIN を探さない)。"""
+    config = _v3("sbcio_vdg")
+    sd_image = _build_sdfs3sys_fat_sd_image(
+        config["sdfs3sys"],
+        [
+            _file("HELLO.COM", config["hello_com"]),
+            _file("TOOBIG.COM", TOOBIG_COM),
+            _file("HELLO.COM", _print_program(b"BIN HELLO", 0x39), ("BIN",)),
+            _file("ARGS.COM", config["args_com"], ("BIN",)),
+            _file("TOOBIG.COM", _print_program(b"BIN TOOBIG", 0x39), ("BIN",)),
+            _file("ONLYBIN.COM", _print_program(b"ONLY IN BIN", 0x39), ("BIN",)),
+        ],
+    )
+    commands = ["HELLO", "hello", "ARGS AAA BBB", "/BIN/HELLO", "BIN/HELLO", "NOSUCH", "TOOBIG", "ONLYBIN.COM"]
+    raw, log, _ = _v3_run_sd(
+        config,
+        "BOOT3\r" + "".join(f"{command}\r" for command in commands) + "\r",
+        sd_image=sd_image,
+        max_cycles=1_500_000_000,
+        timeout=300,
+    )
+    out = raw.replace("\r", "")
+    assert "HELLO COM" in _dos(out, "HELLO") and "BIN HELLO" not in _dos(out, "HELLO"), "root comes first"
+    assert "HELLO COM" in _dos(out, "hello")
+    assert "ARGS AAA BBB" in _dos(out, "ARGS AAA BBB"), "falls back to /BIN with the arguments"
+    assert "BIN HELLO" in _dos(out, "/BIN/HELLO") and "BIN HELLO" in _dos(out, "BIN/HELLO")
+    assert _dos(out, "NOSUCH") == "?\n"
+    assert _dos(out, "TOOBIG") == "?\n", "a root file that is too big must not fall back to /BIN"
+    assert _dos(out, "ONLYBIN.COM") == "?\n", "an explicit .COM name is not searched in /BIN"
+    assert out.count("\n?\n") == 3
+    # NOSUCH はルートと /BIN を探す(mount とディレクトリを 2 回)。TOOBIG はルートだけ
+    start, stop = _segment(raw, PROMPT + "NOSUCH\r\n")
+    nosuch = _reads(log, start, stop)
+    start, stop = _segment(raw, PROMPT + "TOOBIG\r\n")
+    toobig = _reads(log, start, stop)
+    assert len(nosuch) > len(toobig) >= 1, f"NOSUCH {nosuch} should read more than TOOBIG {toobig}"
+    print("[PASS] test_ccp_implicit_com_search")
+
+
+def test_xldr_overlapping_ccp_reloads_only_ccp() -> None:
+    """シナリオ 4: CCP_BASE を $6800 に下げた試験用のイメージでは、XLDR が CCP にかぶる。
+    LOAD HELLO.S の戻りで CCP のセクタだけを読み直し、動きは同じ。"""
+    low_ccp = V3_XLDR_BASE
+    for profile, suffix in V3_PROFILES.items():
+        base = _v3(profile)
+        try:
+            _remake_sdfs3(profile, "sdfs3sys", [f"SDFS3_ASL_DEFS=-D SDFS3_CCP_BASE_TEST={low_ccp}"])
+            lst = PROJECT_ROOT / "build" / f"SDFS3{suffix}.lst"
+            symbols = _load_symbols(lst, "SDFS3_CCP_BASE", "SDFS3_CCP_END", "SDFS3_END")
+            assert symbols["SDFS3_CCP_BASE"] == low_ccp, f"{profile}: test build CCP_BASE {symbols}"
+            config = {**base, "sdfs3sys": (PROJECT_ROOT / "build" / f"SDFS3SYS{suffix}.BIN").read_bytes()}
+        finally:
+            _remake_sdfs3(profile, "sdfs3sys")  # 通常ビルドに戻す
+        assert _load_symbols(lst, "SDFS3_CCP_BASE")["SDFS3_CCP_BASE"] == V3_CCP_BASE
+        restored = (PROJECT_ROOT / "build" / f"SDFS3SYS{suffix}.BIN").read_bytes()
+        assert restored == base["sdfs3sys"], f"{profile}: the normal SDFS3SYS was not rebuilt"
+        sectors = _system_sectors(config, ccp_base=low_ccp)
+        sd_image = _build_sdfs3sys_fat_sd_image(
+            config["sdfs3sys"], [_file("HELLO.S", config["hello_s"]), *_xldr_files(config)]
+        )
+        raw, log, _ = _v3_run_sd(
+            config,
+            "BOOT3\rDIR\rLOAD HELLO.S\rDIR\rEXIT\rD0200-0200\r\r",
+            sd_image=sd_image,
+            max_cycles=1_500_000_000,
+            timeout=300,
+        )
+        out = raw.replace("\r", "")
+        end = symbols["SDFS3_END"] - 1
+        assert f"{WELCOME}\nBASE={low_ccp:04X} END={end:04X}\n" in out, f"{profile}: {out[:300]!r}"
+        assert _dos(out, "LOAD HELLO.S") == "OK\n", f"{profile}: {out[-900:]!r}"
+        start, stop = _segment(raw, PROMPT + "LOAD HELLO.S\r\n")
+        reads = _reads(log, start, stop, system_only=True)
+        assert reads == sectors["ccp"], f"{profile}: LOAD should reload only the CCP: {reads}, want {sectors['ccp']}"
+        assert out.count(PROMPT + "DIR\n") == 2 and "HELLO.S A " in _dos(out[out.index("LOAD HELLO.S"):], "DIR")
+        assert _dump_bytes(_after(out, "] D0200-0200\n"), 0x0200) == [0xCE]
+        assert out.count(WELCOME) == 1 and "\n?\n" not in out
+    print("[PASS] test_xldr_overlapping_ccp_reloads_only_ccp")
+
+
 def main() -> None:
     print("=" * 50)
     print("SDFS/68 v3 build tests")
@@ -3586,6 +3867,10 @@ def main() -> None:
         test_sdfs3_core_does_not_reference_ccp,
         test_read_stream_api_from_com,
         test_com_max_size_runs_and_returns_through_reload,
+        test_xldr_load_run_and_write_range,
+        test_xldr_missing_or_in_root,
+        test_ccp_implicit_com_search,
+        test_xldr_overlapping_ccp_reloads_only_ccp,
     ]
     passed = 0
     failed = 0
