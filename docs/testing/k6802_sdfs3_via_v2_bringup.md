@@ -193,7 +193,7 @@ SDFS>
 | --- | --- |
 | `BOOT` でSDFSに入れない | ROM、stage1、system SD、`SDFS.BIN` |
 | `SDFS> LOAD SDFS3.S` が失敗する | FAT32 root、8.3名、ファイル破損 |
-| `BOOT3` が `?` | LBA64の `SDFS3SYS`、checksum、ROMとresidentの `SDFS3_LOAD_BASE` |
+| `BOOT3` が `?` | LBA64の `SDFS3SYS`、checksum、ROMとresidentの `SDFS3_LOAD_BASE`。#307 以降の ROM は `?` のあとに slot A・B の理由のコードを出す（意味は `docs/usage/monitor_commands.md` の「BOOT3 と DOS のエラーコード」） |
 | `CMD DIR` が `?` | `BOOT3` または `LOAD SDFS3.S` でresidentがロード済みか、ROMとresidentの `SDFS3_LOAD_BASE` が一致しているか |
 | `CMD DIR` が固まる | SD SPI配線、PIAアドレス、カード相性 |
 | `CMD TYPE` / `CMD LOAD` だけ失敗 | FAT32 entry、file size、cluster chain |
