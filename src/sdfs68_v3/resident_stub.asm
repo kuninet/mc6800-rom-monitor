@@ -38,7 +38,10 @@ SDFS3_LP_ARG_LEN equ SDFS3_WORK_BASE+$0E
 SDFS3_LP_ROOM    equ SDFS3_WORK_BASE+$0F  ; 2B。limit、検査のあとは limit-load
 SDFS3_GETC_X     equ SDFS3_WORK_BASE+$11  ; 2B。GETC が X を保つための退避
 SDFS3_CCP_LP_BLOCK equ SDFS3_WORK_BASE+$13 ; 11B。CCP が .COM の起動で組む LOAD_PATH のブロック
-SDFS3_WORK_USED  equ $13+11
+SDFS3_COM_IMPLICIT equ SDFS3_WORK_BASE+$1E ; 1B。0 = 語は .COM の名前、1 = 暗黙の検索(決定 5)
+SDFS3_COM_PATH   equ SDFS3_WORK_BASE+$1F  ; 40B。暗黙の検索で組む "/BIN/" + 語 + ".COM"
+SDFS3_COM_WORD_MAX equ 40-9
+SDFS3_WORK_USED  equ $1F+40
  if SDFS3_WORK_USED > $E0
         error   "SDFS/68 v3 resident work overflows W+$0320-$03FF"
  endif
@@ -61,7 +64,8 @@ SDFS3_CCP_VECTORS:
 
 SDFS3_CCP_COLD:
         jsr     SDFS3_INIT
-        jsr     SDFS3_PRINT_WELCOME
+        ldx     #SDFS3_TXT_WELCOME
+        jsr     SDFS3_PRINT
         bra     SDFS3_CCP_PROMPT
 SDFS3_CCP_WARM:
         clr     SDFS3_STREAM_OPEN   ; 前のプログラムの取っ手を持ち越さない
@@ -83,32 +87,40 @@ SDFS3_CCP_PROMPT:
         bcs     SDFS3_CCP_ERROR
         bra     SDFS3_CCP_PROMPT
 
-SDFS3_PRINT_WELCOME:
-        ldx     #SDFS3_TXT_WELCOME
-        jsr     SDFS3_PRINT
-        ldaa    #SDFS3_API_MAJOR
-        jsr     SDFS3_PRINT_HEX8
-        ldaa    #'.'
-        jsr     SDFS3_PUTC
-        ldaa    #SDFS3_API_MINOR
-        jsr     SDFS3_PRINT_HEX8
-        ldaa    #CHR_CR
-        jsr     SDFS3_PUTC
-        ldx     #SDFS3_TXT_BASE
-        jsr     SDFS3_PRINT
-        ldaa    #SDFS3_CCP_BASE/$0100
-        jsr     SDFS3_PRINT_HEX8
-        ldaa    #SDFS3_CCP_BASE&$00FF
-        jsr     SDFS3_PRINT_HEX8
-        ldx     #SDFS3_TXT_END
-        jsr     SDFS3_PRINT
-        ldaa    #(SDFS3_END-1)/$0100
-        jsr     SDFS3_PRINT_HEX8
-        ldaa    #(SDFS3_END-1)&$00FF
-        jsr     SDFS3_PRINT_HEX8
-        ldaa    #CHR_CR
-        jmp     SDFS3_PUTC
+; 語(TOKEN_PTR、TOKEN_LEN 文字)が X の文字列(大文字)と同じなら C=0。大文字と小文字は区別しない。
+SDFS3_MATCH_TOKEN:
+        ldab    SDFS3_TOKEN_LEN
+        stx     ARG2_PTR
+        ldx     SDFS3_TOKEN_PTR
+        stx     ARG_PTR
+        ldx     ARG2_PTR
+; ARG_PTR からの B 文字(1 以上)が X の文字列(大文字)と同じなら C=0。
+SDFS3_MATCH:
+        stx     ARG2_PTR
+SDFS3_MATCH_LOOP:
+        ldx     ARG_PTR
+        ldaa    0,x
+        jsr     SDFS3_TO_UPPER
+        inx
+        stx     ARG_PTR
+        ldx     ARG2_PTR
+        cmpa    0,x
+        bne     SDFS3_MATCH_FAIL
+        inx
+        stx     ARG2_PTR
+        decb
+        bne     SDFS3_MATCH_LOOP
+        clc
+        rts
+SDFS3_MATCH_FAIL:
+        sec
+        rts
 
+SDFS3_BAD_COMMAND:
+        ldaa    #SDFS3_ERR_BAD_CMD
+        staa    SDFS3_LAST_ERROR
+        sec
+        rts
 
 SDFS3_CMD_DISPATCH:
         stx     SDFS3_PARSE_PTR
@@ -142,26 +154,46 @@ SDFS3_CMD_TOKEN_SCAN:
 SDFS3_CMD_TOKEN_DONE:
         ldaa    SDFS3_TOKEN_LEN
         beq     SDFS3_BAD_COMMAND
+        ldx     #SDFS3_TXT_DIR
         cmpa    #3
         bne     SDFS3_CMD_CHECK_4
-        jsr     SDFS3_IS_DIR
+        jsr     SDFS3_MATCH_TOKEN
         bcc     SDFS3_CMD_DIR_STUB
-        jsr     SDFS3_IS_RUN
-        bcc     SDFS3_CMD_RUN_STUB
         bra     SDFS3_CMD_CHECK_COM
 SDFS3_CMD_CHECK_4:
         cmpa    #4
         bne     SDFS3_CMD_CHECK_COM
-        jsr     SDFS3_IS_TYPE
+        ldx     #SDFS3_TXT_TYPE
+        jsr     SDFS3_MATCH_TOKEN
         bcc     SDFS3_CMD_TYPE_STUB
-        jsr     SDFS3_IS_LOAD
-        bcc     SDFS3_CMD_LOAD_STUB
-        jsr     SDFS3_IS_EXIT
+        ldx     #SDFS3_TXT_EXIT
+        jsr     SDFS3_MATCH_TOKEN
         bcc     SDFS3_CMD_EXIT
+; 内蔵でない語は .COM として探す(仕様 2-4、決定 5)。語に「.」があれば .COM の名前そのもの
+; (最初の「.」から後ろが .COM でなければ不明なコマンド)、なければ <語>.COM をルート → /BIN の
+; 順に探す。
 SDFS3_CMD_CHECK_COM:
-        jsr     SDFS3_IS_COM_TOKEN
-        bcc     SDFS3_CMD_COM_STUB
-        bra     SDFS3_BAD_COMMAND
+        clr     SDFS3_COM_IMPLICIT
+        ldx     SDFS3_TOKEN_PTR
+        ldab    SDFS3_TOKEN_LEN
+SDFS3_CMD_FIND_DOT:
+        ldaa    0,x
+        cmpa    #'.'
+        beq     SDFS3_CMD_HAS_DOT
+        inx
+        decb
+        bne     SDFS3_CMD_FIND_DOT
+        inc     SDFS3_COM_IMPLICIT
+        bra     SDFS3_CMD_COM
+SDFS3_CMD_HAS_DOT:
+        stx     ARG_PTR
+        cmpb    #4
+        bne     SDFS3_CMD_BAD_FAR
+        ldx     #SDFS3_TXT_BIN+5
+        jsr     SDFS3_MATCH
+        bcc     SDFS3_CMD_COM
+SDFS3_CMD_BAD_FAR:
+        jmp     SDFS3_BAD_COMMAND
 
 ; EXIT はモニタへ(決定 2)。BIOS_MONITOR が lds #STACK_TOP してモニタの門へ入る。
 SDFS3_CMD_EXIT:
@@ -170,163 +202,84 @@ SDFS3_CMD_DIR_STUB:
         jmp     SDFS3_CMD_DIR
 SDFS3_CMD_TYPE_STUB:
         jmp     SDFS3_CMD_TYPE
-SDFS3_CMD_LOAD_STUB:
-        jmp     SDFS3_CMD_LOAD
-SDFS3_CMD_RUN_STUB:
-        jmp     SDFS3_CMD_RUN
-SDFS3_CMD_COM_STUB:
-        jmp     SDFS3_CMD_COM
-SDFS3_BAD_COMMAND:
-        ldaa    #SDFS3_ERR_BAD_CMD
-        staa    SDFS3_LAST_ERROR
+
+; .COM は核の LOAD_PATH(exec)で $0100 から GET_MEMTOP まで読んで起動する(#315)。
+; 読み込みは CCP を潰してよい。戻ってくるのは読み込みを始める前の失敗(C=1)だけ。
+; 暗黙の検索では、ルートで見つからなかった(コード 4)ときだけ /BIN を探す(決定 5)。
+SDFS3_CMD_COM_FAIL:
+        ldaa    #SDFS3_ERR_COM
+        jmp     SDFS3_FAIL_A
+SDFS3_CMD_COM:
+        ldx     SDFS3_TOKEN_PTR
+        ldab    SDFS3_TOKEN_LEN
+        addb    SDFS3_PARSE_LEN
+        jsr     SDFS3_PARSE_COM_PATH_COMMAND
+        bcs     SDFS3_CMD_COM_FAIL
+        ldx     PATH_PTR
+        stx     SDFS3_CCP_LP_BLOCK
+        ldaa    PATH_LEN
+        staa    SDFS3_CCP_LP_BLOCK+2
+        ldx     #SDFS3_COM_BASE
+        stx     SDFS3_CCP_LP_BLOCK+3
+        ldx     #SDFS3_MEMTOP
+        stx     SDFS3_CCP_LP_BLOCK+5
+        ldaa    #SDFS3_LP_EXEC
+        staa    SDFS3_CCP_LP_BLOCK+7
+        ldx     PATH_ARG_PTR
+        stx     SDFS3_CCP_LP_BLOCK+8
+        ldaa    PATH_ARG_LEN
+        staa    SDFS3_CCP_LP_BLOCK+10
+        tst     SDFS3_COM_IMPLICIT
+        beq     SDFS3_CMD_COM_GO
+; 暗黙: SDFS3_COM_PATH に "/BIN/" + 語 + ".COM" を組む。ルートは +5 から、/BIN は先頭から
+        ldab    PATH_LEN
+        cmpb    #SDFS3_COM_WORD_MAX
+        bhi     SDFS3_CMD_COM_FAIL
+        ldx     #SDFS3_COM_PATH
+        stx     ARG2_PTR
+        ldx     #SDFS3_TXT_BIN
+        ldab    #5
+        bsr     SDFS3_COPY_B
+        ldx     PATH_PTR
+        ldab    PATH_LEN
+        bsr     SDFS3_COPY_B
+        ldx     #SDFS3_TXT_BIN+5
+        ldab    #4
+        bsr     SDFS3_COPY_B
+        ldx     #SDFS3_COM_PATH+5
+        stx     SDFS3_CCP_LP_BLOCK
+        ldaa    PATH_LEN
+        adda    #4
+        staa    SDFS3_CCP_LP_BLOCK+2
+        ldx     #SDFS3_CCP_LP_BLOCK
+        jsr     SDFS3_LOAD_PATH
+        ldaa    SDFS3_LAST_ERROR
+        cmpa    #SDFS3_ERR_NOT_FOUND
+        bne     SDFS3_CMD_COM_KEEP
+        ldx     #SDFS3_COM_PATH
+        stx     SDFS3_CCP_LP_BLOCK
+        ldaa    SDFS3_CCP_LP_BLOCK+2
+        adda    #5
+        staa    SDFS3_CCP_LP_BLOCK+2
+SDFS3_CMD_COM_GO:
+        ldx     #SDFS3_CCP_LP_BLOCK
+        jmp     SDFS3_LOAD_PATH
+SDFS3_CMD_COM_KEEP:
         sec
         rts
 
-SDFS3_IS_DIR:
-        ldx     SDFS3_TOKEN_PTR
+; X から B バイト(1 以上)を ARG2_PTR へ写し、ARG2_PTR を進める。
+SDFS3_COPY_B:
         ldaa    0,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'D'
-        bne     SDFS3_IS_DIR_FAIL
-        ldaa    1,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'I'
-        bne     SDFS3_IS_DIR_FAIL
-        ldaa    2,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'R'
-        bne     SDFS3_IS_DIR_FAIL
-        clc
-        rts
-SDFS3_IS_DIR_FAIL:
-        sec
-        rts
-
-SDFS3_IS_RUN:
-        ldx     SDFS3_TOKEN_PTR
-        ldaa    0,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'R'
-        bne     SDFS3_IS_RUN_FAIL
-        ldaa    1,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'U'
-        bne     SDFS3_IS_RUN_FAIL
-        ldaa    2,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'N'
-        bne     SDFS3_IS_RUN_FAIL
-        clc
-        rts
-SDFS3_IS_RUN_FAIL:
-        sec
-        rts
-
-SDFS3_IS_TYPE:
-        ldx     SDFS3_TOKEN_PTR
-        ldaa    0,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'T'
-        bne     SDFS3_IS_TYPE_FAIL
-        ldaa    1,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'Y'
-        bne     SDFS3_IS_TYPE_FAIL
-        ldaa    2,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'P'
-        bne     SDFS3_IS_TYPE_FAIL
-        ldaa    3,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'E'
-        bne     SDFS3_IS_TYPE_FAIL
-        clc
-        rts
-SDFS3_IS_TYPE_FAIL:
-        sec
-        rts
-
-SDFS3_IS_LOAD:
-        ldx     SDFS3_TOKEN_PTR
-        ldaa    0,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'L'
-        bne     SDFS3_IS_LOAD_FAIL
-        ldaa    1,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'O'
-        bne     SDFS3_IS_LOAD_FAIL
-        ldaa    2,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'A'
-        bne     SDFS3_IS_LOAD_FAIL
-        ldaa    3,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'D'
-        bne     SDFS3_IS_LOAD_FAIL
-        clc
-        rts
-SDFS3_IS_LOAD_FAIL:
-        sec
-        rts
-
-SDFS3_IS_EXIT:
-        ldx     SDFS3_TOKEN_PTR
-        ldaa    0,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'E'
-        bne     SDFS3_IS_EXIT_FAIL
-        ldaa    1,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'X'
-        bne     SDFS3_IS_EXIT_FAIL
-        ldaa    2,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'I'
-        bne     SDFS3_IS_EXIT_FAIL
-        ldaa    3,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'T'
-        bne     SDFS3_IS_EXIT_FAIL
-        clc
-        rts
-SDFS3_IS_EXIT_FAIL:
-        sec
-        rts
-
-SDFS3_IS_COM_TOKEN:
-        ldaa    SDFS3_TOKEN_LEN
-        cmpa    #5
-        blo     SDFS3_IS_COM_FAIL
-        suba    #4
-        tab
-        ldx     SDFS3_TOKEN_PTR
-SDFS3_COM_EXT_PTR_LOOP:
-        tstb
-        beq     SDFS3_COM_EXT_PTR_DONE
         inx
+        stx     ARG_PTR
+        ldx     ARG2_PTR
+        staa    0,x
+        inx
+        stx     ARG2_PTR
+        ldx     ARG_PTR
         decb
-        bra     SDFS3_COM_EXT_PTR_LOOP
-SDFS3_COM_EXT_PTR_DONE:
-        ldaa    0,x
-        cmpa    #'.'
-        bne     SDFS3_IS_COM_FAIL
-        ldaa    1,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'C'
-        bne     SDFS3_IS_COM_FAIL
-        ldaa    2,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'O'
-        bne     SDFS3_IS_COM_FAIL
-        ldaa    3,x
-        jsr     SDFS3_TO_UPPER
-        cmpa    #'M'
-        bne     SDFS3_IS_COM_FAIL
-        clc
-        rts
-SDFS3_IS_COM_FAIL:
-        sec
+        bne     SDFS3_COPY_B
         rts
 
 SDFS3_CMD_DIR:
@@ -375,102 +328,6 @@ SDFS3_CMD_TYPE_NOT_FOUND:
         jmp     SDFS3_NOT_FOUND
 SDFS3_CMD_TYPE_FAT_FAIL:
         jmp     SDFS3_FAT_FAIL
-
-SDFS3_CMD_LOAD:
-        ldx     SDFS3_PARSE_PTR
-        ldab    SDFS3_PARSE_LEN
-        jsr     SDFS3_LOAD_FILE
-        bcs     SDFS3_CMD_LOAD_FAIL
-        ldx     #SDFS3_TXT_OK
-        jsr     SDFS3_PRINT
-        clr     SDFS3_LAST_ERROR
-        clc
-        rts
-SDFS3_CMD_LOAD_FAIL:
-        ldaa    #SDFS3_ERR_LOAD
-        jmp     SDFS3_FAIL_A
-
-SDFS3_LOAD_FILE:
-        clr     LOADER_MODE
-        clr     LOADER_STAGE
-        clr     SDFS_RUN_ENTRY_SET
-        stx     PATH_PTR
-        stab    PATH_LEN
-        jsr     FAT32_MOUNT
-        bcs     SDFS3_LOAD_FILE_FAIL
-        jsr     SDFS3_RESOLVE_FILE_SAVED
-        bcs     SDFS3_LOAD_FILE_FAIL
-        jsr     FAT32_STREAM_OPEN
-        bcs     SDFS3_LOAD_FILE_FAIL
-SDFS3_LOAD_LOOP:
-        jsr     SDFS3_READ_LOADER_RECORD
-        bcs     SDFS3_LOAD_FILE_FAIL
-        cmpa    #1
-        beq     SDFS3_LOAD_FILE_DONE
-        bra     SDFS3_LOAD_LOOP
-SDFS3_LOAD_FILE_DONE:
-        clc
-        rts
-SDFS3_LOAD_FILE_FAIL:
-        sec
-        rts
-
-SDFS3_CMD_RUN:
-        ldx     SDFS3_PARSE_PTR
-        ldab    SDFS3_PARSE_LEN
-        jsr     SDFS3_PARSE_HEX16
-        bcs     SDFS3_CMD_RUN_FILE
-        ldx     HEX_VALUE_HI
-        bra     SDFS3_RUN_EXEC
-SDFS3_CMD_RUN_FILE:
-        ldx     SDFS3_PARSE_PTR
-        ldab    SDFS3_PARSE_LEN
-        jsr     SDFS3_LOAD_FILE
-        bcs     SDFS3_CMD_RUN_FAIL
-        ldaa    LOADER_MODE
-        cmpa    #LOAD_MODE_SREC
-        bne     SDFS3_CMD_RUN_FAIL
-        ldaa    SDFS_RUN_ENTRY_SET
-        beq     SDFS3_CMD_RUN_FAIL
-        ldx     SDFS_RUN_ENTRY
-; RUN で起動するプログラムは A=0・X=0・B=0(仕様 3-2)。戻らない。
-SDFS3_RUN_EXEC:
-        stx     SDFS3_EXEC_BLOCK
-        ldx     #0
-        stx     SDFS3_EXEC_BLOCK+2
-        clrb
-        jmp     SDFS3_EXEC
-SDFS3_CMD_RUN_FAIL:
-        ldaa    #SDFS3_ERR_RUN
-        jmp     SDFS3_FAIL_A
-
-; .COM は核の LOAD_PATH(exec)で $0100 から GET_MEMTOP まで読んで起動する(#315)。
-; 読み込みは CCP を潰してよい。戻ってくるのは読み込みを始める前の失敗(C=1)だけ。
-SDFS3_CMD_COM:
-        ldx     SDFS3_TOKEN_PTR
-        ldab    SDFS3_TOKEN_LEN
-        addb    SDFS3_PARSE_LEN
-        jsr     SDFS3_PARSE_COM_PATH_COMMAND
-        bcs     SDFS3_CMD_COM_FAIL
-        ldx     PATH_PTR
-        stx     SDFS3_CCP_LP_BLOCK
-        ldaa    PATH_LEN
-        staa    SDFS3_CCP_LP_BLOCK+2
-        ldx     #SDFS3_COM_BASE
-        stx     SDFS3_CCP_LP_BLOCK+3
-        ldx     #SDFS3_MEMTOP
-        stx     SDFS3_CCP_LP_BLOCK+5
-        ldaa    #SDFS3_LP_EXEC
-        staa    SDFS3_CCP_LP_BLOCK+7
-        ldx     PATH_ARG_PTR
-        stx     SDFS3_CCP_LP_BLOCK+8
-        ldaa    PATH_ARG_LEN
-        staa    SDFS3_CCP_LP_BLOCK+10
-        ldx     #SDFS3_CCP_LP_BLOCK
-        jmp     SDFS3_LOAD_PATH
-SDFS3_CMD_COM_FAIL:
-        ldaa    #SDFS3_ERR_COM
-        jmp     SDFS3_FAIL_A
 
 SDFS3_DIR_PATH:
         jsr     SDFS3_RESOLVE_DIR_SAVED
@@ -582,442 +439,6 @@ SDFS3_PARSE_COM_PATH_FAIL:
         sec
         rts
 
-SDFS3_PARSE_HEX16:
-        stx     ARG_PTR
-        stab    ARG_LEN
-        clr     HEX_VALUE_HI
-        clr     HEX_VALUE_LO
-        clr     ARG2_LEN
-SDFS3_PARSE_HEX16_SKIP:
-        tst     ARG_LEN
-        bne     SDFS3_PARSE_HEX16_SKIP_HAS
-        jmp     SDFS3_PARSE_HEX16_FAIL
-SDFS3_PARSE_HEX16_SKIP_HAS:
-        ldx     ARG_PTR
-        ldaa    0,x
-        cmpa    #CHR_SPACE
-        bne     SDFS3_PARSE_HEX16_LOOP
-        inx
-        stx     ARG_PTR
-        dec     ARG_LEN
-        bra     SDFS3_PARSE_HEX16_SKIP
-SDFS3_PARSE_HEX16_LOOP:
-        tst     ARG_LEN
-        beq     SDFS3_PARSE_HEX16_DONE
-        ldx     ARG_PTR
-        ldaa    0,x
-        cmpa    #CHR_SPACE
-        beq     SDFS3_PARSE_HEX16_TRAILING
-        jsr     SDFS3_HEX_TO_NIBBLE
-        bcs     SDFS3_PARSE_HEX16_FAIL
-        ldab    ARG2_LEN
-        cmpb    #4
-        bhs     SDFS3_PARSE_HEX16_FAIL
-        tstb
-        beq     SDFS3_PARSE_HEX16_HI_H
-        cmpb    #1
-        beq     SDFS3_PARSE_HEX16_HI_L
-        cmpb    #2
-        beq     SDFS3_PARSE_HEX16_LO_H
-        oraa    HEX_VALUE_LO
-        staa    HEX_VALUE_LO
-        bra     SDFS3_PARSE_HEX16_ADVANCE
-SDFS3_PARSE_HEX16_HI_H:
-        lsla
-        lsla
-        lsla
-        lsla
-        staa    HEX_VALUE_HI
-        bra     SDFS3_PARSE_HEX16_ADVANCE
-SDFS3_PARSE_HEX16_HI_L:
-        oraa    HEX_VALUE_HI
-        staa    HEX_VALUE_HI
-        bra     SDFS3_PARSE_HEX16_ADVANCE
-SDFS3_PARSE_HEX16_LO_H:
-        lsla
-        lsla
-        lsla
-        lsla
-        staa    HEX_VALUE_LO
-SDFS3_PARSE_HEX16_ADVANCE:
-        ldx     ARG_PTR
-        inx
-        stx     ARG_PTR
-        dec     ARG_LEN
-        inc     ARG2_LEN
-        bra     SDFS3_PARSE_HEX16_LOOP
-SDFS3_PARSE_HEX16_TRAILING:
-        ldx     ARG_PTR
-        inx
-        stx     ARG_PTR
-        dec     ARG_LEN
-SDFS3_PARSE_HEX16_TRAILING_LOOP:
-        tst     ARG_LEN
-        beq     SDFS3_PARSE_HEX16_DONE
-        ldx     ARG_PTR
-        ldaa    0,x
-        cmpa    #CHR_SPACE
-        bne     SDFS3_PARSE_HEX16_FAIL
-        inx
-        stx     ARG_PTR
-        dec     ARG_LEN
-        bra     SDFS3_PARSE_HEX16_TRAILING_LOOP
-SDFS3_PARSE_HEX16_DONE:
-        ldaa    ARG2_LEN
-        cmpa    #4
-        bne     SDFS3_PARSE_HEX16_FAIL
-        clc
-        rts
-SDFS3_PARSE_HEX16_FAIL:
-        sec
-        rts
-
-SDFS3_READ_LOADER_RECORD:
-        jsr     SDFS3_READ_RECORD_HEAD
-        bcs     SDFS3_READ_LOADER_RECORD_FAIL
-        ldaa    LOADER_MODE
-        bne     SDFS3_READ_LOADER_RECORD_MODE_SET
-        ldaa    HEX_NIBBLE
-        cmpa    #'S'
-        beq     SDFS3_READ_LOADER_RECORD_SET_SREC
-        cmpa    #':'
-        beq     SDFS3_READ_LOADER_RECORD_SET_IHEX
-        sec
-        rts
-SDFS3_READ_LOADER_RECORD_SET_SREC:
-        ldaa    #LOAD_MODE_SREC
-        staa    LOADER_MODE
-        bra     SDFS3_READ_LOADER_RECORD_MODE_SET
-SDFS3_READ_LOADER_RECORD_SET_IHEX:
-        ldaa    #LOAD_MODE_IHEX
-        staa    LOADER_MODE
-SDFS3_READ_LOADER_RECORD_MODE_SET:
-        ldaa    LOADER_MODE
-        cmpa    #LOAD_MODE_SREC
-        beq     SDFS3_READ_SREC_RECORD
-        cmpa    #LOAD_MODE_IHEX
-        bne     SDFS3_READ_LOADER_RECORD_FAIL
-        jmp     SDFS3_READ_IHEX_RECORD
-SDFS3_READ_LOADER_RECORD_FAIL:
-        sec
-        rts
-
-SDFS3_READ_RECORD_HEAD:
-        jsr     FAT32_STREAM_GETC
-        bcs     SDFS3_READ_RECORD_HEAD_FAIL
-        cmpa    #CHR_LF
-        beq     SDFS3_READ_RECORD_HEAD
-        cmpa    #CHR_CR
-        beq     SDFS3_READ_RECORD_HEAD
-        cmpa    #CHR_SPACE
-        blo     SDFS3_READ_RECORD_HEAD
-        staa    HEX_NIBBLE
-        clc
-        rts
-SDFS3_READ_RECORD_HEAD_FAIL:
-        sec
-        rts
-
-SDFS3_READ_RECORD_TRAILER:
-        jsr     FAT32_STREAM_GETC
-        bcs     SDFS3_READ_RECORD_TRAILER_EOF_OR_FAIL
-        cmpa    #CHR_LF
-        beq     SDFS3_READ_RECORD_TRAILER_OK
-        cmpa    #CHR_CR
-        beq     SDFS3_READ_RECORD_TRAILER_OK
-SDFS3_READ_RECORD_TRAILER_FAIL:
-        sec
-        rts
-SDFS3_READ_RECORD_TRAILER_EOF_OR_FAIL:
-        jsr     FAT_BYTES_REMAIN
-        bcs     SDFS3_READ_RECORD_TRAILER_FAIL
-SDFS3_READ_RECORD_TRAILER_OK:
-        clc
-        rts
-
-SDFS3_READ_HEXBYTE_INPUT:
-        pshb
-        jsr     FAT32_STREAM_GETC
-        bcs     SDFS3_READ_HEXBYTE_INPUT_FAIL
-        jsr     SDFS3_HEX_TO_NIBBLE
-        bcs     SDFS3_READ_HEXBYTE_INPUT_FAIL
-        lsla
-        lsla
-        lsla
-        lsla
-        staa    HEX_NIBBLE
-        jsr     FAT32_STREAM_GETC
-        bcs     SDFS3_READ_HEXBYTE_INPUT_FAIL
-        jsr     SDFS3_HEX_TO_NIBBLE
-        bcs     SDFS3_READ_HEXBYTE_INPUT_FAIL
-        adda    HEX_NIBBLE
-        pulb
-        clc
-        rts
-SDFS3_READ_HEXBYTE_INPUT_FAIL:
-        pulb
-        sec
-        rts
-
-SDFS3_READ_SREC_RECORD:
-        ldaa    HEX_NIBBLE
-        cmpa    #'S'
-        beq     SDFS3_READ_SREC_HEAD_OK
-        jmp     SDFS3_READ_SREC_FAIL
-SDFS3_READ_SREC_HEAD_OK:
-        ldaa    #1
-        staa    LOADER_STAGE
-        jsr     FAT32_STREAM_GETC
-        bcs     SDFS3_READ_SREC_FAIL_NEAR0
-        staa    LOADER_TYPE
-        cmpa    #'0'
-        beq     SDFS3_READ_SREC_TYPE_OK
-        cmpa    #'1'
-        beq     SDFS3_READ_SREC_TYPE_OK
-        cmpa    #'2'
-        beq     SDFS3_READ_SREC_TYPE_OK
-        cmpa    #'5'
-        beq     SDFS3_READ_SREC_TYPE_OK
-        cmpa    #'8'
-        beq     SDFS3_READ_SREC_TYPE_OK
-        cmpa    #'9'
-        beq     SDFS3_READ_SREC_TYPE_OK
-        jmp     SDFS3_READ_SREC_FAIL
-SDFS3_READ_SREC_FAIL_NEAR0:
-        jmp     SDFS3_READ_SREC_FAIL
-SDFS3_READ_SREC_TYPE_OK:
-        ldaa    #2
-        staa    LOADER_STAGE
-        jsr     SDFS3_READ_HEXBYTE_INPUT
-        bcs     SDFS3_READ_SREC_FAIL_NEAR1
-        staa    LOADER_COUNT
-        staa    LOADER_SUM
-        ldaa    LOADER_TYPE
-        cmpa    #'2'
-        beq     SDFS3_READ_SREC_ADDR24
-        cmpa    #'8'
-        beq     SDFS3_READ_SREC_ADDR24
-        ldaa    LOADER_COUNT
-        cmpa    #3
-        blo     SDFS3_READ_SREC_FAIL_NEAR1
-        ldaa    #3
-        staa    LOADER_STAGE
-        jsr     SDFS3_READ_HEXBYTE_INPUT
-        bcs     SDFS3_READ_SREC_FAIL_NEAR1
-        staa    LOADER_ADDR
-        jsr     SDFS3_ADD_TO_LOADER_SUM
-        jsr     SDFS3_READ_HEXBYTE_INPUT
-        bcs     SDFS3_READ_SREC_FAIL_NEAR1
-        staa    LOADER_ADDR+1
-        jsr     SDFS3_ADD_TO_LOADER_SUM
-        ldab    LOADER_COUNT
-        subb    #3
-        bra     SDFS3_READ_SREC_DATA_LOOP
-SDFS3_READ_SREC_FAIL_NEAR1:
-        jmp     SDFS3_READ_SREC_FAIL
-SDFS3_READ_SREC_ADDR24:
-        ldaa    LOADER_COUNT
-        cmpa    #4
-        blo     SDFS3_READ_SREC_FAIL_NEAR2
-        ldaa    #3
-        staa    LOADER_STAGE
-        jsr     SDFS3_READ_HEXBYTE_INPUT
-        bcs     SDFS3_READ_SREC_FAIL_NEAR2
-        staa    HEX_NIBBLE
-        jsr     SDFS3_ADD_TO_LOADER_SUM
-        ldaa    HEX_NIBBLE
-        bne     SDFS3_READ_SREC_FAIL_NEAR2
-        jsr     SDFS3_READ_HEXBYTE_INPUT
-        bcs     SDFS3_READ_SREC_FAIL_NEAR2
-        staa    LOADER_ADDR
-        jsr     SDFS3_ADD_TO_LOADER_SUM
-        jsr     SDFS3_READ_HEXBYTE_INPUT
-        bcs     SDFS3_READ_SREC_FAIL_NEAR2
-        staa    LOADER_ADDR+1
-        jsr     SDFS3_ADD_TO_LOADER_SUM
-        ldab    LOADER_COUNT
-        subb    #4
-        bra     SDFS3_READ_SREC_DATA_LOOP
-SDFS3_READ_SREC_FAIL_NEAR2:
-        jmp     SDFS3_READ_SREC_FAIL
-SDFS3_READ_SREC_DATA_LOOP:
-        ldaa    #4
-        staa    LOADER_STAGE
-        tstb
-        beq     SDFS3_READ_SREC_CHECKSUM
-        jsr     SDFS3_READ_HEXBYTE_INPUT
-        bcs     SDFS3_READ_SREC_FAIL
-        staa    HEX_NIBBLE
-        jsr     SDFS3_ADD_TO_LOADER_SUM
-        ldaa    LOADER_TYPE
-        cmpa    #'1'
-        beq     SDFS3_READ_SREC_STORE
-        cmpa    #'2'
-        bne     SDFS3_READ_SREC_SKIP_STORE
-SDFS3_READ_SREC_STORE:
-        ldaa    HEX_NIBBLE
-        pshb
-        ldx     LOADER_ADDR
-        staa    0,x
-        inx
-        stx     LOADER_ADDR
-        pulb
-SDFS3_READ_SREC_SKIP_STORE:
-        decb
-        bra     SDFS3_READ_SREC_DATA_LOOP
-SDFS3_READ_SREC_CHECKSUM:
-        ldaa    #5
-        staa    LOADER_STAGE
-        jsr     SDFS3_READ_HEXBYTE_INPUT
-        bcs     SDFS3_READ_SREC_FAIL
-        jsr     SDFS3_ADD_TO_LOADER_SUM
-        cmpa    #$FF
-        bne     SDFS3_READ_SREC_FAIL
-        jsr     SDFS3_READ_RECORD_TRAILER
-        bcs     SDFS3_READ_SREC_FAIL
-        ldaa    LOADER_TYPE
-        cmpa    #'8'
-        beq     SDFS3_READ_SREC_EOF
-        cmpa    #'9'
-        beq     SDFS3_READ_SREC_EOF
-        ldaa    #0
-        clc
-        rts
-SDFS3_READ_SREC_EOF:
-        ldaa    LOADER_ADDR
-        staa    SDFS_RUN_ENTRY
-        ldaa    LOADER_ADDR+1
-        staa    SDFS_RUN_ENTRY+1
-        ldaa    #1
-        staa    SDFS_RUN_ENTRY_SET
-        ldaa    #1
-        clc
-        rts
-SDFS3_READ_SREC_FAIL:
-        sec
-        rts
-
-SDFS3_READ_IHEX_RECORD:
-        ldaa    HEX_NIBBLE
-        cmpa    #':'
-        beq     SDFS3_READ_IHEX_HEAD_OK
-        jmp     SDFS3_READ_IHEX_FAIL
-SDFS3_READ_IHEX_HEAD_OK:
-        ldaa    #1
-        staa    LOADER_STAGE
-        ldaa    #2
-        staa    LOADER_STAGE
-        jsr     SDFS3_READ_HEXBYTE_INPUT
-        bcs     SDFS3_READ_IHEX_FAIL_NEAR1
-        staa    LOADER_COUNT
-        staa    LOADER_SUM
-        ldaa    #3
-        staa    LOADER_STAGE
-        jsr     SDFS3_READ_HEXBYTE_INPUT
-        bcs     SDFS3_READ_IHEX_FAIL_NEAR1
-        staa    LOADER_ADDR
-        jsr     SDFS3_ADD_TO_LOADER_SUM
-        jsr     SDFS3_READ_HEXBYTE_INPUT
-        bcs     SDFS3_READ_IHEX_FAIL_NEAR1
-        staa    LOADER_ADDR+1
-        jsr     SDFS3_ADD_TO_LOADER_SUM
-        jsr     SDFS3_READ_HEXBYTE_INPUT
-        bcs     SDFS3_READ_IHEX_FAIL_NEAR1
-        staa    LOADER_TYPE
-        jsr     SDFS3_ADD_TO_LOADER_SUM
-        ldaa    LOADER_TYPE
-        cmpa    #$00
-        beq     SDFS3_READ_IHEX_DATA
-        cmpa    #$01
-        bne     SDFS3_READ_IHEX_FAIL
-        ldaa    LOADER_COUNT
-        bne     SDFS3_READ_IHEX_FAIL
-        bra     SDFS3_READ_IHEX_DATA
-SDFS3_READ_IHEX_FAIL_NEAR1:
-        jmp     SDFS3_READ_IHEX_FAIL
-SDFS3_READ_IHEX_DATA:
-        ldaa    #4
-        staa    LOADER_STAGE
-        ldab    LOADER_COUNT
-SDFS3_READ_IHEX_DATA_LOOP:
-        tstb
-        beq     SDFS3_READ_IHEX_CHECKSUM
-        jsr     SDFS3_READ_HEXBYTE_INPUT
-        bcs     SDFS3_READ_IHEX_FAIL
-        staa    HEX_NIBBLE
-        jsr     SDFS3_ADD_TO_LOADER_SUM
-        ldaa    LOADER_TYPE
-        cmpa    #$00
-        bne     SDFS3_READ_IHEX_SKIP_STORE
-        ldaa    HEX_NIBBLE
-        pshb
-        ldx     LOADER_ADDR
-        staa    0,x
-        inx
-        stx     LOADER_ADDR
-        pulb
-SDFS3_READ_IHEX_SKIP_STORE:
-        decb
-        bra     SDFS3_READ_IHEX_DATA_LOOP
-SDFS3_READ_IHEX_CHECKSUM:
-        ldaa    #5
-        staa    LOADER_STAGE
-        jsr     SDFS3_READ_HEXBYTE_INPUT
-        bcs     SDFS3_READ_IHEX_FAIL
-        jsr     SDFS3_ADD_TO_LOADER_SUM
-        cmpa    #$00
-        bne     SDFS3_READ_IHEX_FAIL
-        jsr     SDFS3_READ_RECORD_TRAILER
-        bcs     SDFS3_READ_IHEX_FAIL
-        ldaa    LOADER_TYPE
-        cmpa    #$01
-        beq     SDFS3_READ_IHEX_EOF
-        ldaa    #0
-        clc
-        rts
-SDFS3_READ_IHEX_EOF:
-        ldaa    #1
-        clc
-        rts
-SDFS3_READ_IHEX_FAIL:
-        sec
-        rts
-
-SDFS3_HEX_TO_NIBBLE:
-        cmpa    #'0'
-        blo     SDFS3_HEX_TO_NIBBLE_FAIL
-        cmpa    #'9'
-        bhi     SDFS3_HEX_ALPHA
-        suba    #'0'
-        clc
-        rts
-SDFS3_HEX_ALPHA:
-        cmpa    #'A'
-        blo     SDFS3_HEX_LOWER
-        cmpa    #'F'
-        bhi     SDFS3_HEX_LOWER
-        suba    #'A'
-        adda    #10
-        clc
-        rts
-SDFS3_HEX_LOWER:
-        cmpa    #'a'
-        blo     SDFS3_HEX_TO_NIBBLE_FAIL
-        cmpa    #'f'
-        bhi     SDFS3_HEX_TO_NIBBLE_FAIL
-        suba    #'a'
-        adda    #10
-        clc
-        rts
-SDFS3_HEX_TO_NIBBLE_FAIL:
-        sec
-        rts
-
-SDFS3_ADD_TO_LOADER_SUM:
-        adda    LOADER_SUM
-        staa    LOADER_SUM
-        rts
-
 SDFS3_PRINT_DIR_ENTRY:
         ldx     FAT_ENTRY_PTR
         ldab    #8
@@ -1127,21 +548,29 @@ SDFS3_DIR_ENTRY_SKIP:
         sec
         rts
 
-SDFS3_TXT_OK:
-        fcc     "OK"
-        fcb     CHR_CR,0
+; Welcome はアセンブル時に組み立てる(版と範囲を 16 進の文字にする)
+SDFS3_HEXCH function n,'0'+n+7*(n>9)
 SDFS3_TXT_WELCOME:
         fcc     "SDFS/68 V3 "
-        fcb     0
-SDFS3_TXT_BASE:
+        fcb     SDFS3_HEXCH(SDFS3_API_MAJOR>>4),SDFS3_HEXCH(SDFS3_API_MAJOR&15),'.'
+        fcb     SDFS3_HEXCH(SDFS3_API_MINOR>>4),SDFS3_HEXCH(SDFS3_API_MINOR&15),CHR_CR
         fcc     "BASE="
-        fcb     0
-SDFS3_TXT_END:
+        fcb     SDFS3_HEXCH(SDFS3_CCP_BASE>>12),SDFS3_HEXCH((SDFS3_CCP_BASE>>8)&15)
+        fcb     SDFS3_HEXCH((SDFS3_CCP_BASE>>4)&15),SDFS3_HEXCH(SDFS3_CCP_BASE&15)
         fcc     " END="
-        fcb     0
+        fcb     SDFS3_HEXCH((SDFS3_END-1)>>12),SDFS3_HEXCH(((SDFS3_END-1)>>8)&15)
+        fcb     SDFS3_HEXCH(((SDFS3_END-1)>>4)&15),SDFS3_HEXCH((SDFS3_END-1)&15),CHR_CR,0
+SDFS3_TXT_DIR:
+        fcc     "DIR"
+SDFS3_TXT_TYPE:
+        fcc     "TYPE"
+SDFS3_TXT_EXIT:
+        fcc     "EXIT"
 SDFS3_TXT_PROMPT:
         fcc     "SDFS3> "
         fcb     0
+SDFS3_TXT_BIN:
+        fcc     "/BIN/.COM"
 
 SDFS3_CCP_END:
         if SDFS3_CCP_END > SDFS3_CORE_BASE
