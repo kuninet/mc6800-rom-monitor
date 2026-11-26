@@ -324,3 +324,4 @@ PR前の `make test` は、ドキュメントのみの変更として省略で�
 - slot 2 `LOAD_PATH` は、パラメータブロックで生のファイルを `load`〜`limit` に読み、`flags` の bit0 で `BIOS_EXEC` による起動までを行う形にする。slot 3〜5 のストリーム読みは LOAD.COM・RUN.COM・`XLDR.OVL` が使うため、保留から採用に変える
 - slot 7 `GET_MEMTOP` は `$6FFF`（`SDFS3_CORE_BASE - 1`）を返す。slot 14・15 はディレクトリ列挙用に予約する。slot 9〜12 の予約は今のまま
 - `SDFS3_LAST_ERROR` などの resident の変数は窓の `W+$0320` 以降へ移る（#311）
+- SD の raw write は、9〜12・14・15 の予約を保つため表の外の slot 16 `SD_WRITE` に置いた（#303。本数 17、`api_minor` 1）。`GET_CAPS` の A の bit4 が立つ

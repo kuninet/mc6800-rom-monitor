@@ -243,6 +243,52 @@ def check_core_ccp_refs(lst_path):
     return violations, info
 
 
+# ---- CCP から SD の書き込みを呼ばない検査(#303) -----------------------------
+SD_WRITE_NAMES = (
+    "BIOS_SD_SELECT", "BIOS_SD_DESELECT", "BIOS_SD_SEND_CMD", "BIOS_SD_XFER",
+    "BIOS_SD_WAIT_R1", "BIOS_SD_WRITE", "SDFS3_SD_WRITE",
+)
+
+
+def _is_sd_write_name(name):
+    return name in SD_WRITE_NAMES or name.startswith("SDFS3_SDW_")
+
+
+def check_ccp_sd_write_refs(lst_path):
+    """CCP の範囲 [SDFS3_CCP_START, SDFS3_CCP_END) の命令・データが、SD の書き込み
+    (核の SDFS3_SD_WRITE とその内部ラベル SDFS3_SDW_*)と ROM の SD 低レベル入口
+    (BIOS_SD_SELECT〜WAIT_R1、予約の BIOS_SD_WRITE)を参照していないか調べる。
+
+    返り値: (違反リスト, CCP を走査した行数)。違反は (行番号, アドレス, ソース, 参照先名)。"""
+    syms = parse_symbol_table(lst_path)
+    for need in ("SDFS3_CCP_START", "SDFS3_CCP_END"):
+        if need not in syms:
+            raise ValueError(f"missing symbol in listing: {need}")
+    ccp = int(syms["SDFS3_CCP_START"][0], 16)
+    ccp_end = int(syms["SDFS3_CCP_END"][0], 16)
+    violations = []
+    scanned = 0
+    for lineno, line in enumerate(Path(lst_path).read_text(errors="replace").splitlines(), 1):
+        if "Symbol Table" in line:
+            break
+        m = LST_LINE.match(line)
+        if not m:
+            continue
+        addr = int(m.group(2), 16)
+        nbytes, src = _split_bytes_source(m.group(3))
+        if nbytes == 0 or not (ccp <= addr < ccp_end):
+            continue
+        code = src.split(";", 1)[0]
+        code = re.sub(r'"[^"]*"', '""', code)
+        code = re.sub(r"'.'", "''", code)
+        code = re.sub(r"^[A-Za-z_][A-Za-z0-9_.$]*:", "", code.strip()).strip()
+        scanned += 1
+        for name in IDENT.findall(code):
+            if _is_sd_write_name(name):
+                violations.append((lineno, addr, src, name))
+    return violations, scanned
+
+
 def check_core_ccp_main(lst_path):
     violations, info = check_core_ccp_refs(lst_path)
     print(f"CCP ${info['ccp']:04X}-${info['ccp_end'] - 1:04X} / 核 ${info['core']:04X}-${info['end'] - 1:04X}"
