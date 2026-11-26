@@ -291,6 +291,7 @@ test:
 	"$(PYTHON)" tests/test_sdfs68_v3_build.py
 	"$(PYTHON)" tests/test_stage1_build.py
 	"$(PYTHON)" tests/test_mk_sdfs_image.py
+	"$(PYTHON)" tests/test_sdfs3_slot_update.py
 
 stage1: check-stage1-config $(STAGE1_BIN)
 
