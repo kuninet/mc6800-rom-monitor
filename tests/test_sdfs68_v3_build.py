@@ -2029,14 +2029,15 @@ def test_sdfs3_commands_match_output_with_rom_sd_driver() -> None:
         config = _v3(profile)
         hello_s = (PROJECT_ROOT / "build" / "HELLO.S").read_bytes()
         sd_image = _build_sdfs3sys_fat_sd_image(
-            config["sdfs3sys"], [_file("HELLO.S", hello_s), _file("HELLO.COM", config["hello_com"])]
+            config["sdfs3sys"],
+            [_file("HELLO.S", hello_s), _file("HELLO.COM", config["hello_com"]), *_xldr_files(config)],
         )
         out = _v3_run(
             config,
             "BOOT3\rDIR\rTYPE HELLO.S\rHELLO.COM\rLOAD HELLO.S\rEXIT\rD0200-0211\r\r",
             sd_image=sd_image,
         )
-        listing = f"HELLO.S A {len(hello_s):08X}\nHELLO.COM A {len(config['hello_com']):08X}\n"
+        listing = f"HELLO.S A {len(hello_s):08X}\nHELLO.COM A {len(config['hello_com']):08X}\nBIN D 00000000\n"
         assert _dos(out, "DIR") == listing, f"{profile}: DIR: {out!r}"
         typed = hello_s.decode("ascii").replace("\r", "")
         assert _dos(out, "TYPE HELLO.S") == typed, f"{profile}: TYPE: {out!r}"
