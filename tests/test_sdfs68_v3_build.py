@@ -1959,6 +1959,76 @@ def test_rom_bios_read_line_and_sd_match_internal() -> None:
     print("[PASS] test_rom_bios_read_line_and_sd_match_internal")
 
 
+# #317 resident は SD ドライバを持たず、ROM の BIOS 入口を呼ぶ
+SD_DRIVER_LABELS = (
+    "SD_PIA_INIT", "SD_SELECT", "SD_DESELECT", "SD_SEND_CMD", "SD_WAIT_R1", "SD_SPI_XFER", "SD_FAIL_A",
+)
+
+
+def test_sdfs3_resident_calls_rom_sd_entries() -> None:
+    for profile, suffix in V3_PROFILES.items():
+        config = _v3(profile)
+        listing_path = PROJECT_ROOT / "build" / f"SDFS3{suffix}.lst"
+        symbols = _load_symbols(listing_path, "SD_INIT", "SD_READ_SECTOR")
+        assert symbols == {"SD_INIT": 0xE0F8, "SD_READ_SECTOR": 0xE0FB}, f"{profile}: {symbols!r}"
+        listing = listing_path.read_text(encoding="utf-8", errors="replace")
+        left = [name for name in SD_DRIVER_LABELS if re.search(rf"\b{name}\b", listing)]
+        assert not left, f"{profile}: resident still has the SD driver: {left}"
+        payload = config["sdfs3sys"][HEADER_SIZE:]
+        for address in symbols.values():
+            call = bytes([0xBD, address >> 8, address & 0xFF])
+            assert call in payload, f"{profile}: resident never calls ${address:04X}"
+    print("[PASS] test_sdfs3_resident_calls_rom_sd_entries")
+
+
+def test_sdfs3_commands_match_output_with_rom_sd_driver() -> None:
+    """DIR・TYPE・.COM・LOAD の出力は、SD ドライバを外す前の resident と同じ。"""
+    for profile in V3_PROFILES:
+        config = _v3(profile)
+        hello_s = (PROJECT_ROOT / "build" / "HELLO.S").read_bytes()
+        sd_image = _build_sdfs3sys_fat_sd_image(
+            config["sdfs3sys"], [_file("HELLO.S", hello_s), _file("HELLO.COM", config["hello_com"])]
+        )
+        out = _v3_run(
+            config,
+            "BOOT3\rDIR\rTYPE HELLO.S\rHELLO.COM\rLOAD HELLO.S\rEXIT\rD0200-0211\r\r",
+            sd_image=sd_image,
+        )
+        listing = f"HELLO.S A {len(hello_s):08X}\nHELLO.COM A {len(config['hello_com']):08X}\n"
+        assert _dos(out, "DIR") == listing, f"{profile}: DIR: {out!r}"
+        typed = hello_s.decode("ascii").replace("\r", "")
+        assert _dos(out, "TYPE HELLO.S") == typed, f"{profile}: TYPE: {out!r}"
+        assert _dos(out, "HELLO.COM") == "\nHELLO COM\n", f"{profile}: .COM: {out!r}"
+        assert _dos(out, "LOAD HELLO.S") == "OK\n", f"{profile}: LOAD: {out!r}"
+        # HELLO.S(ORG $0200)の先頭 18 バイト
+        assert "] D0200-0211\n0200 CE 02 12 BD 02 07 3F A6 00 27 06 BD E0 75 08 20 " in out, (
+            f"{profile}: LOAD did not write HELLO.S: {out!r}"
+        )
+        assert "\n0210 F6 39 " in out, f"{profile}: LOAD did not write HELLO.S: {out!r}"
+    print("[PASS] test_sdfs3_commands_match_output_with_rom_sd_driver")
+
+
+def test_sdfs3_sd_access_goes_through_bios_table() -> None:
+    """入口表の 1 本だけを失敗にすると、ROM の BOOT3 は通り(内部は表を使わない)、DIR が失敗する。"""
+    for profile in V3_PROFILES:
+        config = _v3(profile)
+        sd_image = _build_sdfs3sys_fat_sd_image(config["sdfs3sys"], [_file("HELLO.S", b"S9030000FC\r\n")])
+        rom = config["rom"].read_bytes()
+        base = 0x10000 - len(rom)
+        unimpl = _rom_byte_reader(rom)(0xE10D, 3)  # 予約の入口 BIOS_SD_WRITE(C=1 を返す)
+        for entry in (0xE0F8, 0xE0FB):
+            offset = entry - base
+            assert rom[offset] == 0x7E and unimpl[0] == 0x7E, f"{profile}: BIOS entry should be jmp"
+            patched = rom[:offset] + unimpl + rom[offset + 3 :]
+            with _temporary_directory() as tmp:
+                rom_path = Path(tmp) / "rom.bin"
+                rom_path.write_bytes(patched)
+                out = _v3_run({**config, "rom": rom_path}, "BOOT3\rDIR\r\r", sd_image=sd_image)
+            assert WELCOME in out, f"{profile}: BOOT3 should not use ${entry:04X}: {out!r}"
+            assert _dos(out, "DIR") == "?\n", f"{profile}: DIR should use ${entry:04X}: {out!r}"
+    print("[PASS] test_sdfs3_sd_access_goes_through_bios_table")
+
+
 def test_rom_bios_exec_returns_to_wboot() -> None:
     profile, suffix = "sbcio_vdg", BIOS_PROFILES["sbcio_vdg"]
     _run_make(profile, "bin")
@@ -3183,6 +3253,9 @@ def main() -> None:
         test_sdfs3sys_cli_reports_bad_input,
         test_rom_bios_entry_table_layout,
         test_rom_bios_read_line_and_sd_match_internal,
+        test_sdfs3_resident_calls_rom_sd_entries,
+        test_sdfs3_commands_match_output_with_rom_sd_driver,
+        test_sdfs3_sd_access_goes_through_bios_table,
         test_rom_bios_exec_returns_to_wboot,
         test_rom_bios_info_and_reserved,
         test_rom_bios_block_rejects_garbage,
