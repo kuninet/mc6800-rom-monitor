@@ -54,6 +54,7 @@ ROM  BIOS_WBOOT → 和の照合 → 壊れた区画だけ読み直す → CCP +
 - `test_sdfs3_profiles_build_and_match_header`: slot 2〜5 が `NOT_IMPLEMENTED` ではないこと。`INIT` のバイト列に `clr SDFS3_STREAM_OPEN` を足した
 - `test_sdfs3_cmd_load_run_and_com_read_fat_files`: 大きさの境界（`BIG.COM`・`MAX.COM`）を上の新しいテストへ移した
 - `test_sdfs3_resident_image_unchanged_after_commands`: `NOFILE.COM` のあとの `LAST_ERROR` は 4（見つからない）
+- `test_sdfs3_cmd_dispatch_parser_classifies_stub_commands`: FAT のないカードで `FOO.COM` を打ったときのコードは 3（マウントの失敗。今までは CCP が 7 に置き換えていた）
 
 ## 容量
 

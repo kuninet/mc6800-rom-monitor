@@ -356,8 +356,9 @@ def test_sdfs3_cmd_dispatch_parser_classifies_stub_commands() -> None:
         ("TYPE README.TXT", 0x03),
         ("LoAd HELLO.S", 0x05),
         ("RUN MISSING.S", 0x06),
-        ("FOO.COM ARG", 0x07),
-        ("foo.com", 0x07),
+        # .COM は核の LOAD_PATH のコードを残す(マウントの失敗は 3。#315)
+        ("FOO.COM ARG", 0x03),
+        ("foo.com", 0x03),
         ("", 0x02),
         ("   ", 0x02),
         ("UNKNOWN", 0x02),
