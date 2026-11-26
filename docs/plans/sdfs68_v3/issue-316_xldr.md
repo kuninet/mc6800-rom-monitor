@@ -43,9 +43,9 @@ ROM   WBOOT → 和の照合(CCP $6C00〜 は無傷)→ CCP +3 → SDFS3>
 
 `tests/test_sdfs68_v3_build.py` に足したテスト（`build/HELLO.S` など本物のサンプルを使う）:
 
-- `test_xldr_load_run_and_write_range`（シナリオ 1〜3、sbcio_vdg・k6802_vdg）: `LOAD HELLO.S` → `EXIT` → `D0200-0220` が `HELLO.S` のデータと一致 → `DOS`。`RUN HELLO.S` は `HELLO SREC` のあと `BRK 0206`。`F0200-0220 00` で消してから `LOAD HELLO.HEX`（`HELLO.S` を写した Intel HEX）→ `RUN 0200` で同じく動く。`$7000`・`$6800`・`$67FE` からまたぐ・窓（`W+$0C00`）へのレコード、Intel HEX の `RUN`、ないファイル、引数なしの `RUN` は `?`。`$67FF` へは書ける。窓の目印と核の先頭 16B は変わらない。どの `LOAD`・`RUN` のあとも SDFS3SYS を読まず、モニタの門の注意も出ない
-- `test_xldr_missing_or_in_root`（k6802_vdg）: `XLDR.OVL` がない、署名が違う（`HELLO.COM` を置く）、memtop を 1 バイト越えるときは `LOAD`・`RUN 0300` が `?` で、続く `DIR` が動く。ルートにだけあれば使う
-- `test_ccp_implicit_com_search`（sbcio_vdg）: `HELLO`・`hello` はルートの `HELLO.COM`（`/BIN` の同名より先）、`ARGS AAA BBB` は `/BIN` で引数付き、`/BIN/HELLO`・`BIN/HELLO` は `/BIN/HELLO.COM`。`NOSUCH` は `?`。ルートの `TOOBIG.COM`（`$6F01` バイト）は `?` で、`/BIN/TOOBIG.COM` を探さない（CMD17 の回数が `NOSUCH` より少ない）。`ONLYBIN.COM` は `/BIN` を探さない
+- `test_xldr_load_run_and_write_range`（シナリオ 1〜3、sbcio_vdg・k6802_vdg）: `LOAD HELLO.S` → `EXIT` → `D0200-0220` が `HELLO.S` のデータと一致 → `DOS`。`RUN HELLO.S` は `HELLO SREC` のあと `BRK 0206`。`F0200-0220 00` で消してから `LOAD HELLO.HEX`（`HELLO.S` を写した Intel HEX）→ `RUN 0200` で同じく動く。`$7000`・`$6800`・`$67FE` からまたぐ・窓（`W+$0C00`）へのレコード、Intel HEX の `RUN`、ないファイル、引数なしの `RUN` は `?`。`$67FF` へは書ける。最後のレコードの後ろに行末がない S-record と Intel HEX も読める。窓の目印と核の先頭 16B は変わらない。本体・入口・resident が別々に持つ `$6800`・`$6C00`・API major が同じで、本体の変数が `$6C00` の手前で終わることも、各リスティングから確かめる。どの `LOAD`・`RUN` のあとも SDFS3SYS を読まず、モニタの門の注意も出ない
+- `test_xldr_missing_or_in_root`（両プロファイル）: `XLDR.OVL` がない、署名が違う（`HELLO.COM` を置く）、memtop を 1 バイト越えるときは `LOAD`・`RUN 0300` が `?` で、続く `DIR` が動く。ルートにだけあれば使う
+- `test_ccp_implicit_com_search`（両プロファイル）: `HELLO`・`hello` はルートの `HELLO.COM`（`/BIN` の同名より先）、`ARGS AAA BBB` は `/BIN` で引数付き、`/BIN/HELLO`・`BIN/HELLO` は `/BIN/HELLO.COM`。`NOSUCH` は `?`。ルートの `TOOBIG.COM`（`$6F01` バイト）は `?` で、`/BIN/TOOBIG.COM` を探さない（CMD17 の回数が `NOSUCH` より少ない）。`ONLYBIN.COM` は `/BIN` を探さない
 - `test_xldr_overlapping_ccp_reloads_only_ccp`（シナリオ 4、両プロファイル）: `CCP_BASE=$6800` の試験用イメージ（Welcome は `BASE=6800`）で `LOAD HELLO.S` が `OK`、戻りで CCP のセクタだけを読み直し、続く `DIR` が動く。後始末で通常のイメージに戻ったことを確かめる
 
 書き換えたテスト:

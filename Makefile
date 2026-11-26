@@ -320,7 +320,7 @@ sdfs3sys: check-sdfs3-config $(SDFS3SYS_BIN)
 check-stage1-config:
 	"$(PYTHON)" -c "import sys; sd='$(FEATURE_SD)'; board='$(BOARD_IO)'; memory='$(MEMORY_CONFIG)'; ok = sd == '1' and board == 'sbcio' and memory in ('ram64_c000_work', 'ram64_a000_work', 'ram64_4000_work'); sys.exit(0 if ok else 1)" || (echo "stage1 target requires FEATURE_SD=1 BOARD_IO=sbcio and MEMORY_CONFIG=ram64_c000_work, ram64_a000_work or ram64_4000_work" && exit 1)
 
-# v3(案 B)は低位 RAM の $6400-$7FFF に置くので、USER_RAM_END=$7FFF の構成だけで作る。
+# v3(案 B)は低位 RAM の $6C00-$7FFF に置くので、USER_RAM_END=$7FFF の構成だけで作る。
 # 4000 work 構成(sbcio_4000・k6802_4000)は v2 用で、v3 の対象外(#310 の決定 11)。
 check-sdfs3-config: check-stage1-config
 	"$(PYTHON)" -c "import sys; sys.exit(0 if '$(MEMORY_CONFIG)' in ('ram64_c000_work', 'ram64_a000_work') else 1)" || (echo "SDFS/68 v3 requires MEMORY_CONFIG=ram64_c000_work or ram64_a000_work (MONITOR_PROFILE=sbcio_vdg or k6802_vdg); 4000 work profiles are v2 only" && exit 1)

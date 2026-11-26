@@ -76,7 +76,7 @@ SDFS3>
 
 | 操作 | 動き |
 | --- | --- |
-| `BOOT3` | system slot A（LBA `64`）か B（LBA `96`）の `SDFS3SYS` を検証して `$6400-$7FFF` に置き、起動した slot と CCP と核の和を ROM の BIOS 区画に控えて、CCP の cold 入口（Welcome あり）へ入る。LBA `48` の active marker が有効ならその slot を、無効なら世代の大きい slot を先に試し、だめなら他方を試す（#300・#301）。両方とも古い resident（API major 1）や壊れたイメージなら `?` と slot A・B の理由を 1 桁ずつ（例 `?42`。表は `docs/usage/monitor_commands.md` の「BOOT3 と DOS のエラーコード」。#307） |
+| `BOOT3` | system slot A（LBA `64`）か B（LBA `96`）の `SDFS3SYS` を検証して `$6C00-$7FFF` に置き、起動した slot と CCP と核の和を ROM の BIOS 区画に控えて、CCP の cold 入口（Welcome あり）へ入る。LBA `48` の active marker が有効ならその slot を、無効なら世代の大きい slot を先に試し、だめなら他方を試す（#300・#301）。両方とも古い resident（API major 1）や壊れたイメージなら `?` と slot A・B の理由を 1 桁ずつ（例 `?42`。表は `docs/usage/monitor_commands.md` の「BOOT3 と DOS のエラーコード」。#307） |
 | `SDFS3> ` の内蔵コマンド | `DIR [path]`、`TYPE path`、`EXIT` の 3 つだけ。それ以外の語は `.COM` として探す。`HELLO.COM` のように拡張子 `.COM` が付いていればその名前のまま、`HELLO` のように拡張子がなければ `HELLO.COM` をルート → `/BIN` の順に探す（ルートで見つからなかったときだけ `/BIN` を探す。#310 の決定 5、#316）。`.COM` 以外の拡張子の語（`HELLO.S` など）は `?` |
 | `.COM` | `$0100` に読み、`BIOS_EXEC` で起動する。`RTS` は ROM の WBOOT（`$E0E6`）に戻り、CCP と核を検査してから `SDFS3> ` に戻る（Welcome なし）。読み込みは核の `LOAD_PATH` が行い、大きさの上限は `$6F00` バイト（`$0100-$6FFF`。#315）。CCP を潰す大きさでも起動でき、戻ると ROM が CCP を読み直す。読み込みの途中で SD が失敗したときは `?` を 1 回出して `SDFS3> ` に戻る |
 | `LOAD file` | `/BIN/LOAD.COM`。S-record か Intel HEX を読み込み、`OK` を出して `SDFS3> ` に戻る。書けるのは `$0000-$67FF` だけで、`$6800` 以上（本体 XLDR、CCP、核、窓、I/O、ROM）へのレコードは `?`（その手前までのレコードは書かれる）。形式はファイルの最初のレコードの先頭の文字で決める（`S` なら S-record、`:` なら Intel HEX。拡張子は見ない） |
