@@ -47,9 +47,9 @@ V3_CORE_OFFSET = V3_CORE_BASE - V3_CCP_BASE
 V3_MEMTOP = 0x6FFF
 V3_COM_MAX = V3_CORE_BASE - 0x0100  # .COM は GET_MEMTOP まで(#315)
 V3_API_MAJOR = 2
-V3_API_MINOR = 0
+V3_API_MINOR = 1  # slot 16 SD_WRITE(#303)
 PROMPT = "SDFS3> "
-WELCOME = "SDFS/68 V3 02.00"
+WELCOME = "SDFS/68 V3 02.01"
 _V3_CACHE: dict[str, dict] = {}
 
 # tsx / ldaa 0,x / staa $0210 / ldaa 1,x / staa $0211 / rts。スタックの一番上(戻り番地)を残す
@@ -233,7 +233,7 @@ def test_sdfs3_profiles_build_and_match_header() -> None:
         assert header[0:8] == b"SDFS3API"
         assert header[8] == V3_API_MAJOR, "SDFS3 api major mismatch"
         assert header[9] == V3_API_MINOR, "SDFS3 api minor mismatch"
-        assert header[10] == 16, "SDFS3 api count mismatch"
+        assert header[10] == 17, "SDFS3 api count mismatch"
         assert header[11] == 0, "SDFS3 flags should be zero"
         assert _word(header, 0x0C) == symbols["SDFS3_JUMP_TABLE"]
         assert _word(header, 0x0E) == base, "work_base should be the image start (CCP)"
@@ -301,8 +301,8 @@ def test_sdfs3_memtop_and_caps_match_calling_convention() -> None:
         get_caps = symbols["SDFS3_GET_CAPS"] - symbols["SDFS3_CCP_BASE"]
         header = symbols["SDFS3_API_HEADER"]
         assert data[get_caps : get_caps + 9] == bytes(
-            [0x86, 0x00, 0xC6, 0x00, 0xCE, (header >> 8) & 0xFF, header & 0xFF, 0x0C, 0x39]
-        )
+            [0x86, 0x10, 0xC6, 0x00, 0xCE, (header >> 8) & 0xFF, header & 0xFF, 0x0C, 0x39]
+        ), f"{profile}: GET_CAPS should set bit4 (raw SD write)"
     print("[PASS] test_sdfs3_memtop_and_caps_match_calling_convention")
 
 
@@ -4117,6 +4117,406 @@ def test_sd_image_tool_first_update_survives_marker_loss() -> None:
     print("[PASS] test_sd_image_tool_first_update_survives_marker_loss")
 
 
+# ---------------------------------------------------------------------------
+# #303 核の SD raw write(slot 16 SD_WRITE)
+# ---------------------------------------------------------------------------
+
+SDW_SLOT = 16
+SDW_SYSTEM = 0x01
+SDW_VERIFY = 0x02
+SDW_RES = 0x2E00
+SDW_PAT = 0x2C00
+SDW_STRM = 0x3000
+SDW_DATA_LBA = 400
+SDW_IMAGE_SECTORS = 416
+SDW_PATTERN = bytes(range(256)) * 2  # $40-$7F・$FE・$FF を含む
+SDW_BIG = bytes((i * 7 + 3) & 0xFF for i in range(1500))
+SDW_PREFIX = 600  # 書く前に GETC で読むバイト数(セクタ境界をまたぐ)
+SDW_ERR_RANGE, SDW_ERR_CMD, SDW_ERR_DATA, SDW_ERR_BUSY, SDW_ERR_VERIFY = 10, 11, 12, 13, 14
+
+
+def _sdw_sd_image(config: dict, com: bytes) -> bytes:
+    """README.TXT・BIG.TXT・SDW.COM を置き、FAT のボリュームの後ろに空きセクタを足した SD。"""
+    files = [_file("README.TXT", README), _file("BIG.TXT", SDW_BIG), _file("SDW.COM", com)]
+    image = bytearray(_build_sdfs3sys_fat_sd_image(config["sdfs3sys"], files))
+    assert len(image) <= SDW_DATA_LBA * SECTOR_SIZE, "fixture already reaches the data LBA"
+    image.extend(bytes(SDW_IMAGE_SECTORS * SECTOR_SIZE - len(image)))
+    return bytes(image)
+
+
+def _sdw_com(tmp: Path, blocks: list[tuple[int, int, str]], *, stream: bool, orig128: bytes = b"") -> bytes:
+    """blocks の (LBA, flags, バッファのラベル) を順に slot 16 で書き、i 番目の {CC, A, B} を
+    SDW_RES+3*i に、最後の GET_ERROR を SDW_RES+$7F に残す .COM。stream なら BIG.TXT を開いて
+    SDW_PREFIX バイト読んでから書き、書いたあと残りを読み切る(SDW_STRM から。末尾の次を
+    SDW_RES+$7D に)。"""
+    block_lines = []
+    for lba, flags, buf in blocks:
+        block_lines.append(f"        fdb     {buf}")
+        block_lines.append(
+            "        fcb     " + ",".join(f"${(lba >> shift) & 0xFF:02X}" for shift in (24, 16, 8, 0))
+        )
+        block_lines.append(f"        fcb     ${flags:02X}")
+    orig_lines = ["ORIG128:"] + [
+        "        fcb     " + ",".join(f"${b:02X}" for b in orig128[i : i + 16])
+        for i in range(0, len(orig128), 16)
+    ]
+    pre = rest = ""
+    if stream:
+        pre = """
+        ldx     #BNAME
+        ldab    #BNAME_END-BNAME
+        jsr     VOPEN
+        bcc     POK
+        jmp     SFAIL
+POK:    ldx     #STRM
+        stx     PTR
+        ldx     #PREFIX
+        stx     LEFT
+PRE:    jsr     VGETC
+        bcc     PRE2
+        jmp     SFAIL
+PRE2:   ldx     PTR
+        staa    0,x
+        inx
+        stx     PTR
+        ldx     LEFT
+        dex
+        stx     LEFT
+        bne     PRE
+"""
+        rest = """
+REST:   jsr     VGETC
+        bcs     SEOF
+        ldx     PTR
+        staa    0,x
+        inx
+        stx     PTR
+        bra     REST
+SEOF:   ldx     PTR
+        stx     RES+$7D
+        rts
+SFAIL:  ldaa    #$EE
+        staa    RES+$7C
+        rts
+"""
+    source = f"""
+        cpu     6800
+BIOS_GET_API equ $E0EC
+RES     equ ${SDW_RES:04X}
+PAT     equ ${SDW_PAT:04X}
+STRM    equ ${SDW_STRM:04X}
+PREFIX  equ {SDW_PREFIX}
+        org     $0100
+        jsr     BIOS_GET_API
+        ldx     $0C,x
+        ldaa    6,x
+        staa    VOPEN+1
+        ldaa    7,x
+        staa    VOPEN+2
+        ldaa    8,x
+        staa    VGETC+1
+        ldaa    9,x
+        staa    VGETC+2
+        ldaa    12,x
+        staa    VERR+1
+        ldaa    13,x
+        staa    VERR+2
+        ldaa    {SDW_SLOT * 2},x
+        staa    VWRITE+1
+        ldaa    {SDW_SLOT * 2 + 1},x
+        staa    VWRITE+2
+        ldx     #PAT                    ; 0..255, twice
+        clra
+FILL:   staa    0,x
+        inx
+        inca
+        bne     FILL
+FILL2:  staa    0,x
+        inx
+        inca
+        bne     FILL2
+{pre}
+        ldx     #BLOCKS
+        stx     BPTR
+        ldx     #RES
+        stx     RPTR
+        ldaa    #{len(blocks)}
+        staa    CNT
+NEXT:   ldx     BPTR
+        jsr     VWRITE
+        psha
+        tpa
+        ldx     RPTR
+        staa    0,x
+        pula
+        staa    1,x
+        stab    2,x
+        inx
+        inx
+        inx
+        stx     RPTR
+        ldx     BPTR
+        inx
+        inx
+        inx
+        inx
+        inx
+        inx
+        inx
+        stx     BPTR
+        dec     CNT
+        bne     NEXT
+        jsr     VERR
+        staa    RES+$7F
+        {"jmp     REST" if stream else "rts"}
+VOPEN:  jmp     $0000
+VGETC:  jmp     $0000
+VERR:   jmp     $0000
+VWRITE: jmp     $0000
+BPTR:   fdb     0
+RPTR:   fdb     0
+PTR:    fdb     0
+LEFT:   fdb     0
+CNT:    fcb     0
+BNAME:  fcc     "BIG.TXT"
+BNAME_END:
+{rest}
+BLOCKS:
+{chr(10).join(block_lines)}
+{chr(10).join(orig_lines) if orig128 else ""}
+        end
+"""
+    return _assemble_source(tmp, "SDW", source)
+
+
+def _sdw_run(
+    config: dict, com: bytes, extra_args: list[str] | None = None, prefill: bytes | None = None
+) -> tuple[str, bytes, bytes, list[tuple[int, int, str]]]:
+    """BOOT3 → SDW.COM → DIR。出力、前と終わりの SD イメージ、CMD24 の記録を返す。
+    prefill なら、走らせる前の LBA SDW_DATA_LBA の中身をそれにする。"""
+    image = _sdw_sd_image(config, com)
+    if prefill is not None:
+        start = SDW_DATA_LBA * SECTOR_SIZE
+        image = image[:start] + prefill + image[start + SECTOR_SIZE :]
+    TEMP_ROOT.mkdir(parents=True, exist_ok=True)
+    tag = uuid4().hex
+    save = TEMP_ROOT / f"sdw-{tag}.img"
+    wlog = TEMP_ROOT / f"sdw-{tag}.log"
+    try:
+        stdout, stderr, rc = _run_emu(
+            rom_path=config["rom"],
+            input_text="BOOT3\rSDW.COM\rDIR\r\r",
+            max_cycles=600_000_000,
+            sd_image=image,
+            dump_range=f"{SDW_RES:04X}-{SDW_STRM + len(SDW_BIG) - 1:04X}",
+            timeout=180,
+            extra_args=["--sd-save", str(save), "--sd-write-log", str(wlog), *(extra_args or [])],
+        )
+        assert rc == 0 and "[TIMEOUT]" not in stderr, (
+            f"{config['profile']}: emulator failed: rc={rc} stderr={stderr[-400:]!r}"
+        )
+        after = save.read_bytes()
+        log = []
+        for line in wlog.read_text(encoding="ascii").splitlines():
+            number, lba, result = line.split()
+            log.append((int(number), int(lba), result))
+    finally:
+        save.unlink(missing_ok=True)
+        wlog.unlink(missing_ok=True)
+    out = stdout.replace("\r", "")
+    assert "README.TXT" in _dos(out, "DIR"), f"{config['profile']}: DIR after SDW.COM: {out[-800:]!r}"
+    return out, image, after, log
+
+
+def _sdw_results(out: str, count: int) -> tuple[list[tuple[int, int, int]], int, bytes, int]:
+    dump = out[out.rindex(f"{SDW_RES:04X} ") :]
+    raw = _dump_range_bytes(dump, SDW_RES, 0x80)
+    results = [(raw[3 * i] & 0x01, raw[3 * i + 1], raw[3 * i + 2]) for i in range(count)]
+    strm = bytes(_dump_range_bytes(dump, SDW_STRM, len(SDW_BIG)))
+    return results, raw[0x7F], strm, (raw[0x7D] << 8) | raw[0x7E] if raw[0x7C] != 0xEE else -1
+
+
+def _changed_sectors(before: bytes, after: bytes) -> list[int]:
+    assert len(before) == len(after), f"image size changed: {len(before)} -> {len(after)}"
+    return [
+        n
+        for n in range(len(before) // SECTOR_SIZE)
+        if before[n * SECTOR_SIZE : (n + 1) * SECTOR_SIZE] != after[n * SECTOR_SIZE : (n + 1) * SECTOR_SIZE]
+    ]
+
+
+def _sector(image: bytes, lba: int) -> bytes:
+    return image[lba * SECTOR_SIZE : (lba + 1) * SECTOR_SIZE]
+
+
+def test_sd_write_writes_verifies_and_keeps_stream() -> None:
+    """シナリオ 1・2・4: データ領域と system 領域に書いて読み戻せ、変わるのは対象のセクタだけ。
+    範囲外は SD に何も送らずコード 10。範囲を通った容量外の LBA はカードの R1 でコード 11。
+    BIG.TXT を読みかけのまま書いても、残りを読み切った中身がファイルと一致する。"""
+    for profile in V3_PROFILES:
+        config = _v3(profile)
+        orig128 = _sector(_sdw_sd_image(config, b"\x39"), 128)  # パーティションの先頭(VBR)
+        blocks = [
+            (SDW_DATA_LBA, SDW_VERIFY, "PAT"),          # 0 データ領域、読み戻し
+            (49, SDW_SYSTEM | SDW_VERIFY, "PAT"),       # 1 system 領域の下端の次
+            (127, SDW_SYSTEM, "PAT"),                   # 2 system 領域の上端
+            (128, SDW_VERIFY, "ORIG128"),               # 3 データ領域の下端(今の中身と同じ)
+            (0, 0, "PAT"),                              # 4 以下は範囲外
+            (0, SDW_SYSTEM, "PAT"),
+            (47, 0, "PAT"),
+            (47, SDW_SYSTEM, "PAT"),
+            (48, 0, "PAT"),
+            (49, 0, "PAT"),
+            (127, 0, "PAT"),
+            (128, SDW_SYSTEM, "PAT"),
+            (0x00010000, SDW_SYSTEM, "PAT"),            # 12 下位 16bit が 0
+            (0x00010030, SDW_SYSTEM, "PAT"),            # 13 下位バイトは 48
+            (0x00010000, 0, "PAT"),                     # 14 範囲は通り、カードが拒む
+            (0x01000000, 0, "PAT"),                     # 15 最上位バイトだけ非 0
+        ]
+        with _temporary_directory() as tmp:
+            com = _sdw_com(Path(tmp), blocks, stream=True, orig128=orig128)
+        assert len(com) < SDW_PAT - 0x0100, "SDW.COM overlaps its buffers"
+        out, before, after, log = _sdw_run(config, com)
+        assert _sector(before, 128) == orig128, f"{profile}: VBR depends on the file list"
+        results, last_error, strm, strm_end = _sdw_results(out, len(blocks))
+        for i in range(4):
+            assert results[i] == (0, 0, results[i][2]), f"{profile}: block {i} should succeed: {results}"
+        for i in range(4, 14):
+            assert results[i] == (1, SDW_ERR_RANGE, 0), f"{profile}: block {i} should be out of range: {results}"
+        for i in (14, 15):
+            assert results[i] == (1, SDW_ERR_CMD, 0x40), f"{profile}: block {i} should be R1 $40: {results}"
+        assert last_error == SDW_ERR_CMD, f"{profile}: GET_ERROR after the last write: {last_error}"
+        assert log == [
+            (1, SDW_DATA_LBA, "ok"),
+            (2, 49, "ok"),
+            (3, 127, "ok"),
+            (4, 128, "ok"),
+            (5, 0x00010000, "r1=40"),
+            (6, 0x01000000, "r1=40"),
+        ], f"{profile}: CMD24 log: {log}"
+        assert _changed_sectors(before, after) == [49, 127, SDW_DATA_LBA], f"{profile}: changed sectors"
+        for lba in (49, 127, SDW_DATA_LBA):
+            assert _sector(after, lba) == SDW_PATTERN, f"{profile}: LBA {lba} content"
+        assert strm_end == SDW_STRM + len(SDW_BIG), f"{profile}: stream end {strm_end:04X}"
+        assert strm == SDW_BIG, f"{profile}: stream read across the write differs"
+        assert "\n?\n" not in out, f"{profile}: nothing should print ?: {out[-800:]!r}"
+    print("[PASS] test_sd_write_writes_verifies_and_keeps_stream")
+
+
+# パターンと 512 バイトすべて違う前の中身(受理して書かないカードの検出に使う)
+SDW_ALL_DIFFER = bytes((b + 1) & 0xFF for b in SDW_PATTERN)
+SDW_FAULTS = [
+    # (エミュレータの引数, 期待する (C, A, B)、None なら B は見ない, イメージが変わってよいか, 前の中身)
+    (["--sd-fail-cmd24", "r1"], (1, SDW_ERR_CMD, 0x04), False),
+    (["--sd-fail-cmd24", "noresp"], (1, SDW_ERR_CMD, 0xFF), False),
+    (["--sd-fail-cmd24", "crc"], (1, SDW_ERR_DATA, 0xEB), False),
+    (["--sd-fail-cmd24", "wrerr"], (1, SDW_ERR_DATA, 0xED), False),
+    (["--sd-fail-cmd24", "busy"], (1, SDW_ERR_BUSY, 0x00), True),
+    (["--sd-fail-cmd24", "corrupt"], (1, SDW_ERR_VERIFY, 0x00), True),
+    (["--sd-cmd24-resp-delay", "7"], (0, 0, None), True),
+    (["--sd-cmd24-resp-delay", "8"], (1, SDW_ERR_DATA, 0xFF), True),  # カードは受理している
+    # 読み戻しの不一致は数えずに立てる。256 個・512 個違っても、全部 $FF が返っても 14(#303 の 1 周目 B1)
+    (["--sd-fail-cmd24", "corrupt256"], (1, SDW_ERR_VERIFY, 0x00), True),
+    (["--sd-fail-cmd24", "drop"], (1, SDW_ERR_VERIFY, 0x00), False, SDW_ALL_DIFFER),
+    (["--sd-fail-cmd24", "readff"], (1, SDW_ERR_VERIFY, 0x00), True),
+    # busy が長いカード。書き込みエラーのあとも busy が解けるまで待ってから離す(待たないと続く DIR の
+    # CMD17 が busy の $00 を R1 と取り違える。1 周目 m1・m2)
+    (["--sd-cmd24-busy-bytes", "300"], (0, 0, None), True),
+    (["--sd-fail-cmd24", "wrerr", "--sd-cmd24-busy-bytes", "300"], (1, SDW_ERR_DATA, 0xED), False),
+]
+
+
+def test_sd_write_failures_return_codes() -> None:
+    """シナリオ 3: 注入した失敗ごとに C=1・コード・カードの生のバイトが返り、GET_ERROR も同じ。
+    拒んだときイメージは変わらず、どの場合も DESELECT 済みで続く DIR が動く。応答が 7 バイト
+    遅れても通り、8 バイト遅れたら無応答(12・$FF)。読み戻しは 256 個・512 個違っても、全部 $FF が
+    返っても 14。busy が 300 バイト続いても通り、書き込みエラーのあとの busy も待ってから離す。"""
+    for profile in V3_PROFILES:
+        config = _v3(profile)
+        with _temporary_directory() as tmp:
+            com = _sdw_com(Path(tmp), [(SDW_DATA_LBA, SDW_VERIFY, "PAT")], stream=False)
+        for args, (c, code, raw), may_change, *rest in SDW_FAULTS:
+            prefill = rest[0] if rest else None
+            out, before, after, log = _sdw_run(config, com, args, prefill)
+            results, last_error, _strm, _end = _sdw_results(out, 1)
+            got = results[0]
+            assert got[0] == c and got[1] == code, f"{profile} {args}: result {got}"
+            if raw is not None:
+                assert got[2] == raw, f"{profile} {args}: raw byte {got[2]:02X} != {raw:02X}"
+            assert last_error == code, f"{profile} {args}: GET_ERROR {last_error}"
+            changed = _changed_sectors(before, after)
+            if may_change:
+                assert changed in ([], [SDW_DATA_LBA]), f"{profile} {args}: changed {changed}"
+            else:
+                assert changed == [], f"{profile} {args}: rejected write changed {changed}"
+            assert len(log) == 1 and log[0][1] == SDW_DATA_LBA, f"{profile} {args}: CMD24 log {log}"
+            if c == 0:
+                assert _sector(after, SDW_DATA_LBA) == SDW_PATTERN, f"{profile} {args}: content"
+    print("[PASS] test_sd_write_failures_return_codes")
+
+
+def test_sd_write_slot_header_and_caps() -> None:
+    """シナリオ 6: ヘッダの本数 17・minor 1、slot 16 が SDFS3_SD_WRITE、9〜12・14・15 は予約のまま、
+    GET_CAPS の A は bit4(raw SD write)。"""
+    for profile, suffix in V3_PROFILES.items():
+        _run_make(profile, "sdfs3")
+        build = PROJECT_ROOT / "build"
+        data = (build / f"SDFS3{suffix}.BIN").read_bytes()
+        symbols = _load_symbols(
+            build / f"SDFS3{suffix}.lst",
+            "SDFS3_CCP_BASE",
+            "SDFS3_API_HEADER",
+            "SDFS3_JUMP_TABLE",
+            "SDFS3_SD_WRITE",
+            "SDFS3_NOT_IMPLEMENTED",
+            "SDFS3_INIT",
+        )
+        base = symbols["SDFS3_CCP_BASE"]
+        header = data[symbols["SDFS3_API_HEADER"] - base :]
+        assert header[8] == V3_API_MAJOR and header[9] == 1 and header[10] == 17, f"{profile}: header {header[:12]!r}"
+        table = symbols["SDFS3_JUMP_TABLE"] - base
+        slot = lambda n: (data[table + 2 * n] << 8) | data[table + 2 * n + 1]  # noqa: E731
+        assert slot(SDW_SLOT) == symbols["SDFS3_SD_WRITE"], f"{profile}: slot 16"
+        for n in (1, 9, 10, 11, 12, 14, 15):
+            assert slot(n) == symbols["SDFS3_NOT_IMPLEMENTED"], f"{profile}: slot {n} should stay reserved"
+        assert slot(13) == symbols["SDFS3_INIT"]
+    print("[PASS] test_sd_write_slot_header_and_caps")
+
+
+def test_ccp_does_not_call_sd_write() -> None:
+    """シナリオ 5: CCP の範囲に SD_WRITE と ROM の SD 低レベル入口への参照がない。
+    CCP に足すと検査が見つける(負の対照)。"""
+    import lst_analyze
+
+    profile, suffix = "sbcio_vdg", V3_PROFILES["sbcio_vdg"]
+    lst = PROJECT_ROOT / "build" / f"SDFS3{suffix}.lst"
+    original_source = PROJECT_ROOT / "src" / "sdfs68_v3" / "resident_stub.asm"
+    try:
+        _run_make(profile, "sdfs3")
+        violations, scanned = lst_analyze.check_ccp_sd_write_refs(lst)
+        assert scanned > 200, f"CCP range looks empty (vacuous check): {scanned}"
+        assert violations == [], f"CCP references SD write: {violations}"
+        text = original_source.read_text(encoding="utf-8")
+        anchor = "SDFS3_CMD_DIR:\n"
+        assert anchor in text
+        mutations = {
+            "jsr": ("        jsr     SDFS3_SD_WRITE\n", "SDFS3_SD_WRITE"),
+            "inner": ("        bra     *+2\n        fdb     SDFS3_SDW_CMD\n", "SDFS3_SDW_CMD"),
+            "bios": ("        jsr     BIOS_SD_XFER\n", "BIOS_SD_XFER"),
+        }
+        with _temporary_directory() as tmp:
+            for kind, (line, name) in mutations.items():
+                mutated = Path(tmp) / f"mutated_{kind}.asm"
+                mutated.write_text(text.replace(anchor, anchor + line, 1), encoding="utf-8")
+                _run_make(profile, "sdfs3", extra_args=[f"SDFS3_TOPSRC={mutated}"])
+                violations, _ = lst_analyze.check_ccp_sd_write_refs(lst)
+                assert [v[3] for v in violations] == [name], f"{kind}: not detected: {violations}"
+    finally:
+        _remake_sdfs3(profile, "sdfs3sys")
+    print("[PASS] test_ccp_does_not_call_sd_write")
+
+
 def main() -> None:
     print("=" * 50)
     print("SDFS/68 v3 build tests")
@@ -4177,6 +4577,10 @@ def main() -> None:
         test_autoexec_failures_show_one_error,
         test_sd_image_tool_boots_and_runs_dos_commands,
         test_sd_image_tool_first_update_survives_marker_loss,
+        test_sd_write_slot_header_and_caps,
+        test_ccp_does_not_call_sd_write,
+        test_sd_write_writes_verifies_and_keeps_stream,
+        test_sd_write_failures_return_codes,
     ]
     passed = 0
     failed = 0

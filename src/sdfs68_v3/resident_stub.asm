@@ -4,11 +4,12 @@
         include "sdfs3_layout.inc"
 
 SDFS3_API_MAJOR    equ 2
-SDFS3_API_MINOR    equ 0
-SDFS3_API_COUNT    equ 16
+SDFS3_API_MINOR    equ 1    ; slot 16 SD_WRITE を足した(#303)
+SDFS3_API_COUNT    equ 17
 SDFS3_API_HDR_SIZE equ $18
 SDFS3_FLAG_NONE    equ 0
 SDFS3_CAPS_NONE    equ 0
+SDFS3_CAPS_RAW_WRITE equ $10 ; GET_CAPS の A bit4: raw SD write(#259 の caps 表、#303)
 SDFS3_ERR_NONE     equ 0
 SDFS3_ERR_NOT_IMPL equ 1
 SDFS3_ERR_BAD_CMD  equ 2
@@ -19,9 +20,23 @@ SDFS3_ERR_RUN     equ 6
 SDFS3_ERR_COM     equ 7
 SDFS3_ERR_TOO_BIG equ 8    ; LOAD_PATH: 空のファイル、または load〜limit に入らない(#315)
 SDFS3_ERR_NOT_OPEN equ 9   ; READ_STREAM_GETC: 取っ手が開いていない(#315)
+SDFS3_ERR_WR_RANGE equ 10  ; SD_WRITE: LBA が書いてよい範囲の外。SD に何も送らない(#303)
+SDFS3_ERR_WR_CMD  equ 11   ; SD_WRITE: CMD24 の R1 が 0 でない、または来ない
+SDFS3_ERR_WR_DATA equ 12   ; SD_WRITE: データ応答が「受理」でない(CRC・書き込みエラー、無応答)
+SDFS3_ERR_WR_BUSY equ 13   ; SD_WRITE: busy が上限回数のうちに解けない
+SDFS3_ERR_WR_VERIFY equ 14 ; SD_WRITE: 読み戻しが書いた内容と違う
 
 ; LOAD_PATH の flags(#315)
 SDFS3_LP_EXEC      equ $01 ; 読み終えたら BIOS_EXEC で起動して戻らない
+
+; SD_WRITE の flags と書いてよい LBA(#303、#300 の配置)
+SDFS3_SDW_SYSTEM   equ $01 ; 1: system 領域 [48, 128)、0: データ領域 [128, ...)
+SDFS3_SDW_VERIFY   equ $02 ; 書いたあと読み戻して比べる
+SDFS3_SDW_SYS_LO   equ 48  ; active marker(#300)
+SDFS3_SDW_DATA_LO  equ 128 ; system slot B の次。FAT32 partition はここより後(#300)
+SDFS3_SDW_RESP_TRIES equ 8 ; データ応答の前の $FF を読み飛ばす回数
+SDFS3_SDW_BUSY_LIMIT equ 2048 ; busy を待つ XFER の回数(1MHz で約 1.5 秒、推測)
+SDFS3_SDW_READ_LIMIT equ $0200 ; 読み戻しのトークンを待つ回数(ROM の SD_READ_SECTOR と同じ)
 
 ; 書き換わる変数はイメージの外(窓の resident ワーク)に置く。#311
 SDFS3_LAST_ERROR equ SDFS3_WORK_BASE
@@ -41,7 +56,14 @@ SDFS3_CCP_LP_BLOCK equ SDFS3_WORK_BASE+$13 ; 11B。CCP が .COM の起動で組�
 SDFS3_COM_IMPLICIT equ SDFS3_WORK_BASE+$1E ; 1B。0 = 語は .COM の名前、1 = 暗黙の検索(決定 5)
 SDFS3_COM_PATH   equ SDFS3_WORK_BASE+$1F  ; 40B。暗黙の検索で組む "/BIN/" + 語 + ".COM"
 SDFS3_COM_WORD_MAX equ 40-9
-SDFS3_WORK_USED  equ $1F+40
+; SD_WRITE(#303)。バッファの先頭・末尾の次・ループのポインタ、flags、待つ回数の残り
+SDFS3_SDW_START  equ SDFS3_WORK_BASE+$47  ; 2B
+SDFS3_SDW_END    equ SDFS3_WORK_BASE+$49  ; 2B
+SDFS3_SDW_PTR    equ SDFS3_WORK_BASE+$4B  ; 2B
+SDFS3_SDW_FLAGS  equ SDFS3_WORK_BASE+$4D  ; 1B
+SDFS3_SDW_COUNT  equ SDFS3_WORK_BASE+$4E  ; 2B
+SDFS3_SDW_BAD    equ SDFS3_WORK_BASE+$50  ; 1B。読み戻しで 1 バイトでも違ったら 1
+SDFS3_WORK_USED  equ $51
  if SDFS3_WORK_USED > $E0
         error   "SDFS/68 v3 resident work overflows W+$0320-$03FF"
  endif
@@ -615,6 +637,7 @@ SDFS3_JUMP_TABLE:
         fdb     SDFS3_INIT
         fdb     SDFS3_NOT_IMPLEMENTED
         fdb     SDFS3_NOT_IMPLEMENTED
+        fdb     SDFS3_SD_WRITE
 SDFS3_JUMP_TABLE_END:
         if (SDFS3_JUMP_TABLE_END-SDFS3_JUMP_TABLE)/2 <> SDFS3_API_COUNT
         error   "SDFS3 jump table size does not match SDFS3_API_COUNT"
@@ -810,9 +833,217 @@ SDFS3_GET_MEMTOP:
         rts
 
 SDFS3_GET_CAPS:
-        ldaa    #SDFS3_CAPS_NONE
+        ldaa    #SDFS3_CAPS_RAW_WRITE
         ldab    #SDFS3_CAPS_NONE
         ldx     #SDFS3_API_HEADER
+        clc
+        rts
+
+; ---------------------------------------------------------------------------
+; slot 16 SD_WRITE(#303)。1 セクタ(512B)を SD に書く。CCP からは呼ばない。
+; X -> {buf(2), lba(4, 上位から), flags(1)}。flags bit0 = system 領域 [48, 128)、
+; bit0 = 0 ならデータ領域 [128, ...)。0〜47(MBR・予約・stage1)はどちらでも拒む。
+; bit1 = 書いたあと読み戻して buf と比べる(SD_SECTOR_BUF は使わない)。
+; C=0 で成功。C=1 なら A = コード(LAST_ERROR と同じ)、B = カードが返した生のバイト。
+; A・B・X を壊す。FAT_* と SD_SECTOR_BUF に触らないので、開いた取っ手はそのまま続く。
+; ROM の SD 低レベル入口(BIOS_SD_SELECT〜WAIT_R1)だけを使う(決定 7)。XFER が X・B を
+; 保つことは当てにしない。
+SDFS3_SD_WRITE:
+        ldaa    0,x
+        staa    SDFS3_SDW_START
+        adda    #2
+        staa    SDFS3_SDW_END
+        ldaa    1,x
+        staa    SDFS3_SDW_START+1
+        staa    SDFS3_SDW_END+1
+        ldaa    2,x                     ; SD_LBA* は ROM の SEND_CMD が読むだけで変えない
+        staa    SD_LBA0
+        ldaa    3,x
+        staa    SD_LBA1
+        ldaa    4,x
+        staa    SD_LBA2
+        ldaa    5,x
+        staa    SD_LBA3
+        ldab    6,x
+        stab    SDFS3_SDW_FLAGS
+        ; 範囲。上位 3 バイトのどれかが 0 でなければ LBA >= 256
+        ldaa    SD_LBA0
+        oraa    SD_LBA1
+        oraa    SD_LBA2
+        andb    #SDFS3_SDW_SYSTEM
+        bne     SDFS3_SDW_CHECK_SYS
+        tsta
+        bne     SDFS3_SDW_IN_RANGE
+        ldaa    SD_LBA3
+        cmpa    #SDFS3_SDW_DATA_LO
+        bhs     SDFS3_SDW_IN_RANGE
+        bra     SDFS3_SDW_RANGE_FAIL
+SDFS3_SDW_CHECK_SYS:
+        tsta
+        bne     SDFS3_SDW_RANGE_FAIL
+        ldaa    SD_LBA3
+        cmpa    #SDFS3_SDW_SYS_LO
+        blo     SDFS3_SDW_RANGE_FAIL
+        cmpa    #SDFS3_SDW_DATA_LO
+        blo     SDFS3_SDW_IN_RANGE
+SDFS3_SDW_RANGE_FAIL:
+        clrb
+        ldaa    #SDFS3_ERR_WR_RANGE
+        jmp     SDFS3_SDW_FAIL_AB
+
+SDFS3_SDW_IN_RANGE:
+        ldaa    #$58                    ; CMD24 WRITE_BLOCK
+        bsr     SDFS3_SDW_CMD
+        bcs     SDFS3_SDW_CMD_NO_R1
+        tab
+        tsta
+        beq     SDFS3_SDW_SEND_DATA
+        bra     SDFS3_SDW_CMD_FAIL
+SDFS3_SDW_CMD_NO_R1:
+        ldab    #$FF
+SDFS3_SDW_CMD_FAIL:
+        ldaa    #SDFS3_ERR_WR_CMD
+        bra     SDFS3_SDW_DESELECT_FAIL
+
+SDFS3_SDW_SEND_DATA:
+        bsr     SDFS3_SDW_FF            ; Nwr の間
+        ldaa    #$FE                    ; データの開始トークン
+        jsr     BIOS_SD_XFER
+        bsr     SDFS3_SDW_REWIND
+SDFS3_SDW_DATA_LOOP:
+        ldx     SDFS3_SDW_PTR
+        ldaa    0,x
+        inx
+        stx     SDFS3_SDW_PTR
+        jsr     BIOS_SD_XFER
+        ldx     SDFS3_SDW_PTR
+        cpx     SDFS3_SDW_END
+        bne     SDFS3_SDW_DATA_LOOP
+        bsr     SDFS3_SDW_FF            ; CRC 2 バイト(SPI では見ない)
+        bsr     SDFS3_SDW_FF
+        ; データ応答 xxx0sss1。$FF は RESP_TRIES 回まで読み飛ばす
+        ldab    #SDFS3_SDW_RESP_TRIES
+SDFS3_SDW_RESP_LOOP:
+        pshb
+        bsr     SDFS3_SDW_FF
+        pulb
+        cmpa    #$FF
+        bne     SDFS3_SDW_RESP_GOT
+        decb
+        bne     SDFS3_SDW_RESP_LOOP
+SDFS3_SDW_RESP_GOT:
+        tab
+        anda    #$1F
+        cmpa    #$05
+        beq     SDFS3_SDW_ACCEPTED
+        pshb                            ; 拒まれても、カードが busy なら解けるまで待つ(結果は見ない)。
+        bsr     SDFS3_SDW_WAIT_BUSY     ; 待たずに離すと、次の CMD17 が busy の $00 を R1 と取り違える
+        pulb
+        ldaa    #SDFS3_ERR_WR_DATA
+        bra     SDFS3_SDW_DESELECT_FAIL
+SDFS3_SDW_ACCEPTED:
+        bsr     SDFS3_SDW_WAIT_BUSY
+        bcc     SDFS3_SDW_WRITTEN
+        clrb
+        ldaa    #SDFS3_ERR_WR_BUSY
+        bra     SDFS3_SDW_DESELECT_FAIL
+
+; 小さな部品。SDW_CMD: A = コマンドで SELECT → SEND_CMD(C=1 なら R1 なし、A = R1。A・B を壊す)。
+; SDW_FF: $FF を送って A に受ける。SDW_REWIND: PTR を START に戻す(X を壊す)。
+SDFS3_SDW_CMD:
+        staa    SD_CMD_BYTE
+        ldaa    #$FF
+        staa    SD_CRC_BYTE
+        jsr     BIOS_SD_SELECT
+        jmp     BIOS_SD_SEND_CMD
+SDFS3_SDW_FF:
+        ldaa    #$FF
+        jmp     BIOS_SD_XFER
+SDFS3_SDW_REWIND:
+        ldx     SDFS3_SDW_START
+        stx     SDFS3_SDW_PTR
+        rts
+
+; busy($00)が解けて $FF が来るまで、BUSY_LIMIT 回まで待つ。C=0 で解けた、C=1 で上限。A・X を壊す。
+SDFS3_SDW_WAIT_BUSY:
+        ldx     #SDFS3_SDW_BUSY_LIMIT
+        stx     SDFS3_SDW_COUNT
+SDFS3_SDW_BUSY_LOOP:
+        bsr     SDFS3_SDW_FF
+        cmpa    #$FF                    ; 等しければ C=0
+        beq     SDFS3_SDW_BUSY_RET
+        ldx     SDFS3_SDW_COUNT
+        dex
+        stx     SDFS3_SDW_COUNT
+        bne     SDFS3_SDW_BUSY_LOOP
+        sec
+SDFS3_SDW_BUSY_RET:
+        rts
+
+SDFS3_SDW_DESELECT_FAIL:
+        psha
+        pshb
+        jsr     BIOS_SD_DESELECT
+        pulb
+        pula
+SDFS3_SDW_FAIL_AB:
+        staa    SDFS3_LAST_ERROR
+        sec
+        rts
+
+SDFS3_SDW_WRITTEN:
+        jsr     BIOS_SD_DESELECT
+        ldaa    SDFS3_SDW_FLAGS
+        anda    #SDFS3_SDW_VERIFY
+        beq     SDFS3_SDW_OK
+        ; 読み戻し。CMD17 を出し、受けたバイトを buf と比べる。不一致でも最後まで読む
+        clr     SDFS3_SDW_BAD
+        ldaa    #$51                    ; CMD17 READ_SINGLE_BLOCK
+        bsr     SDFS3_SDW_CMD
+        bcs     SDFS3_SDW_READ_FAIL
+        tsta
+        bne     SDFS3_SDW_READ_FAIL
+        ldx     #SDFS3_SDW_READ_LIMIT
+        stx     SDFS3_SDW_COUNT
+SDFS3_SDW_TOKEN_LOOP:
+        bsr     SDFS3_SDW_FF
+        cmpa    #$FE
+        beq     SDFS3_SDW_CMP_START
+        cmpa    #$FF
+        bne     SDFS3_SDW_READ_FAIL
+        ldx     SDFS3_SDW_COUNT
+        dex
+        stx     SDFS3_SDW_COUNT
+        bne     SDFS3_SDW_TOKEN_LOOP
+        bra     SDFS3_SDW_READ_FAIL
+SDFS3_SDW_CMP_START:
+        bsr     SDFS3_SDW_REWIND
+SDFS3_SDW_CMP_LOOP:
+        bsr     SDFS3_SDW_FF
+        ldx     SDFS3_SDW_PTR
+        cmpa    0,x
+        beq     SDFS3_SDW_CMP_NEXT
+        ldab    #1                      ; 数えずに立てる(inc だと 256 個違うと 0 に戻る)
+        stab    SDFS3_SDW_BAD
+SDFS3_SDW_CMP_NEXT:
+        inx
+        stx     SDFS3_SDW_PTR
+        cpx     SDFS3_SDW_END
+        bne     SDFS3_SDW_CMP_LOOP
+        bsr     SDFS3_SDW_FF
+        bsr     SDFS3_SDW_FF
+        jsr     BIOS_SD_DESELECT
+        tst     SDFS3_SDW_BAD
+        beq     SDFS3_SDW_OK
+        clrb
+        ldaa    #SDFS3_ERR_WR_VERIFY
+        bra     SDFS3_SDW_FAIL_AB
+SDFS3_SDW_READ_FAIL:
+        tab
+        ldaa    #SDFS3_ERR_IO
+        bra     SDFS3_SDW_DESELECT_FAIL
+SDFS3_SDW_OK:
+        clr     SDFS3_LAST_ERROR
         clc
         rts
 

@@ -187,6 +187,19 @@ class SDCard:
         self.swap_at = None
         self.fail_cmd0_after = None  # CMD17 がこの回数済んだあとの CMD0 を R1 エラーにする(#307)
         self.tx_counter = None       # 送信済みバイト数を返す関数
+        # CMD24(1 ブロック書き込み)の状態・記録・失敗注入(#303)。番号は 1 始まり
+        self.cmd24_count = 0
+        self.cmd24_log = []          # (番号, LBA, 結果)。結果は ok・r1=XX・noresp・crc・wrerr・busy・corrupt・abort
+        self.write_rx = None         # None: 書き込み中でない、"token": 開始トークン待ち、bytearray: 受信中
+        self.write_lba = None
+        self.write_number = None
+        self.busy_stuck = False      # True の間は CS が上がるまで $00(busy)を返し続ける
+        self.busy_left = 0           # 書き込みの busy の残りバイト数。CS を上げても残る(実カードと同じ)
+        self.readff_lba = None       # この LBA の次の CMD17 はデータを全部 $FF で返す(readff の注入)
+        self.fail_cmd24 = None       # r1・noresp・crc・wrerr・busy・corrupt・corrupt256・drop・readff
+        self.fail_cmd24_at = None    # 失敗させる CMD24 の番号(None なら全部)
+        self.cmd24_resp_delay = 0    # データ応答の前に挟む $FF の数(0 なら CRC の直後のバイト)
+        self.cmd24_busy_bytes = 2    # 受理(と書き込みエラー)のあと busy($00)を返すバイト数
 
     @classmethod
     def from_file(cls, path):
@@ -196,12 +209,36 @@ class SDCard:
     def transfer_byte(self, value, selected=True):
         value &= 0xFF
         if not selected:
+            if self.write_rx is not None:
+                # データの途中で CS が上がった。書き込みは反映しない
+                self.cmd24_log.append((self.write_number, self.write_lba, "abort"))
+            self.write_rx = None
+            self.busy_stuck = False
             self.command = []
             self.response = []
             return 0xFF
 
+        if self.write_rx is not None:
+            # データ区間はコマンドの解析より先に受ける($40-$7F のデータを偽のコマンドにしない)
+            out = self.response.pop(0) if self.response else 0xFF
+            if self.write_rx == "token":
+                if value == 0xFE:
+                    self.write_rx = bytearray()
+            else:
+                self.write_rx.append(value)
+                if len(self.write_rx) == self.SECTOR_SIZE + 2:
+                    out = self._finish_write(bytes(self.write_rx[: self.SECTOR_SIZE]), out)
+            return out
+
         if self.response:
             return self.response.pop(0)
+        if self.busy_stuck:
+            return 0x00
+        if self.busy_left > 0:
+            # busy の間はコマンドを受け付けず、$00 を返す
+            self.busy_left -= 1
+            self.command = []
+            return 0x00
 
         if self.command:
             self.command.append(value)
@@ -257,10 +294,75 @@ class SDCard:
                 self.cmd17_log.append((number, arg, 0x04, tx))
                 return [0x04]
             self.cmd17_log.append((number, arg, 0x00, tx))
+            if self.readff_lba == arg:
+                self.readff_lba = None
+                sector = bytes([0xFF]) * self.SECTOR_SIZE
             return [0x00, 0xFE] + list(sector) + [0xFF, 0xFF]
+
+        if cmd == 24:
+            self.app_cmd = False
+            self.cmd24_count += 1
+            number = self.cmd24_count
+            mode = self._cmd24_fault(number)
+            offset = arg * self.SECTOR_SIZE
+            if mode == "r1":
+                self.cmd24_log.append((number, arg, "r1=04"))
+                return [0x04]
+            if mode == "noresp":
+                self.cmd24_log.append((number, arg, "noresp"))
+                return []
+            if offset + self.SECTOR_SIZE > len(self.image):
+                # カードの容量の外(パラメータエラー)。イメージは伸ばさない
+                self.cmd24_log.append((number, arg, "r1=40"))
+                return [0x40]
+            self.write_rx = "token"
+            self.write_lba = arg
+            self.write_number = number
+            return [0x00]
 
         self.app_cmd = False
         return [0x04]
+
+    def _cmd24_fault(self, number):
+        if self.fail_cmd24 is None:
+            return None
+        if self.fail_cmd24_at is not None and number != self.fail_cmd24_at:
+            return None
+        return self.fail_cmd24
+
+    def _finish_write(self, data, out):
+        """CRC の 2 バイト目を受けたところ。戻り値は次のバイトでホストが読む値。"""
+        number, lba = self.write_number, self.write_lba
+        self.write_rx = None
+        mode = self._cmd24_fault(number)
+        if mode == "crc":
+            token = 0xEB              # 上位 3 bit は不定。CRC エラー
+        elif mode == "wrerr":
+            token = 0xED              # 書き込みエラー
+        else:
+            token = 0xE5              # 受理
+            if mode in ("corrupt", "corrupt256"):
+                data = bytearray(data)
+                if mode == "corrupt":
+                    data[0x123] ^= 0xFF   # 黙って 1 バイト化ける(読み戻しで見つかるはず)
+                else:
+                    for i in range(256):  # 256 バイト化ける(数えると 0 に戻る個数)
+                        data[i] ^= 0xFF
+                data = bytes(data)
+            if mode == "readff":
+                self.readff_lba = lba     # 書けたが、読み戻しは全部 $FF が返る
+            if mode != "drop":            # drop は受理を返して書かない(前の中身が残る)
+                offset = lba * self.SECTOR_SIZE
+                image = bytearray(self.image)
+                image[offset : offset + self.SECTOR_SIZE] = data
+                self.image = bytes(image)
+        self.cmd24_log.append((number, lba, mode or "ok"))
+        self.response.extend([0xFF] * self.cmd24_resp_delay + [token])
+        if mode == "busy":
+            self.busy_stuck = True
+        elif token in (0xE5, 0xED):
+            self.busy_left = self.cmd24_busy_bytes
+        return self.response.pop(0)
 
 
 class PIA:
@@ -1944,6 +2046,22 @@ def main():
                         help="差し替えを始める CMD17 の番号(1 始まり)")
     parser.add_argument("--sd-fail-cmd0-after", type=int,
                         help="CMD17 が N 回済んだあとの CMD0 を R1 エラーにする(SD_INIT の失敗。0 なら最初から)")
+    parser.add_argument("--sd-save",
+                        help="終了時の SD イメージ(CMD24 で書いた内容を含む)を書き出すファイル")
+    parser.add_argument("--sd-write-log",
+                        help="CMD24 ごとに「番号 LBA 結果」を書くファイル")
+    parser.add_argument("--sd-fail-cmd24",
+                        choices=["r1", "noresp", "crc", "wrerr", "busy", "corrupt", "corrupt256",
+                                 "drop", "readff"],
+                        help="CMD24 の失敗の注入(R1 エラー、R1 なし、データ応答の CRC・書き込みエラー、"
+                             "busy の張り付き、1 バイト・256 バイト化ける、受理して書かない、"
+                             "読み戻しが全部 $FF)")
+    parser.add_argument("--sd-fail-cmd24-at", type=int,
+                        help="--sd-fail-cmd24 を N 回目(1 始まり)の CMD24 だけに掛ける")
+    parser.add_argument("--sd-cmd24-resp-delay", type=int, default=0,
+                        help="CMD24 のデータ応答の前に挟む $FF の数")
+    parser.add_argument("--sd-cmd24-busy-bytes", type=int, default=2,
+                        help="CMD24 の受理(と書き込みエラー)のあと busy を返すバイト数。CS を上げても残る")
     parser.add_argument("--input-hold-pc",
                         help="1st ACIA の入力で CR を渡したら、この番地(16 進)を実行するまで次の入力を見せない")
     parser.add_argument("--key-input-hold-pc",
@@ -1978,6 +2096,10 @@ def main():
         sdcard.fail_cmd17_from = args.sd_fail_cmd17_from
         sdcard.fail_cmd17_count = args.sd_fail_cmd17_count
         sdcard.fail_cmd0_after = args.sd_fail_cmd0_after
+        sdcard.fail_cmd24 = args.sd_fail_cmd24
+        sdcard.fail_cmd24_at = args.sd_fail_cmd24_at
+        sdcard.cmd24_resp_delay = args.sd_cmd24_resp_delay
+        sdcard.cmd24_busy_bytes = args.sd_cmd24_busy_bytes
         if args.sd_swap_image is not None:
             with open(args.sd_swap_image, "rb") as f:
                 sdcard.swap_image = f.read()
@@ -2011,6 +2133,13 @@ def main():
         with open(args.sd_log, "w", encoding="ascii") as f:
             for number, lba, r1, tx in sdcard.cmd17_log:
                 f.write(f"{number} {lba} {r1:02X} {tx}\n")
+    if args.sd_write_log and sdcard is not None:
+        with open(args.sd_write_log, "w", encoding="ascii") as f:
+            for number, lba, result in sdcard.cmd24_log:
+                f.write(f"{number} {lba} {result}\n")
+    if args.sd_save and sdcard is not None:
+        with open(args.sd_save, "wb") as f:
+            f.write(sdcard.image)
     if cpu.stack_watch_floor is not None:
         print(f"[EMU] stack-watch rom_min={_format_sp(cpu.stack_watch_rom_min)} "
               f"ram_min={_format_sp(cpu.stack_watch_ram_min)}", file=sys.stderr)

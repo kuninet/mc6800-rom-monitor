@@ -50,3 +50,4 @@ v3 は、現行の `BOOT -> stage1 -> SDFS.BIN -> SDFS> ` 方式を単純に拡�
 | #316 | [issue-316_xldr.md](issue-316_xldr.md) | LOAD.COM・RUN.COM・XLDR.OVL を作り、CCP から LOAD と RUN を外す |
 | #304 | [issue-304_autoexec.md](issue-304_autoexec.md) | AUTOEXEC.COM を CCP の cold 入口で自動実行する（抑止は受信済みの文字） |
 | #299 | [issue-299_sd_image_tool.md](issue-299_sd_image_tool.md) | v3 の system SD イメージ生成ツール（marker・slot A 世代 1・FAT32 は LBA 2048） |
+| #303 | [issue-303_sd_raw_write.md](issue-303_sd_raw_write.md) | 核に SD raw write（slot 16 `SD_WRITE`）を置き、ROM の SD 低レベル入口で書く |

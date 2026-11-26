@@ -221,6 +221,7 @@ API を major 2 に上げる（決定 9）。ROM は major だけを見る。
 | 9〜12 | （予約） | `SYS_UPDATE`、WRITE 3 本（今の割り当てを保つ） | 後続 |
 | 13 | `INIT` | 核の初期化。**出力しない**。ROM は呼ばず、CCP の cold が呼ぶ | CCP |
 | 14・15 | （予約） | ディレクトリ列挙（将来の DIR.COM 用） | 後続 |
+| 16 | `SD_WRITE` | 1 セクタの raw write（#303 で表の外に足した。本数 17、`api_minor` 1）。X → `{buf(2), lba(4), flags(1)}`。書いてよい LBA は固定 | system install・FAT write の `.COM` と核（CCP は呼ばない） |
 
 - `.COM` の起動を核に移す理由: `.COM` の上限を `GET_MEMTOP`（`$6FFF`）にすると、読み込みが CCP を上書きする。CCP の中のローダが自分を潰さないように、読み込みは核で行い、読み終えたら CCP に戻らず `BIOS_EXEC` で起動する
 - 読み込みを始める前の失敗（見つからない、大きすぎる）は C=1 で CCP に戻す。読み込みの途中で失敗したら、CCP が潰れているかもしれないので、`SDFS3_PENDING_ERR` を立てて `BIOS_WBOOT` へ飛ぶ。CCP は warm 入口で保留エラーを見て `?` を出す
