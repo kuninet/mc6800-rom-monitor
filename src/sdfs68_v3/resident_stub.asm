@@ -17,11 +17,11 @@ SDFS3_ERR_NOT_FOUND equ 4
 SDFS3_ERR_LOAD    equ 5
 SDFS3_ERR_RUN     equ 6
 SDFS3_ERR_COM     equ 7
+SDFS3_ERR_TOO_BIG equ 8    ; LOAD_PATH: 空のファイル、または load〜limit に入らない(#315)
+SDFS3_ERR_NOT_OPEN equ 9   ; READ_STREAM_GETC: 取っ手が開いていない(#315)
 
-; .COM は $0100 から CCP の手前まで(#313。CCP の中のローダが自分を潰さないため)。
-; #315 で読み込みを核へ移し、上限を GET_MEMTOP まで($6F00 バイト)に広げる。
-SDFS3_COM_MAX_HI equ SDFS3_COM_MAX/256
-SDFS3_COM_MAX_LO equ SDFS3_COM_MAX-SDFS3_COM_MAX_HI*256
+; LOAD_PATH の flags(#315)
+SDFS3_LP_EXEC      equ $01 ; 読み終えたら BIOS_EXEC で起動して戻らない
 
 ; 書き換わる変数はイメージの外(窓の resident ワーク)に置く。#311
 SDFS3_LAST_ERROR equ SDFS3_WORK_BASE
@@ -31,6 +31,17 @@ SDFS3_TOKEN_PTR  equ SDFS3_WORK_BASE+4
 SDFS3_TOKEN_LEN  equ SDFS3_WORK_BASE+6
 SDFS3_PENDING_ERR equ SDFS3_WORK_BASE+7
 SDFS3_EXEC_BLOCK equ SDFS3_WORK_BASE+8   ; BIOS_EXEC に渡す {entry(2), argptr(2)}
+; ファイル API(#315)。取っ手は 1 本で、0 なら閉じている
+SDFS3_STREAM_OPEN equ SDFS3_WORK_BASE+$0C
+SDFS3_LP_FLAGS   equ SDFS3_WORK_BASE+$0D
+SDFS3_LP_ARG_LEN equ SDFS3_WORK_BASE+$0E
+SDFS3_LP_ROOM    equ SDFS3_WORK_BASE+$0F  ; 2B。limit、検査のあとは limit-load
+SDFS3_GETC_X     equ SDFS3_WORK_BASE+$11  ; 2B。GETC が X を保つための退避
+SDFS3_CCP_LP_BLOCK equ SDFS3_WORK_BASE+$13 ; 11B。CCP が .COM の起動で組む LOAD_PATH のブロック
+SDFS3_WORK_USED  equ $13+11
+ if SDFS3_WORK_USED > $E0
+        error   "SDFS/68 v3 resident work overflows W+$0320-$03FF"
+ endif
 
         if S1_SUPPORTED = 0
         error   "SDFS/68 v3 resident is not supported for this memory configuration"
@@ -53,6 +64,7 @@ SDFS3_CCP_COLD:
         jsr     SDFS3_PRINT_WELCOME
         bra     SDFS3_CCP_PROMPT
 SDFS3_CCP_WARM:
+        clr     SDFS3_STREAM_OPEN   ; 前のプログラムの取っ手を持ち越さない
         tst     SDFS3_PENDING_ERR
         beq     SDFS3_CCP_PROMPT
         clr     SDFS3_PENDING_ERR
@@ -427,83 +439,38 @@ SDFS3_RUN_EXEC:
         ldx     #0
         stx     SDFS3_EXEC_BLOCK+2
         clrb
-        bra     SDFS3_EXEC
+        jmp     SDFS3_EXEC
 SDFS3_CMD_RUN_FAIL:
         ldaa    #SDFS3_ERR_RUN
         jmp     SDFS3_FAIL_A
 
+; .COM は核の LOAD_PATH(exec)で $0100 から GET_MEMTOP まで読んで起動する(#315)。
+; 読み込みは CCP を潰してよい。戻ってくるのは読み込みを始める前の失敗(C=1)だけ。
 SDFS3_CMD_COM:
         ldx     SDFS3_TOKEN_PTR
         ldab    SDFS3_TOKEN_LEN
         addb    SDFS3_PARSE_LEN
         jsr     SDFS3_PARSE_COM_PATH_COMMAND
         bcs     SDFS3_CMD_COM_FAIL
-        jsr     FAT32_MOUNT
-        bcs     SDFS3_CMD_COM_FAIL
-        jsr     SDFS3_RESOLVE_FILE_SAVED
-        bcs     SDFS3_CMD_COM_FAIL
-        jsr     SDFS3_PARSE_COM_CHECK_EXT
-        bcs     SDFS3_CMD_COM_FAIL
-        jsr     SDFS3_COM_CHECK_SIZE
-        bcs     SDFS3_CMD_COM_FAIL
-        jsr     FAT32_STREAM_OPEN
-        bcs     SDFS3_CMD_COM_FAIL
-        jsr     SDFS3_COM_LOAD_RAW
-        bcs     SDFS3_CMD_COM_FAIL
+        ldx     PATH_PTR
+        stx     SDFS3_CCP_LP_BLOCK
+        ldaa    PATH_LEN
+        staa    SDFS3_CCP_LP_BLOCK+2
         ldx     #SDFS3_COM_BASE
-        stx     SDFS3_EXEC_BLOCK
+        stx     SDFS3_CCP_LP_BLOCK+3
+        ldx     #SDFS3_MEMTOP
+        stx     SDFS3_CCP_LP_BLOCK+5
+        ldaa    #SDFS3_LP_EXEC
+        staa    SDFS3_CCP_LP_BLOCK+7
         ldx     PATH_ARG_PTR
-        stx     SDFS3_EXEC_BLOCK+2
-        ldab    PATH_ARG_LEN
-; BIOS_EXEC で起動する。プログラムの RTS は ROM の WBOOT を通って CCP の warm に戻る。
-SDFS3_EXEC:
-        clr     SDFS3_LAST_ERROR
-        ldx     #SDFS3_EXEC_BLOCK
-        jmp     BIOS_EXEC
+        stx     SDFS3_CCP_LP_BLOCK+8
+        ldaa    PATH_ARG_LEN
+        staa    SDFS3_CCP_LP_BLOCK+10
+        ldx     #SDFS3_CCP_LP_BLOCK
+        jmp     SDFS3_LOAD_PATH
 SDFS3_CMD_COM_FAIL:
         ldaa    #SDFS3_ERR_COM
         jmp     SDFS3_FAIL_A
-
-SDFS3_COM_CHECK_SIZE:
-        ldaa    FAT_FILE_SIZE0
-        oraa    FAT_FILE_SIZE1
-        bne     SDFS3_COM_CHECK_FAIL
-        ldaa    FAT_FILE_SIZE2
-        oraa    FAT_FILE_SIZE3
-        beq     SDFS3_COM_CHECK_FAIL
-        ldaa    FAT_FILE_SIZE2
-        cmpa    #SDFS3_COM_MAX_HI
-        bhi     SDFS3_COM_CHECK_FAIL
-        blo     SDFS3_COM_CHECK_OK
-        ldaa    FAT_FILE_SIZE3
-        cmpa    #SDFS3_COM_MAX_LO
-        bhi     SDFS3_COM_CHECK_FAIL
-SDFS3_COM_CHECK_OK:
-        clc
-        rts
-SDFS3_COM_CHECK_FAIL:
-        sec
-        rts
-
-SDFS3_COM_LOAD_RAW:
-        ldx     #SDFS3_COM_BASE
-        stx     FAT_READ_PTR
-SDFS3_COM_LOAD_LOOP:
-        jsr     FAT_BYTES_REMAIN
-        bcc     SDFS3_COM_LOAD_DONE
-        jsr     FAT32_STREAM_GETC
-        bcs     SDFS3_COM_LOAD_FAIL
-        ldx     FAT_READ_PTR
-        staa    0,x
-        inx
-        stx     FAT_READ_PTR
-        bra     SDFS3_COM_LOAD_LOOP
-SDFS3_COM_LOAD_DONE:
-        clc
-        rts
-SDFS3_COM_LOAD_FAIL:
-        sec
-        rts
 
 SDFS3_DIR_PATH:
         jsr     SDFS3_RESOLVE_DIR_SAVED
@@ -612,22 +579,6 @@ SDFS3_PARSE_COM_PATH_NO_ARGS:
         clc
         rts
 SDFS3_PARSE_COM_PATH_FAIL:
-        sec
-        rts
-
-SDFS3_PARSE_COM_CHECK_EXT:
-        ldaa    FAT_FIND_NAME8
-        cmpa    #'C'
-        bne     SDFS3_PARSE_COM_CHECK_FAIL
-        ldaa    FAT_FIND_NAME9
-        cmpa    #'O'
-        bne     SDFS3_PARSE_COM_CHECK_FAIL
-        ldaa    FAT_FIND_NAME10
-        cmpa    #'M'
-        bne     SDFS3_PARSE_COM_CHECK_FAIL
-        clc
-        rts
-SDFS3_PARSE_COM_CHECK_FAIL:
         sec
         rts
 
@@ -1245,10 +1196,171 @@ SDFS3_GET_INFO:
         clc
         rts
 
+; ---------------------------------------------------------------------------
+; ファイル API(slot 2〜5、#315。仕様 2-3)。パスを取る API(LOAD_PATH・OPEN)は、コマンドと同じく
+; 頭で FAT32_MOUNT し直す(ROM の読み直しなどが SD_SECTOR_BUF と FAT_* を上書きしてよいように)。
+; 取っ手は 1 本。LOAD_PATH と OPEN はまず前の取っ手を閉じる。
+; ---------------------------------------------------------------------------
+
+; slot 2 LOAD_PATH。X -> {path(2), path_len(1), load(2), limit(2), flags(1), argptr(2), arg_len(1)}
+; ファイルを load〜limit(limit を含む)に読む。limit は GET_MEMTOP 以下(核と窓を潰さない)。
+; 読み込みを始める前の失敗は C=1(見つからない 4、SD 3、空・入らない 8)で戻る。
+; 読み込みの途中の失敗は LAST_ERROR と PENDING_ERR に 3 を入れて BIOS_WBOOT へ飛び、戻らない。
+; flags bit0 なら BIOS_EXEC(entry = load、X = argptr、B = arg_len)で起動して戻らない。
+; bit0 でなければ C=0、LAST_ERROR = 0、X = 読み込んだ末尾の次の番地。
+; ブロックは最初に写すので、読み込みで潰れてもよい。
 SDFS3_LOAD_PATH:
+        ldaa    7,x
+        staa    SDFS3_LP_FLAGS
+        ldaa    10,x
+        staa    SDFS3_LP_ARG_LEN
+        ldaa    2,x
+        staa    PATH_LEN
+        ldaa    5,x
+        staa    SDFS3_LP_ROOM
+        ldaa    6,x
+        staa    SDFS3_LP_ROOM+1
+        ldaa    3,x
+        staa    SDFS3_EXEC_BLOCK
+        ldaa    4,x
+        staa    SDFS3_EXEC_BLOCK+1
+        ldaa    8,x
+        staa    SDFS3_EXEC_BLOCK+2
+        ldaa    9,x
+        staa    SDFS3_EXEC_BLOCK+3
+        ldx     0,x
+        stx     PATH_PTR
+        jsr     SDFS3_OPEN_PATH
+        bcs     SDFS3_LP_RTS
+; 大きさ: 1 バイト以上 $FFFF 以下、limit <= MEMTOP、load <= limit、size-1 <= limit-load
+        ldaa    FAT_FILE_SIZE0
+        oraa    FAT_FILE_SIZE1
+        bne     SDFS3_LP_TOO_BIG
+        ldaa    FAT_FILE_SIZE2
+        oraa    FAT_FILE_SIZE3
+        beq     SDFS3_LP_TOO_BIG
+        ldaa    SDFS3_LP_ROOM
+        ldab    SDFS3_LP_ROOM+1
+        cmpa    #SDFS3_MEMTOP/$0100
+        bhi     SDFS3_LP_TOO_BIG
+        blo     SDFS3_LP_LIMIT_OK
+        cmpb    #SDFS3_MEMTOP&$00FF
+        bhi     SDFS3_LP_TOO_BIG
+SDFS3_LP_LIMIT_OK:
+        subb    SDFS3_EXEC_BLOCK+1
+        sbca    SDFS3_EXEC_BLOCK
+        bcs     SDFS3_LP_TOO_BIG
+        staa    SDFS3_LP_ROOM
+        stab    SDFS3_LP_ROOM+1
+        ldaa    FAT_FILE_SIZE2
+        ldab    FAT_FILE_SIZE3
+        subb    #1
+        sbca    #0
+        cmpa    SDFS3_LP_ROOM
+        bhi     SDFS3_LP_TOO_BIG
+        blo     SDFS3_LP_SIZE_OK
+        cmpb    SDFS3_LP_ROOM+1
+        bhi     SDFS3_LP_TOO_BIG
+SDFS3_LP_SIZE_OK:
+        ldx     SDFS3_EXEC_BLOCK
+        stx     FAT_READ_PTR
+SDFS3_LP_LOOP:
+        jsr     FAT_BYTES_REMAIN
+        bcc     SDFS3_LP_DONE
+        jsr     FAT32_STREAM_GETC
+        bcs     SDFS3_LP_MID_FAIL
+        ldx     FAT_READ_PTR
+        staa    0,x
+        inx
+        stx     FAT_READ_PTR
+        bra     SDFS3_LP_LOOP
+SDFS3_LP_DONE:
+        ldaa    SDFS3_LP_FLAGS
+        bita    #SDFS3_LP_EXEC
+        bne     SDFS3_LP_EXEC_IT
+        clr     SDFS3_LAST_ERROR
+        ldx     FAT_READ_PTR
+        clc
+SDFS3_LP_RTS:
+        rts
+SDFS3_LP_EXEC_IT:
+        ldab    SDFS3_LP_ARG_LEN
+; BIOS_EXEC で起動する(EXEC_BLOCK と B は呼び手が用意する)。プログラムの RTS は ROM の
+; WBOOT を通って CCP の warm に戻る。CCP の RUN もここを使う。
+SDFS3_EXEC:
+        clr     SDFS3_LAST_ERROR
+        ldx     #SDFS3_EXEC_BLOCK
+        jmp     BIOS_EXEC
+SDFS3_LP_TOO_BIG:
+        ldaa    #SDFS3_ERR_TOO_BIG
+        jmp     SDFS3_FAIL_A
+; 読み込みの途中の失敗。呼び手(CCP など)は潰れているかもしれないので戻らない。WBOOT は
+; 壊れた区画を読み直して CCP の warm に入り、warm が PENDING_ERR を見て「?」を出す。
+SDFS3_LP_MID_FAIL:
+        ldaa    #SDFS3_ERR_IO
+        staa    SDFS3_LAST_ERROR
+        staa    SDFS3_PENDING_ERR
+        jmp     BIOS_WBOOT
+
+; slot 3 READ_STREAM_OPEN。X = パス、B = 長さ。C=1 なら見つからない 4、SD 3。
 SDFS3_READ_STREAM_OPEN:
+        stx     PATH_PTR
+        stab    PATH_LEN
+        jsr     SDFS3_OPEN_PATH
+        bcs     SDFS3_LP_RTS
+        ldaa    #1
+        staa    SDFS3_STREAM_OPEN
+        clr     SDFS3_LAST_ERROR
+        clc
+        rts
+
+; slot 4 READ_STREAM_GETC。A = 1 バイト(B と X は保つ)。終わりで C=1・LAST_ERROR = 0。
+; SD の失敗は C=1・3、取っ手が開いていなければ C=1・9。
 SDFS3_READ_STREAM_GETC:
+        stx     SDFS3_GETC_X
+        pshb
+        tst     SDFS3_STREAM_OPEN
+        beq     SDFS3_GETC_NOT_OPEN
+        jsr     FAT32_STREAM_GETC
+        bcc     SDFS3_GETC_DONE
+        jsr     FAT_BYTES_REMAIN
+        bcs     SDFS3_GETC_IO
+        clra
+        bra     SDFS3_GETC_FAIL
+SDFS3_GETC_IO:
+        ldaa    #SDFS3_ERR_IO
+        bra     SDFS3_GETC_FAIL
+SDFS3_GETC_NOT_OPEN:
+        ldaa    #SDFS3_ERR_NOT_OPEN
+SDFS3_GETC_FAIL:
+        staa    SDFS3_LAST_ERROR
+        sec
+SDFS3_GETC_DONE:
+        pulb
+        ldx     SDFS3_GETC_X
+        rts
+
+; slot 5 READ_STREAM_CLOSE。取っ手を閉じる。C=0。
 SDFS3_READ_STREAM_CLOSE:
+        clr     SDFS3_STREAM_OPEN
+        clc
+        rts
+
+; 取っ手を閉じ、mount し直して PATH_PTR/PATH_LEN のファイルを開く(LOAD_PATH と OPEN が共用)。
+SDFS3_OPEN_PATH:
+        clr     SDFS3_STREAM_OPEN
+        jsr     FAT32_MOUNT
+        bcs     SDFS3_OPEN_PATH_IO
+        jsr     SDFS3_RESOLVE_FILE_SAVED
+        bcs     SDFS3_OPEN_PATH_RESOLVE_FAIL
+        jmp     FAT32_STREAM_OPEN
+SDFS3_OPEN_PATH_RESOLVE_FAIL:
+        ldaa    FAT_ERROR
+        bne     SDFS3_OPEN_PATH_IO
+        jmp     SDFS3_NOT_FOUND
+SDFS3_OPEN_PATH_IO:
+        jmp     SDFS3_FAT_FAIL
+
 SDFS3_NOT_IMPLEMENTED:
         ldaa    #SDFS3_ERR_NOT_IMPL
 SDFS3_NOT_IMPLEMENTED_A:
@@ -1274,10 +1386,11 @@ SDFS3_GET_CAPS:
         rts
 
 ; 核の初期化(slot 13)。出力しない。ROM は呼ばず、CCP の cold 入口が呼ぶ(仕様 2-3)。
-; LAST_ERROR と PENDING_ERR はイメージの外にあり初期値を持たないので、ここで 0 にする。
+; LAST_ERROR・PENDING_ERR・取っ手はイメージの外にあり初期値を持たないので、ここで 0 にする。
 SDFS3_INIT:
         clr     SDFS3_LAST_ERROR
         clr     SDFS3_PENDING_ERR
+        clr     SDFS3_STREAM_OPEN
         clc
         rts
 

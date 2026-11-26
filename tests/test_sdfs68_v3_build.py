@@ -44,7 +44,7 @@ V3_CCP_BASE = 0x6400
 V3_CORE_BASE = 0x7000
 V3_CORE_OFFSET = V3_CORE_BASE - V3_CCP_BASE
 V3_MEMTOP = 0x6FFF
-V3_COM_MAX = V3_CCP_BASE - 0x0100
+V3_COM_MAX = V3_CORE_BASE - 0x0100  # .COM は GET_MEMTOP まで(#315)
 V3_API_MAJOR = 2
 V3_API_MINOR = 0
 PROMPT = "SDFS3> "
@@ -87,6 +87,7 @@ def _v3(profile: str) -> dict:
         "SDFS3_GET_ERROR",
         "SDFS3_CMD_DISPATCH",
         "SDFS3_ERR_COM",
+        "SDFS3_ERR_NOT_FOUND",
     )
     assert resident["SDFS3_CCP_BASE"] == V3_CCP_BASE and resident["SDFS3_CORE_BASE"] == V3_CORE_BASE
     config = {
@@ -191,6 +192,7 @@ def test_sdfs3_profiles_build_and_match_header() -> None:
             "SDFS3_JUMP_TABLE",
             "SDFS3_LAST_ERROR",
             "SDFS3_PENDING_ERR",
+            "SDFS3_STREAM_OPEN",
             "SDFS3_END",
             *sorted(set(slot_names)),
         )
@@ -223,14 +225,20 @@ def test_sdfs3_profiles_build_and_match_header() -> None:
         for slot, name in enumerate(slot_names):
             assert _word(data, table + 2 * slot) == symbols[name], f"{profile}: slot {slot} != {name}"
             assert _word(data, table + 2 * slot) >= V3_CORE_BASE, f"{profile}: slot {slot} points into CCP"
+        file_api = {symbols[name] for name in slot_names[2:6]}
+        assert len(file_api) == 4 and symbols["SDFS3_NOT_IMPLEMENTED"] not in file_api, (
+            f"{profile}: slot 2-5 must be implemented (#315)"
+        )
         get_error = symbols["SDFS3_GET_ERROR"] - base
         assert data[get_error + 3 : get_error + 5] == bytes([0x0C, 0x39])
-        # INIT は出力しない: clr LAST_ERROR / clr PENDING_ERR / clc / rts だけ
+        # INIT は出力しない: clr LAST_ERROR / clr PENDING_ERR / clr STREAM_OPEN / clc / rts だけ
         init = symbols["SDFS3_INIT"] - base
         last_error, pending = symbols["SDFS3_LAST_ERROR"], symbols["SDFS3_PENDING_ERR"]
-        assert data[init : init + 8] == bytes(
-            [0x7F, last_error >> 8, last_error & 0xFF, 0x7F, pending >> 8, pending & 0xFF, 0x0C, 0x39]
-        ), f"{profile}: INIT should only clear the error variables: {data[init:init + 8].hex()}"
+        stream = symbols["SDFS3_STREAM_OPEN"]
+        assert data[init : init + 11] == bytes(
+            [0x7F, last_error >> 8, last_error & 0xFF, 0x7F, pending >> 8, pending & 0xFF,
+             0x7F, stream >> 8, stream & 0xFF, 0x0C, 0x39]
+        ), f"{profile}: INIT should only clear the error variables and the handle: {data[init:init + 11].hex()}"
         ccp_part = data[: symbols["SDFS3_CCP_END"] - base]
         core_part = data[V3_CORE_OFFSET:]
         assert b"SDFS/68 V3 " in ccp_part and b"SDFS/68 V3 " not in core_part, "Welcome belongs to CCP"
@@ -348,8 +356,9 @@ def test_sdfs3_cmd_dispatch_parser_classifies_stub_commands() -> None:
         ("TYPE README.TXT", 0x03),
         ("LoAd HELLO.S", 0x05),
         ("RUN MISSING.S", 0x06),
-        ("FOO.COM ARG", 0x07),
-        ("foo.com", 0x07),
+        # .COM は核の LOAD_PATH のコードを残す(マウントの失敗は 3。#315)
+        ("FOO.COM ARG", 0x03),
+        ("foo.com", 0x03),
         ("", 0x02),
         ("   ", 0x02),
         ("UNKNOWN", 0x02),
@@ -481,8 +490,6 @@ def test_sdfs3_cmd_load_run_and_com_read_fat_files() -> None:
             _file("HELLO.COM", config["hello_com"]),
             _file("ARGS.COM", config["args_com"]),
             _file("EMPTY.COM", b""),
-            _file("BIG.COM", b"\x39" * (V3_COM_MAX + 1)),
-            _file("MAX.COM", b"\x39" * V3_COM_MAX),
         ],
     )
     out = _v3_run(
@@ -500,8 +507,6 @@ def test_sdfs3_cmd_load_run_and_com_read_fat_files() -> None:
         "ARGS.COM AAA BBB\r"
         "NOFILE.COM\r"
         "EMPTY.COM\r"
-        "BIG.COM\r"
-        "MAX.COM\r"
         "RUN HELLO.HEX\r"
         "RUN RUN.S\r"
         "DOS\r"
@@ -518,13 +523,12 @@ def test_sdfs3_cmd_load_run_and_com_read_fat_files() -> None:
     assert "ARGS AAA BBB" in _dos(out, "ARGS.COM AAA BBB")
     assert _dos(out, "NOFILE.COM") == "?\n"
     assert _dos(out, "EMPTY.COM") == "?\n"
-    assert _dos(out, "BIG.COM") == "?\n", f".COM larger than CCP_BASE-$0100 must be rejected: {out!r}"
-    assert _dos(out, "MAX.COM") == "", f".COM of exactly CCP_BASE-$0100 bytes should run: {out!r}"
+    # 大きさの境界($6F00 / $6F01 バイト)は test_com_max_size_runs_and_returns_through_reload(#315)
     assert _dos(out, "RUN HELLO.HEX") == "?\n"
     run_file = _after(out, PROMPT + "RUN RUN.S\n")
     assert "HELLO, WORLD" in run_file and "BRK 0106" in run_file, f"RUN file: {run_file[:300]!r}"
     assert out.count("] DOS\n" + PROMPT) == 3, f"each DOS from the monitor should reach the prompt: {out[-300:]!r}"
-    assert out.count("\n?\n") == 4, f"bad .COM/RUN inputs should fail exactly four times: {out!r}"
+    assert out.count("\n?\n") == 3, f"bad .COM/RUN inputs should fail exactly three times: {out!r}"
     assert out.count(WELCOME) == 1
     print("[PASS] test_sdfs3_cmd_load_run_and_com_read_fat_files")
 
@@ -557,6 +561,7 @@ def _v3_run_sd(
     *,
     sd_image: bytes,
     fail_from: int | None = None,
+    fail_count: int | None = None,
     fail_cmd0_after: int | None = None,
     swap_image: bytes | None = None,
     swap_at: int | None = None,
@@ -573,6 +578,8 @@ def _v3_run_sd(
     args = ["--sd-log", str(log_path)]
     if fail_from is not None:
         args += ["--sd-fail-cmd17-from", str(fail_from)]
+    if fail_count is not None:
+        args += ["--sd-fail-cmd17-count", str(fail_count)]
     if fail_cmd0_after is not None:
         args += ["--sd-fail-cmd0-after", str(fail_cmd0_after)]
     if swap_image is not None:
@@ -1584,7 +1591,7 @@ def test_sdfs3_resident_image_unchanged_after_commands() -> None:
     assert f"] DOS\n{PROMPT}EXIT" in out, "DOS gate should accept the image after the commands"
     image = bytes(_dump_range_bytes(_final_dump(out, base), base, end - base))
     assert image == payload, "resident image in RAM changed after running commands"
-    last_failure = symbols["SDFS3_ERR_COM"]
+    last_failure = symbols["SDFS3_ERR_NOT_FOUND"]  # .COM は核の LOAD_PATH のコードを残す(#315)
     assert _dump_bytes(_after(out, f"] D{last_error:04X}"), last_error)[0] == last_failure, (
         f"LAST_ERROR should hold the last failure: {out[-600:]!r}"
     )
@@ -3236,6 +3243,299 @@ def _load_symbols(path: Path, *names: str) -> dict[str, int]:
     return result
 
 
+# ---------------------------------------------------------------------------
+# #315 ファイル API(slot 2〜5)と、核の LOAD_PATH による .COM の起動
+# ---------------------------------------------------------------------------
+
+COM_MARK_ADDR = 0x0100
+COM_MARK = 0xAA
+# $0100 から NOP を並べ、最後のバイト($6FFF)を RTS にした最大の .COM。CCP($6400-$6FFF)を潰す
+BIG_COM = b"\x01" * (V3_COM_MAX - 1) + b"\x39"
+TOOBIG_COM = b"\x39" * (V3_COM_MAX + 1)
+FOURK_COM = b"\x39" + b"\x01" * 4095
+
+
+def _file_api_sd_image(config: dict, extra: list | None = None) -> bytes:
+    return _build_sdfs3sys_fat_sd_image(
+        config["sdfs3sys"],
+        [
+            _file("README.TXT", b"HELLO FROM README\r\n"),
+            _file("BIG.COM", BIG_COM),
+            _file("TOOBIG.COM", TOOBIG_COM),
+            _file("FOURK.COM", FOURK_COM),
+            *(extra or []),
+        ],
+    )
+
+
+def _numbers(log: list, start: int, stop: int) -> list[int]:
+    """出力の位置 start〜stop の間に起きた CMD17 の番号。"""
+    return [n for n, _lba, _r1, tx in log if start <= tx <= stop]
+
+
+def test_com_max_size_runs_and_returns_through_reload() -> None:
+    """シナリオ 1・2・3: $6F00 バイトの .COM は CCP を潰して起動し、RTS のあと WBOOT が CCP だけを
+    読み直して DOS に戻る。$6F01 バイトは読み込みの前に「?」で、ファイルの中身も SDFS3SYS も
+    読まない。読み込みの途中で SD が失敗したら「?」を 1 回だけ出して DOS に戻る。"""
+    for profile in V3_PROFILES:
+        config = _v3(profile)
+        symbols = config["symbols"]
+        sectors = _system_sectors(config)
+        payload = config["sdfs3sys"][HEADER_SIZE:]
+        pending = symbols["SDFS3_PENDING_ERR"]
+        sd_image = _file_api_sd_image(config)
+        ccp_dump = f"D{V3_CCP_BASE:04X}-{V3_CCP_BASE + 15:04X}"
+        input_text = (
+            f"M{COM_MARK_ADDR:04X}\r{COM_MARK:02X}\r.\r"
+            "BOOT3\rTOOBIG.COM\rEXIT\r"
+            f"D{COM_MARK_ADDR:04X}-{COM_MARK_ADDR:04X}\r"
+            "DOS\rFOURK.COM\rEXIT\r"
+            f"D{COM_MARK_ADDR:04X}-{COM_MARK_ADDR:04X}\r"
+            f"D{pending:04X}-{pending:04X}\r"
+            "DOS\rBIG.COM\rDIR\rEXIT\r"
+            f"{ccp_dump}\r\r"
+        )
+        run = dict(sd_image=sd_image, max_cycles=3_000_000_000, timeout=600)
+        raw, log, _ = _v3_run_sd(config, input_text, **run)
+        out = raw.replace("\r", "")
+        # 2. 大きすぎる: mount とディレクトリだけ読んで「?」。$0100 の目印は残る
+        assert _dos(out, "TOOBIG.COM") == "?\n", f"{profile}: $6F01 bytes must be rejected: {out[-600:]!r}"
+        start, stop = _segment(raw, PROMPT + "TOOBIG.COM")
+        reads = _reads(log, start, stop)
+        assert 1 <= len(reads) <= 3, f"{profile}: TOOBIG.COM must not read the file data: {reads}"
+        assert _reads(log, start, stop, system_only=True) == [], f"{profile}: TOOBIG.COM reloaded the system"
+        marks = [_dump_bytes(_after(out[m.start():], ""), COM_MARK_ADDR)[0]
+                 for m in re.finditer(rf"\] D{COM_MARK_ADDR:04X}-{COM_MARK_ADDR:04X}\n", out)]
+        assert marks[0] == COM_MARK, f"{profile}: TOOBIG.COM must not write the TPA: {marks}"
+        assert marks[1] == 0x39, f"{profile}: FOURK.COM should have been loaded: {marks}"
+        assert _dos(out, "FOURK.COM") == "", f"{profile}: FOURK.COM: {out[-600:]!r}"
+        # 1. 最大: 何も出さずに戻り、CCP のセクタだけを読み直す。続く DIR が動く
+        start, stop = _segment(raw, PROMPT + "BIG.COM")
+        assert raw[start:stop] == "\r\n", f"{profile}: BIG.COM should return silently: {raw[start:stop]!r}"
+        big_numbers = _numbers(log, start, stop)
+        system = _reads(log, start, stop, system_only=True)
+        assert system == sectors["ccp"], f"{profile}: BIG.COM should reload only the CCP: {system}"
+        assert "README.TXT A 00000013" in _dos(out, "DIR")
+        ccp = _dump_range_bytes(_after(out, f"] {ccp_dump}\n"), V3_CCP_BASE, 16)
+        assert bytes(ccp) == payload[:16], f"{profile}: CCP should be reloaded from SD: {ccp}"
+        assert "\n?\n" in out and out.count("\n?\n") == 1, f"{profile}: only TOOBIG.COM should fail: {out!r}"
+        assert out.count(WELCOME) == 1
+
+        start, stop = _segment(raw, PROMPT + "FOURK.COM")
+        fourk = _numbers(log, start, stop)
+        assert len(fourk) >= 6, f"{profile}: FOURK.COM reads: {fourk}"
+        # 3. 読み込みの 3 回目の CMD17 から失敗(mount 2 回とディレクトリ 1 回のあと)
+        cases = [
+            ("load 3rd read onward", dict(fail_from=fourk[3 + 2]), "FOURK.COM", 0x39, False),
+            # Issue の字面どおり「コマンドの頭から 3 回目」はディレクトリの読み出し(読み込み前、C=1 で戻る)
+            ("command 3rd read", dict(fail_from=fourk[2], fail_count=1), "FOURK.COM", COM_MARK, False),
+            # CCP の範囲を書いたあと(最後のデータのセクタ)で 1 回だけ失敗: WBOOT が CCP を読み直す
+            ("big last read", dict(fail_from=big_numbers[-len(sectors["ccp"]) - 1], fail_count=1), "BIG.COM", None, True),
+        ]
+        for label, kwargs, command, mark, reload in cases:
+            raw, log, _ = _v3_run_sd(config, input_text, **run, **kwargs)
+            out = raw.replace("\r", "")
+            assert f"{PROMPT}{command}\n?\n{PROMPT}" in out, f"{profile} {label}: {out[-900:]!r}"
+            start, stop = _segment(raw, PROMPT + command)
+            system = _reads(log, start, stop, system_only=True)
+            if reload:
+                assert system == sectors["ccp"], f"{profile} {label}: should reload the CCP: {system}"
+                failed = [lba for n, lba, r1, _tx in log if r1 != 0]
+                assert len(failed) == 1, f"{profile} {label}: one failed read: {failed}"
+                assert "README.TXT A 00000013" in _dos(out, "DIR"), f"{profile} {label}: DIR after reload"
+            else:
+                assert system == [], f"{profile} {label}: CCP is intact, no reload: {system}"
+                marks = [_dump_bytes(_after(out[m.start():], ""), COM_MARK_ADDR)[0]
+                         for m in re.finditer(rf"\] D{COM_MARK_ADDR:04X}-{COM_MARK_ADDR:04X}\n", out)]
+                assert marks[1] == mark, f"{profile} {label}: $0100 = {marks[1]:02X}, want {mark:02X}"
+                assert _dump_bytes(_after(out, f"] D{pending:04X}-{pending:04X}\n"), pending) == [0], (
+                    f"{profile} {label}: the warm entry should clear PENDING_ERR"
+                )
+            assert out.count(f"{PROMPT}{command}\n?\n") == 1, f"{profile} {label}: '?' should be shown once"
+            assert out.count(WELCOME) == 1, f"{profile} {label}: no cold entry"
+    print("[PASS] test_com_max_size_runs_and_returns_through_reload")
+
+
+STREAM_RES = 0x0400
+STREAM_BUF = 0x0420
+STREAM_LOAD = 0x0500
+README = b"HELLO FROM README\r\n"
+
+
+def _stream_com(tmp: Path) -> bytes:
+    """BIOS_GET_API で表を引き、slot 2〜6 を呼んで結果を STREAM_RES に残す .COM。"""
+    readme_len = len(README)
+    source = f"""
+        cpu     6800
+BIOS_GET_API equ $E0EC
+RES     equ ${STREAM_RES:04X}
+BUF     equ ${STREAM_BUF:04X}
+        org     $0100
+        jsr     BIOS_GET_API
+        ldx     $0C,x
+        ldaa    4,x
+        staa    VLOAD+1
+        ldaa    5,x
+        staa    VLOAD+2
+        ldaa    6,x
+        staa    VOPEN+1
+        ldaa    7,x
+        staa    VOPEN+2
+        ldaa    8,x
+        staa    VGETC+1
+        ldaa    9,x
+        staa    VGETC+2
+        ldaa    10,x
+        staa    VCLOSE+1
+        ldaa    11,x
+        staa    VCLOSE+2
+        ldaa    12,x
+        staa    VERR+1
+        ldaa    13,x
+        staa    VERR+2
+        ldx     #NAME
+        ldab    #NAME_END-NAME
+        jsr     VOPEN
+        tpa
+        staa    RES+0
+        ldx     #BUF
+        stx     PTR
+LOOP:   ldab    #$5A
+        ldx     PTR
+        jsr     VGETC
+        bcs     EOF
+        cmpb    #$5A
+        bne     BAD
+        cpx     PTR
+        bne     BAD
+        staa    0,x
+        inx
+        stx     PTR
+        bra     LOOP
+BAD:    ldaa    #$EE
+        staa    RES+15
+        rts
+EOF:    tpa
+        staa    RES+1
+        jsr     VERR
+        staa    RES+2
+        ldx     PTR
+        stx     RES+3
+        jsr     VCLOSE
+        jsr     VGETC
+        tpa
+        staa    RES+5
+        jsr     VERR
+        staa    RES+6
+        ldx     #MISSING
+        ldab    #MISSING_END-MISSING
+        jsr     VOPEN
+        tpa
+        staa    RES+7
+        jsr     VERR
+        staa    RES+8
+        ldx     #BLK1
+        jsr     VLOAD
+        tpa
+        staa    RES+9
+        stx     RES+10
+        ldx     #BLK2
+        jsr     VLOAD
+        tpa
+        staa    RES+12
+        jsr     VERR
+        staa    RES+13
+        ldx     #BLK3
+        jsr     VLOAD
+        tpa
+        staa    RES+14
+        jsr     VERR
+        staa    RES+15
+        rts
+VLOAD:  jmp     $0000
+VOPEN:  jmp     $0000
+VGETC:  jmp     $0000
+VCLOSE: jmp     $0000
+VERR:   jmp     $0000
+PTR:    fdb     0
+NAME:   fcc     "/HELLO.S"
+NAME_END:
+MISSING: fcc    "MISSING.S"
+MISSING_END:
+RNAME:  fcc     "README.TXT"
+RNAME_END:
+; LOAD_PATH bit0=0: exact fit / one byte short / limit above MEMTOP
+BLK1:   fdb     RNAME
+        fcb     RNAME_END-RNAME
+        fdb     ${STREAM_LOAD:04X}
+        fdb     ${STREAM_LOAD + readme_len - 1:04X}
+        fcb     0
+        fdb     0
+        fcb     0
+BLK2:   fdb     RNAME
+        fcb     RNAME_END-RNAME
+        fdb     ${STREAM_LOAD:04X}
+        fdb     ${STREAM_LOAD + readme_len - 2:04X}
+        fcb     0
+        fdb     0
+        fcb     0
+BLK3:   fdb     RNAME
+        fcb     RNAME_END-RNAME
+        fdb     ${V3_MEMTOP - 0x0F:04X}
+        fdb     ${V3_MEMTOP + 1:04X}
+        fcb     0
+        fdb     0
+        fcb     0
+        end
+"""
+    return _assemble_source(tmp, "STREAM", source)
+
+
+def test_read_stream_api_from_com() -> None:
+    """シナリオ 4: .COM から slot 3〜5 で HELLO.S を 1 バイトずつ読め、終わりで C=1・GET_ERROR = 0。
+    CLOSE のあとの GETC と、見つからない OPEN は C=1 とコード。LOAD_PATH(bit0 = 0)は戻る。"""
+    for profile in V3_PROFILES:
+        config = _v3(profile)
+        symbols = config["symbols"]
+        hello = _srec_file(0x0200, b"S")
+        with _temporary_directory() as tmp:
+            stream = _stream_com(Path(tmp))
+        assert len(stream) < STREAM_RES - 0x0100, "STREAM.COM overlaps its result area"
+        sd_image = _build_sdfs3sys_fat_sd_image(
+            config["sdfs3sys"],
+            [_file("HELLO.S", hello), _file("README.TXT", README), _file("STREAM.COM", stream)],
+        )
+        out = _v3_run(
+            config,
+            "BOOT3\rSTREAM.COM\rDIR\r\r",
+            sd_image=sd_image,
+            dump_range=f"{STREAM_RES:04X}-{STREAM_LOAD + 0x3F:04X}",
+        )
+        assert _dos(out, "STREAM.COM") == "", f"{profile}: STREAM.COM: {out[-600:]!r}"
+        assert "README.TXT" in _dos(out, "DIR"), f"{profile}: DOS after STREAM.COM"
+        # 終了時のダンプは DOS のプロンプトの直後に続くので、最後の「0400 」から読む
+        dump = out[out.rindex(f"{STREAM_RES:04X} ") :]
+        res = _dump_range_bytes(dump, STREAM_RES, 16)
+        buf = bytes(_dump_range_bytes(dump, STREAM_BUF, len(hello)))
+        loaded = bytes(_dump_range_bytes(dump, STREAM_LOAD, len(README)))
+        c = lambda cc: cc & 0x01  # noqa: E731
+        assert c(res[0]) == 0, f"{profile}: OPEN HELLO.S should succeed: {res}"
+        assert buf == hello, f"{profile}: GETC bytes differ: {buf!r} != {hello!r}"
+        assert c(res[1]) == 1 and res[2] == 0, f"{profile}: EOF should be C=1 and GET_ERROR=0: {res}"
+        assert (res[3] << 8 | res[4]) == STREAM_BUF + len(hello), f"{profile}: byte count: {res}"
+        assert c(res[5]) == 1 and res[6] == 9, f"{profile}: GETC after CLOSE should be C=1, code 9: {res}"
+        not_found = symbols["SDFS3_ERR_NOT_FOUND"]
+        assert c(res[7]) == 1 and res[8] == not_found, f"{profile}: missing OPEN should be C=1, code 4: {res}"
+        assert c(res[9]) == 0 and (res[10] << 8 | res[11]) == STREAM_LOAD + len(README), (
+            f"{profile}: LOAD_PATH without exec should return C=0 and X=end+1: {res}"
+        )
+        assert loaded == README, f"{profile}: LOAD_PATH data: {loaded!r}"
+        assert c(res[12]) == 1 and res[13] == 8, f"{profile}: LOAD_PATH one byte short should be code 8: {res}"
+        assert c(res[14]) == 1 and res[15] == 8, f"{profile}: LOAD_PATH above MEMTOP should be code 8: {res}"
+        assert "\n?\n" not in out, f"{profile}: nothing should fail: {out!r}"
+    print("[PASS] test_read_stream_api_from_com")
+
+
 def main() -> None:
     print("=" * 50)
     print("SDFS/68 v3 build tests")
@@ -3284,6 +3584,8 @@ def main() -> None:
         test_sdfs3_resident_image_unchanged_after_commands,
         test_sdfs3_init_clears_errors_and_warm_shows_pending,
         test_sdfs3_core_does_not_reference_ccp,
+        test_read_stream_api_from_com,
+        test_com_max_size_runs_and_returns_through_reload,
     ]
     passed = 0
     failed = 0

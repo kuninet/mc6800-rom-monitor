@@ -173,6 +173,7 @@ class SDCard:
         self.cmd17_count = 0
         self.cmd17_log = []          # (番号, LBA, R1, 送信済みバイト数)
         self.fail_cmd17_from = None  # この番号以降の CMD17 を R1 エラーにする(SD を抜いた代わり)
+        self.fail_cmd17_count = None  # fail_cmd17_from から何回失敗させるか(None なら以降すべて。#315)
         self.swap_image = None       # この番号の CMD17 からイメージを差し替える(カードの差し替え)
         self.swap_at = None
         self.fail_cmd0_after = None  # CMD17 がこの回数済んだあとの CMD0 を R1 エラーにする(#307)
@@ -236,7 +237,9 @@ class SDCard:
                 self.image = self.swap_image
                 self.swap_image = None
             tx = self.tx_counter() if self.tx_counter is not None else 0
-            if self.fail_cmd17_from is not None and number >= self.fail_cmd17_from:
+            if (self.fail_cmd17_from is not None and number >= self.fail_cmd17_from
+                    and (self.fail_cmd17_count is None
+                         or number < self.fail_cmd17_from + self.fail_cmd17_count)):
                 self.cmd17_log.append((number, arg, 0x04, tx))
                 return [0x04]
             offset = arg * self.SECTOR_SIZE
@@ -1902,6 +1905,8 @@ def main():
                         help="CMD17 ごとに「番号 LBA R1 送信済みバイト数」を書くファイル")
     parser.add_argument("--sd-fail-cmd17-from", type=int,
                         help="N 回目(1 始まり)以降の CMD17 を R1 エラーにする(SD を抜いた代わり)")
+    parser.add_argument("--sd-fail-cmd17-count", type=int,
+                        help="--sd-fail-cmd17-from から N 回だけ失敗させる(一時的な読み出しの失敗)")
     parser.add_argument("--sd-swap-image",
                         help="--sd-swap-at の CMD17 から差し替える SD イメージ(カードの差し替え)")
     parser.add_argument("--sd-swap-at", type=int,
@@ -1911,6 +1916,8 @@ def main():
     parser.add_argument("--stack-watch",
                         help="モニタのスタックの下限(16 進)。lds/txs でこれ以上になった区間の最小 SP を出す")
     args = parser.parse_args()
+    if args.sd_fail_cmd17_count is not None and args.sd_fail_cmd17_from is None:
+        parser.error("--sd-fail-cmd17-count は --sd-fail-cmd17-from と一緒に指定する")
     if (args.sd_swap_image is None) != (args.sd_swap_at is None):
         parser.error("--sd-swap-image と --sd-swap-at は一緒に指定する")
 
@@ -1934,6 +1941,7 @@ def main():
     if sdcard is not None:
         sdcard.tx_counter = lambda: acia.tx_count
         sdcard.fail_cmd17_from = args.sd_fail_cmd17_from
+        sdcard.fail_cmd17_count = args.sd_fail_cmd17_count
         sdcard.fail_cmd0_after = args.sd_fail_cmd0_after
         if args.sd_swap_image is not None:
             with open(args.sd_swap_image, "rb") as f:
