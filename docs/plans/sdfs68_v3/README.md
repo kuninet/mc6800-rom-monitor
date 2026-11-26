@@ -44,3 +44,4 @@ v3 は、現行の `BOOT -> stage1 -> SDFS.BIN -> SDFS> ` 方式を単純に拡�
 | #314 | [issue-314_wboot_reload.md](issue-314_wboot_reload.md) | 戻り口の検査と静かな再ロードを ROM に入れ、BOOT3 を 1 回読みにする |
 | #301 | [issue-301_boot3_slots.md](issue-301_boot3_slots.md) | BOOT3 を system slot A/B と active marker 対応ローダへ拡張する |
 | #307 | [issue-307_boot3_error_codes.md](issue-307_boot3_error_codes.md) | BOOT3 と WBOOT の失敗要因を識別できるエラーコードを出す |
+| #317 | [issue-317_resident_bios_sd.md](issue-317_resident_bios_sd.md) | v3 resident の SD ドライバを ROM の BIOS 入口へ寄せる |
