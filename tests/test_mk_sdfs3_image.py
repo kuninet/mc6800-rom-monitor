@@ -27,6 +27,7 @@ from mk_sdfs3_image import (  # noqa: E402
     build_sdfs3_image,
     file_from_spec,
     validate_system,
+    verify_layout,
 )
 from mk_sdfs_image import fat83_from_name  # noqa: E402
 
@@ -221,6 +222,39 @@ def test_file_specs_and_tools_dir() -> None:
     print("[PASS] test_file_specs_and_tools_dir")
 
 
+def test_verify_layout_rejects_broken_images() -> None:
+    """組み立てのあとの読み直し(verify_layout)は、区画が system 領域に入るイメージや、
+    marker・slot A・slot B・stage1 領域が置いたとおりでないイメージを拒否する。"""
+    system = _system()
+    image = build_sdfs3_image(system=system, files=_files(), total_volume_sectors=SMALL_VOLUME)
+    slot_a = image[SLOT_A_LBA * SECTOR_SIZE : SLOT_A_LBA * SECTOR_SIZE + len(system)]
+    marker = build_marker(0, 1)
+    verify_layout(image, slot_a, marker)
+
+    def broken(offset: int, value: bytes) -> bytes:
+        data = bytearray(image)
+        data[offset : offset + len(value)] = value
+        return bytes(data)
+
+    cases = {
+        "partition at 64": broken(446 + 8, (64).to_bytes(4, "little")),
+        "partition past the end": broken(446 + 12, (SMALL_VOLUME + 1).to_bytes(4, "little")),
+        "no 55AA": broken(510, b"\0\0"),
+        "marker": broken(MARKER_LBA * SECTOR_SIZE + 40, b"\1"),
+        "slot A": broken(SLOT_A_LBA * SECTOR_SIZE + 100, b"\xAA"),
+        "slot A tail": broken(SLOT_A_LBA * SECTOR_SIZE + len(system), b"\1"),
+        "slot B": broken(SLOT_B_LBA * SECTOR_SIZE + 5, b"\1"),
+        "stage1 area": broken(16 * SECTOR_SIZE, b"\1"),
+    }
+    for name, data in cases.items():
+        try:
+            verify_layout(data, slot_a, marker)
+        except ValueError:
+            continue
+        raise AssertionError(f"{name}: must be rejected")
+    print("[PASS] test_verify_layout_rejects_broken_images")
+
+
 def _cli(*args) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(TOOL), *(str(a) for a in args)],
@@ -237,6 +271,7 @@ def main() -> None:
         test_rejects_fat_overlapping_system_area,
         test_rejects_bad_system_images,
         test_file_specs_and_tools_dir,
+        test_verify_layout_rejects_broken_images,
     ]
     failed = 0
     for test in tests:

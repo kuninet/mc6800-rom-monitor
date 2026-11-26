@@ -18,7 +18,8 @@
 6. **重なりの検出**: `--fat-start` が 128 未満なら拒否する（MBR・stage1・marker・slot と重なる）。組み立てたあと MBR を読み直して区画の開始を確かめ、marker・slot A・空の slot B・空の stage1 領域が置いたとおりかも確かめる
 7. **ファイルの指定は `カード上のパス=ホストのパス`。** `=` がなければ `mk_sdfs_image.py` と同じく相対パスをそのまま使う。`--tools-dir` は `LOAD.COM`・`RUN.COM`・`XLDR.OVL` を `/BIN` に入れる（1 本でもなければエラー）
 8. **Makefile に `sdfs3-image` を足した。** 出力は `build/SDFS3SD<suffix>.img`。中身はルートの `README.TXT`（`sdfs_tools/SDCARD.TXT` を CR LF にしたもの）・`HELLO.S`・`HELLO.COM`・`ARGS.COM` と `/BIN` の 3 本。`SDFS3_FAT_START`（既定 2048）で開始を変えられる
-9. **実カードへは書かない**（今までの方針どおり）。Windows の手順は、書き込みソフトの使い方と書き込み先の取り違えの注意を `docs/usage/sdfs68_system_sd.md` に書いた
+9. **`SDFS3_LOAD_BASE=$5000` の手順（Issue 本文の「削るもの」）は、`docs/testing/k6802_sdfs3_via_v2_bringup.md` に案 B より前の記録として残し、冒頭の注記に「今のビルドでは使えない」と新しいカードの作り方への参照を足した。** 今の使い方の文書（`docs/usage`）にはこの手順はもう無い
+10. **実カードへは書かない**（今までの方針どおり）。Windows の手順は、書き込みソフトの使い方と書き込み先の取り違えの注意を `docs/usage/sdfs68_system_sd.md` に書いた
 
 ## 配置
 
@@ -34,7 +35,7 @@ physical LBA
 
 ## 検証
 
-- `tests/test_mk_sdfs3_image.py`（エミュレータなし）: marker のバイト列と和、slot A の世代 1 と和（変わるのは `+$18`・`+$1C` の 4 バイトだけ）、slot B と LBA 1〜47 が 0、MBR の区画の開始（2048・128）。既定のイメージは 65525 クラスタ以上で、同じ入力から同じバイト列。`--fat-start` 0・1・16・47・48・64・95・96・127 は拒否（CLI は終了コード 2 で、出力を作らない）、128 は通る。壊れた `SDFS3SYS`（magic、和、header version、API major 1、flags、load の範囲、16385 バイト、`SDFS3API`、切り詰め）は拒否し、16384 バイトちょうどは通る。`カード上のパス=` と `--tools-dir`（足りなければエラー）
+- `tests/test_mk_sdfs3_image.py`（エミュレータなし）: marker のバイト列と和、slot A の世代 1 と和（変わるのは `+$18`・`+$1C` の 4 バイトだけ）、slot B と LBA 1〜47 が 0、MBR の区画の開始（2048・128）。既定のイメージは 65525 クラスタ以上で、同じ入力から同じバイト列。`--fat-start` 0・1・16・47・48・64・95・96・127 は拒否（CLI は終了コード 2 で、出力を作らない）、128 は通る。壊れた `SDFS3SYS`（magic、和、header version、API major 1、flags、load の範囲、16385 バイト、`SDFS3API`、切り詰め）は拒否し、16384 バイトちょうどは通る。`カード上のパス=` と `--tools-dir`（足りなければエラー）。組み立てのあとの読み直しは、区画の開始が 64、区画がイメージの末尾を越える、55AA がない、marker・slot A・slot A の後ろ・slot B・stage1 領域に 1 バイトでも違いがあるイメージを拒否する
 - `tests/test_sdfs68_v3_build.py`（sbcio_vdg・k6802_vdg）
   - `test_sd_image_tool_boots_and_runs_dos_commands`: `make sdfs3-image`（2048）と `--fat-start 128` のカードで、`BOOT3`→`DIR`→`DIR /BIN`→`TYPE README.TXT`→`LOAD HELLO.S`→`RUN HELLO.S`→`DOS`→`HELLO.COM`→`HELLO`→`ARGS AAA BBB` が通る。`BOOT3` は 48 と slot A の 9 セクタだけを読み、`BB_SLOT_LBA` = 64。marker と slot A は、テストの `_marker(0)`・`_slot_image(config, 1)` とバイト単位で一致する
   - `test_sd_image_tool_first_update_survives_marker_loss`: 生成したカードの 96 に世代 2 の slot B を置き、48 を 0 にする（最初の更新で marker の書き込みが途中で切れた状態）と、48・64・96 のあと B から起動する
