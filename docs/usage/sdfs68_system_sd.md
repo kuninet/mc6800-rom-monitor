@@ -208,8 +208,8 @@ python3 tools/mk_sdfs3_image.py --system build/SDFS3SYS-k6802-vdg.BIN --output s
 
 ```text
 ] BOOT3
-SDFS/68 V3 02.00
-BASE=6C00 END=7Dxx
+SDFS/68 V3 02.01
+BASE=6C00 END=7Cxx
 SDFS3> DIR
 README.TXT A 000000A2
 HELLO.S A 0000008C
