@@ -44,12 +44,12 @@ flowchart TD
 v3 は `sbcio_vdg` と `k6802_vdg` で作る。4000 work 構成（`sbcio_4000`・`k6802_4000`）は v2 専用で、`make sdfs3sys` はエラーで止まる（#310 の決定 11）。`SDFS3_LOAD_BASE` などの上書きは要らない（#313 で仕組みを消した）。
 
 ```console
-make bin sdfs3sys MONITOR_PROFILE=k6802_vdg
+make bin sdfs3-image MONITOR_PROFILE=k6802_vdg
 ```
 
-`build/SDFS3SYS-k6802-vdg.BIN` を SD の physical LBA `64` に置き、FAT32 partition を LBA `128` 以降に置く。
+`build/SDFS3SD-k6802-vdg.img` が v3 の system SD イメージである。作り方と中身は下の「v3 の system SD イメージ生成」、実カードへの書き方は「Windows での実機確認」を参照する。
 
-LOAD と RUN は `.COM` なので、`build/LOAD.COM`・`build/RUN.COM`・`build/XLDR.OVL`（`make sdfs-tools` で作る。プロファイルによらず 1 本）を FAT の `/BIN` に入れる（#316）。
+LOAD と RUN は `.COM` なので、`build/LOAD.COM`・`build/RUN.COM`・`build/XLDR.OVL`（`make sdfs-tools` で作る。プロファイルによらず 1 本）を FAT の `/BIN` に入れる（#316）。`make sdfs3-image` はこの 3 本を `/BIN` に入れる。
 
 ```text
 ] BOOT3
@@ -149,14 +149,92 @@ python tools\mk_sdfs_image.py --stage1 STAGE1.BIN --sdfs SDFS.BIN --output sdfs.
 
 - FAT32 形式の SDイメージファイル。
 - partition開始前の physical LBA `16` 以降にstage1 loaderを配置する。
-- v3 `BOOT3` 用に physical LBA `64` 以降へ `SDFS3SYS` を配置する（system slot A。marker と slot B は書かない。`BOOT3` は marker のないカードを slot A から起動する。#301）。
 - v2/stage1だけのSDではFAT32 partitionを physical LBA `32` から開始できる。
-- `BOOT3` 用の `SDFS3SYS` を同居させるv3 system SDでは、system領域と重ならないようにFAT32 partitionを physical LBA `128` 以降から開始する。
+- v3 の `BOOT3` 用のカードは、このツールではなく `tools/mk_sdfs3_image.py` で作る（下の「v3 の system SD イメージ生成」）。
 - 既定出力はホストOSがFAT32として扱えるクラスタ数を持つ。
 - root directory に `SDFS.BIN` を配置し、相対パス付きの指定ファイルは対応するサブディレクトリに配置する。
 - テスト用には小さい決定的イメージを生成できるようにする。
 
 stage1 boot area は FAT32 reserved sector ではない。ROMはFATを見ずに physical LBA `16` からstage1を読み、stage1がFAT rootの `SDFS.BIN` を読む。
+
+## v3 の system SD イメージ生成
+
+v3（案 B）の `BOOT3` 用のカードは `tools/mk_sdfs3_image.py` で作る（#299）。配置は #300（[issue-300_system_slot_layout.md](../plans/sdfs68_v3/issue-300_system_slot_layout.md)）に従う。
+
+| physical LBA | 中身 |
+| ---: | --- |
+| `0` | MBR。区画 1 が FAT32（type `0C`）で、開始は `--fat-start` |
+| `16` - `47` | `0`（v2 の stage1 用に予約。FAT には割り当てない） |
+| `48` | active marker。`active_slot` = A、`marker_generation` = 1 |
+| `64` - `95` | system slot A。`SDFS3SYS` の `slot_generation`（`+$1C`）を 1 にして和を付け直したもの |
+| `96` - `127` | `0`（system slot B。PC 側の slot 更新 `tools/sdfs3_slot_update.py`（#302）の最初の書き込み先） |
+| `--fat-start` 以降 | FAT32。既定は LBA `2048`。`/BIN` に `LOAD.COM`・`RUN.COM`・`XLDR.OVL`、ルートにサンプル |
+
+`BOOT3` は marker（48）と slot A だけを読んで起動する。slot A を世代 1 にしておくのは、最初の slot 更新（slot B に世代 2）の途中で marker が壊れても、ROM が世代を比べて新しい slot B を選べるようにするためである（世代 0 のままだと世代を比べず slot A に戻る）。
+
+Makefile から作る:
+
+```console
+make bin sdfs3-image MONITOR_PROFILE=k6802_vdg
+make sdfs3-image MONITOR_PROFILE=k6802_vdg SDFS3_FAT_START=128
+```
+
+出力は `build/SDFS3SD-k6802-vdg.img`（`sbcio_vdg` なら `build/SDFS3SD-sbcio-vdg.img`）。中身はルートの `README.TXT`・`HELLO.S`・`HELLO.COM`・`ARGS.COM` と、`/BIN` の `LOAD.COM`・`RUN.COM`・`XLDR.OVL`。既定の大きさは 35,123,712 バイト（約 33.5MiB）で、ホストの OS が FAT32 として読めるクラスタ数を持つ。`SDFS3_FAT_START=128` は、FAT32 が LBA `128` から始まる今までのカードと同じ配置にする（#310 の決定 12）。
+
+ツールを直に使う:
+
+```console
+python3 tools/mk_sdfs3_image.py --system build/SDFS3SYS-k6802-vdg.BIN --output sdfs3.img --tools-dir build HELLO.S=build/HELLO.S BIN/HELLO.COM=build/HELLO.COM
+```
+
+- `--system`: `make sdfs3sys` の `SDFS3SYS`。ROM の `BOOT3` と同じ条件（magic、API major 2、load の範囲、`SDFS3API`、和、16384 バイト以下）で検査し、通らなければ止まる
+- `--fat-start`: FAT32 の開始 LBA。既定 `2048`。`128` 未満は system 領域（MBR・stage1・marker・slot A/B）と重なるので拒否する
+- `--tools-dir`: そのディレクトリの `LOAD.COM`・`RUN.COM`・`XLDR.OVL` を `/BIN` に入れる。1 本でもなければ止まる
+- 位置引数: `カード上のパス=ホストのパス`。`=` がなければ、ホストの相対パスをそのままカード上のパスにする（`mk_sdfs_image.py` と同じ）。名前は 8.3
+
+エラーは終了コード 2（入力の誤り）か 1（ファイルの読み書き）で、出力ファイルは作らない。
+
+## Windows での実機確認
+
+イメージをカードへ書くのは、ツールではなく Windows のイメージ書き込みソフトで行う。カードの中身はすべて消える。
+
+1. Windows で `make bin sdfs3-image MONITOR_PROFILE=k6802_vdg PYTHON=python ASL_INCLUDE_ARG="build;include;src"` を実行する（`sbcio_vdg` なら `MONITOR_PROFILE=sbcio_vdg`）。`build\SDFS3SD-k6802-vdg.img` ができる
+2. ROM は同じプロファイルの `build\mc6800-monitor-k6802-vdg.bin` を焼く（[build_commands.md](build_commands.md) の `rombin`・`program`）
+3. SD カードを PC に挿す。**ほかの USB メモリや外付けディスクは外しておく**
+4. エクスプローラーと「ディスクの管理」（`diskmgmt.msc`）で、SD カードのドライブ文字と**ディスク番号**、容量を確かめる。容量がカードと合わないディスクは選ばない
+5. Win32 Disk Imager や Rufus などのイメージ書き込みソフトで、`SDFS3SD-k6802-vdg.img` を**手順 4 で確かめた SD カード**に書く。書き込み先の一覧にディスクが複数あるときは、容量とドライブ文字で SD カードを選び直す。書き込み先を取り違えると、そのディスクの中身が消える
+6. 書き終わると、Windows が「フォーマットしますか」と聞くことがある。**フォーマットしない**（「キャンセル」）。区画は FAT32 なので、エクスプローラーで `README.TXT` などが見えるはず
+7. 取り出してから実機に挿し、ROM の `] ` で次を打つ
+
+```text
+] BOOT3
+SDFS/68 V3 02.00
+BASE=6C00 END=7Dxx
+SDFS3> DIR
+README.TXT A 000000A2
+HELLO.S A 0000008C
+HELLO.COM A 00000020
+ARGS.COM A 0000003E
+BIN D 00000000
+SDFS3> LOAD HELLO.S
+OK
+SDFS3> RUN HELLO.S
+
+HELLO SREC
+
+BRK 0206 A=00 B=00 X=0220 SP=BF7D CC=D4
+] DOS
+SDFS3> HELLO.COM
+
+HELLO COM
+SDFS3>
+```
+
+（`END=` は resident の末尾の番地で、版によって変わる。ファイルの大きさと `SP=` はビルドとプロファイルで変わる。`sbcio_vdg` は `SP=DF7D`）
+
+- エクスプローラーでカードにファイルを足せるかは、まだ実機で確かめていない（#318）。足すときも `/BIN` の 3 本は消さない。フォーマットすると FAT の中身（`/BIN` を含む）が消え、SD Card Formatter などで区画から作り直すと system 領域（marker と slot A）も消えることがある。どちらもイメージを書き直せば戻る
+- `SDFS3SYS` だけを差し替えるときは、イメージを作り直して書き直すか、イメージに `tools/sdfs3_slot_update.py`（#302）をかけて非 active の slot を更新してから書く
+- `BOOT3` が `?` とコードを出したときは [monitor_commands.md](monitor_commands.md) の「BOOT3 と DOS のエラーコード」を見る
 
 ## 実SDカードへの書き込み
 

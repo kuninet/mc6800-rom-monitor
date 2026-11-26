@@ -1,6 +1,6 @@
 # K6802-SBC VDG環境でSDFS/68 v2からv3 residentを確認する手順
 
-> この手順は案 B より前（#291〜#298 時点）の記録である。#313 で ROM の `CMD <tail>` と `SDFS3_LOAD_BASE` の上書きはなくなり、v3 は `BOOT3` から DOS のプロンプト `SDFS3> ` に入る形に変わった。今の使い方は [../usage/sdfs68_system_sd.md](../usage/sdfs68_system_sd.md) の「SDFS/68 v3（案 B）の使い方」を、実機での確認は #318 を参照する。
+> この手順は案 B より前（#291〜#298 時点）の記録である。#313 で ROM の `CMD <tail>` と `SDFS3_LOAD_BASE` の上書きはなくなり、v3 は `BOOT3` から DOS のプロンプト `SDFS3> ` に入る形に変わった。今の使い方は [../usage/sdfs68_system_sd.md](../usage/sdfs68_system_sd.md) の「SDFS/68 v3（案 B）の使い方」を、カードの作り方は同じ文書の「v3 の system SD イメージ生成」と「Windows での実機確認」（#299）を、実機での確認は #318 を参照する。下のコマンド例（`SDFS3_LOAD_BASE=0x5000` など）は今のビルドでは使えない。
 
 ## 目的
 

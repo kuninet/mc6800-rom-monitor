@@ -109,6 +109,8 @@ ROM_CODE_LIMIT=0 make bin
 | SDFS/68本体 (k6802-16k) | `MONITOR_PROFILE=k6802_4000 make sdfs` | `build/SDFS-k6802-4000.BIN` |
 | SDFS/68 v3 resident system image | `MONITOR_PROFILE=sbcio_vdg make sdfs3sys` | `build/SDFS3SYS-sbcio-vdg.BIN` |
 | SDFS/68 v3 resident system image (k6802) | `MONITOR_PROFILE=k6802_vdg make sdfs3sys` | `build/SDFS3SYS-k6802-vdg.BIN` |
+| SDFS/68 v3 system SD イメージ | `MONITOR_PROFILE=sbcio_vdg make sdfs3-image` | `build/SDFS3SD-sbcio-vdg.img` |
+| SDFS/68 v3 system SD イメージ (k6802) | `MONITOR_PROFILE=k6802_vdg make sdfs3-image` | `build/SDFS3SD-k6802-vdg.img` |
 
 SDFS/68 v3（案 B）は `sbcio_vdg`・`k6802_vdg` だけで作る。4000 work 構成（`sbcio_4000`・`k6802_4000`）では `make sdfs3sys` がエラーで止まる（v2 専用。#310 の決定 11）。
 
@@ -122,6 +124,7 @@ SDFS/68 v3（案 B）は `sbcio_vdg`・`k6802_vdg` だけで作る。4000 work �
 | `make sdfs3sys` | system SD fixed system area | v3 residentを `SDFS3SYS` headerで包んだ固定LBA system image |
 | `tools/mk_sdfs_image.py` | ホストPC上の補助ツール | stage1、`SDFS.BIN`、利用者ファイルをまとめた system SD image を作る |
 | `tools/mk_sdfs3sys.py` | ホストPC上の補助ツール | v3 resident binaryに `SDFS3SYS` headerを付ける |
+| `make sdfs3-image` / `tools/mk_sdfs3_image.py` | ホストPC上の補助ツール | v3 の system SD image を作る。marker（LBA 48）、slot A（LBA 64）の `SDFS3SYS`、FAT32（既定 LBA 2048）の `/BIN` とサンプル（#299）。使い方は [sdfs68_system_sd.md](sdfs68_system_sd.md) |
 
 ## SDFS/68 stage1
 
