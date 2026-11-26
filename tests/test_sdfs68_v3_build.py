@@ -4019,6 +4019,104 @@ def test_autoexec_failures_show_one_error() -> None:
     print("[PASS] test_autoexec_failures_show_one_error")
 
 
+# ---------------------------------------------------------------------------
+# 生成ツール(#299): make sdfs3-image / tools/mk_sdfs3_image.py が作るカード
+# ---------------------------------------------------------------------------
+
+SD_IMAGE_COMMANDS = [
+    "DIR",
+    "DIR /BIN",
+    "TYPE README.TXT",
+    "LOAD HELLO.S",
+    "RUN HELLO.S",
+]
+SD_IMAGE_AFTER_SWI = ["HELLO.COM", "HELLO", "ARGS AAA BBB"]
+
+
+def _sd_image_tool(config: dict, fat_start: int) -> bytes:
+    """2048 は make sdfs3-image(Makefile の経路)で、それ以外はツールを直に呼んで作る。"""
+    build = PROJECT_ROOT / "build"
+    if fat_start == 2048:
+        _run_make(config["profile"], "sdfs3-image")
+        return (build / f"SDFS3SD{config['suffix']}.img").read_bytes()
+    TEMP_ROOT.mkdir(parents=True, exist_ok=True)
+    output = TEMP_ROOT / f"sdfs3sd-{uuid4().hex}.img"
+    try:
+        result = subprocess.run(
+            [
+                sys.executable, str(PROJECT_ROOT / "tools" / "mk_sdfs3_image.py"),
+                "--system", str(build / f"SDFS3SYS{config['suffix']}.BIN"),
+                "--output", str(output), "--fat-start", str(fat_start), "--tools-dir", str(build),
+                f"README.TXT={build / 'README.TXT'}", f"HELLO.S={build / 'HELLO.S'}",
+                f"HELLO.COM={build / 'HELLO.COM'}", f"ARGS.COM={build / 'ARGS.COM'}",
+            ],
+            capture_output=True, text=True, timeout=60,
+        )
+        assert result.returncode == 0, f"mk_sdfs3_image failed: {result.stderr}"
+        return output.read_bytes()
+    finally:
+        output.unlink(missing_ok=True)
+
+
+def test_sd_image_tool_boots_and_runs_dos_commands() -> None:
+    """受入基準: 生成ツールのカードで BOOT3 → DIR → LOAD HELLO.S → RUN HELLO.S → HELLO.COM が通る。
+    BOOT3 は marker(48)と slot A だけを読み(96 は読まない)、slot A から起動する。FAT32 の開始は
+    既定の 2048(make sdfs3-image)と、今のカードの 128(--fat-start 128)。"""
+    for profile in V3_PROFILES:
+        config = _v3(profile)
+        _run_make(profile, "sdfs3-image")  # build/README.TXT を作る
+        readme = (PROJECT_ROOT / "sdfs_tools" / "SDCARD.TXT").read_text(encoding="ascii")
+        for fat_start in (2048, 128):
+            image = _sd_image_tool(config, fat_start)
+            # 置いたもの: MBR の区画、marker、世代 1 の slot A、空の slot B と stage1 領域
+            assert int.from_bytes(image[446 + 8 : 446 + 12], "little") == fat_start
+            assert image[SDFS3MRK_LBA * SECTOR_SIZE : (SDFS3MRK_LBA + 1) * SECTOR_SIZE] == _marker(0)
+            slot_a = _slot_image(config, 1)
+            assert image[SLOT_A_LBA * SECTOR_SIZE : SLOT_A_LBA * SECTOR_SIZE + len(slot_a)] == slot_a
+            assert not any(image[SLOT_B_LBA * SECTOR_SIZE : SDFS3SYS_FAT_PARTITION_LBA * SECTOR_SIZE])
+            assert not any(image[16 * SECTOR_SIZE : SDFS3MRK_LBA * SECTOR_SIZE])
+            extra = "".join(f"{c}\r" for c in SD_IMAGE_COMMANDS) + "DOS\r" + "".join(f"{c}\r" for c in SD_IMAGE_AFTER_SWI)
+            raw, _log, boot_reads, slot_lba = _boot3_slot(config, image, extra)
+            out = raw.replace("\r", "")
+            where = f"{profile} fat={fat_start}"
+            assert boot_reads == [SDFS3MRK_LBA, *_system_sectors(config)["all"]], f"{where}: BOOT3 read {boot_reads}"
+            assert slot_lba == SLOT_A_LBA, f"{where}: BB_SLOT_LBA={slot_lba}"
+            assert out.count(WELCOME) == 1, f"{where}: {out[-800:]!r}"
+            root = _dos(out, "DIR")
+            for line in ("README.TXT A ", "HELLO.S A ", "HELLO.COM A ", "ARGS.COM A ", "BIN D "):
+                assert line in root, f"{where}: DIR missing {line!r}: {root!r}"
+            listing = _dos(out, "DIR /BIN")
+            assert all(f"{n} A " in listing for n in ("LOAD.COM", "RUN.COM", "XLDR.OVL")), f"{where}: {listing!r}"
+            typed = _dos(out, "TYPE README.TXT")
+            assert all(line in typed for line in readme.splitlines()), f"{where}: TYPE: {typed!r}"
+            assert _dos(out, "LOAD HELLO.S") == "OK\n", f"{where}: LOAD: {out[-800:]!r}"
+            ran = _after(out, PROMPT + "RUN HELLO.S\n")
+            assert re.match(r"\s*HELLO SREC\n+BRK 0206 ", ran), f"{where}: RUN HELLO.S: {ran[:200]!r}"
+            assert f"] DOS\n{PROMPT}HELLO.COM\n" in out, f"{where}: DOS after BRK"
+            assert "HELLO COM" in _dos(out, "HELLO.COM") and "HELLO COM" in _dos(out, "HELLO")
+            assert "ARGS AAA BBB" in _dos(out, "ARGS AAA BBB"), f"{where}: ARGS"
+            assert "\n?" not in out, f"{where}: no command should fail: {out!r}"
+    print("[PASS] test_sd_image_tool_boots_and_runs_dos_commands")
+
+
+def test_sd_image_tool_first_update_survives_marker_loss() -> None:
+    """#302 の残件: 生成したカードの slot A は世代 1。最初の更新で slot B(世代 2)を書いたあと
+    marker の書き込みが途中で切れても(48 が 0)、ROM は世代を比べて B から起動する。"""
+    for profile in V3_PROFILES:
+        config = _v3(profile)
+        image = bytearray(_sd_image_tool(config, 2048))
+        slot_b = _slot_image(config, 2, tag=SLOT_TAG)
+        image[SLOT_B_LBA * SECTOR_SIZE : SLOT_B_LBA * SECTOR_SIZE + len(slot_b)] = slot_b
+        image[SDFS3MRK_LBA * SECTOR_SIZE : (SDFS3MRK_LBA + 1) * SECTOR_SIZE] = bytes(SECTOR_SIZE)
+        raw, _log, boot_reads, slot_lba = _boot3_slot(config, bytes(image), "DIR\r")
+        out = raw.replace("\r", "")
+        want = [SDFS3MRK_LBA, SLOT_A_LBA, SLOT_B_LBA, *_system_sectors(config, SLOT_B_LBA)["all"]]
+        assert boot_reads == want, f"{profile}: BOOT3 read {boot_reads}, want {want}"
+        assert slot_lba == SLOT_B_LBA, f"{profile}: should boot slot B: BB_SLOT_LBA={slot_lba}"
+        assert "BIN D " in _dos(out, "DIR"), f"{profile}: {out[-600:]!r}"
+    print("[PASS] test_sd_image_tool_first_update_survives_marker_loss")
+
+
 def main() -> None:
     print("=" * 50)
     print("SDFS/68 v3 build tests")
@@ -4077,6 +4175,8 @@ def main() -> None:
         test_autoexec_absent_searches_quietly,
         test_autoexec_skipped_by_pending_key,
         test_autoexec_failures_show_one_error,
+        test_sd_image_tool_boots_and_runs_dos_commands,
+        test_sd_image_tool_first_update_survives_marker_loss,
     ]
     passed = 0
     failed = 0

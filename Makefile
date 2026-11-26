@@ -189,6 +189,11 @@ SDFS3_OBJ := $(OUTDIR)/$(SDFS3_TARGET).p
 SDFS3_LST := $(OUTDIR)/$(SDFS3_TARGET).lst
 SDFS3_BIN := $(OUTDIR)/$(SDFS3_TARGET).BIN
 SDFS3SYS_BIN := $(OUTDIR)/SDFS3SYS$(TARGET_SUFFIX).BIN
+# v3 の system SD イメージ(#299)。FAT32 の開始 LBA は #300 の既定 2048。128 にすると今のカードの配置
+SDFS3_FAT_START ?= 2048
+SDFS3_SD_IMG := $(OUTDIR)/SDFS3SD$(TARGET_SUFFIX).img
+SDFS3_SD_README_SRC := sdfs_tools/SDCARD.TXT
+SDFS3_SD_README := $(OUTDIR)/README.TXT
 SDFS_TOOLS_DIR := sdfs_tools
 SDFS_TOOL_HELLO_S_SRC := $(SDFS_TOOLS_DIR)/HELLO_S.ASM
 SDFS_TOOL_HELLO_COM_SRC := $(SDFS_TOOLS_DIR)/HELLO_COM.ASM
@@ -273,7 +278,7 @@ endif
 
 ASL_INCLUDE := $(CURDIR)/$(OUTDIR)$(ASL_PATHSEP)$(CURDIR)/include$(ASL_PATHSEP)$(CURDIR)/src
 
-.PHONY: all clean bin test check-rom-size srec ihex stage1 sdfs sdfs3 sdfs3sys sdfs-tools sdfs-tools-srec sdfs-tools-com check-stage1-config check-sdfs3-config rombin rombin-27c64 rombin-27c128 rombin-27c256 rombin-28c256 rombin-w27c512 program verify readback program-27c64 program-27c128 program-27c256 program-28c256 program-w27c512 program-upd28c256 FORCE
+.PHONY: all clean bin test check-rom-size srec ihex stage1 sdfs sdfs3 sdfs3sys sdfs3-image sdfs-tools sdfs-tools-srec sdfs-tools-com check-stage1-config check-sdfs3-config rombin rombin-27c64 rombin-27c128 rombin-27c256 rombin-28c256 rombin-w27c512 program verify readback program-27c64 program-27c128 program-27c256 program-28c256 program-w27c512 program-upd28c256 FORCE
 
 all: check-rom-size srec ihex
 
@@ -308,6 +313,7 @@ test:
 	"$(PYTHON)" tests/test_stage1_build.py
 	"$(PYTHON)" tests/test_mk_sdfs_image.py
 	"$(PYTHON)" tests/test_sdfs3_slot_update.py
+	"$(PYTHON)" tests/test_mk_sdfs3_image.py
 
 stage1: check-stage1-config $(STAGE1_BIN)
 
@@ -347,6 +353,16 @@ $(SDFS3_LST): $(SDFS3_OBJ)
 
 $(SDFS3SYS_BIN): $(SDFS3_BIN) $(SDFS3_LST) tools/mk_sdfs3sys.py
 	"$(PYTHON)" tools/mk_sdfs3sys.py --input "$(SDFS3_BIN)" --listing "$(SDFS3_LST)" --output "$(SDFS3SYS_BIN)"
+
+sdfs3-image: check-sdfs3-config $(SDFS3_SD_IMG)
+
+# SDFS3SYS を slot A に、LOAD.COM・RUN.COM・XLDR.OVL を /BIN に、サンプルをルートに置く
+$(SDFS3_SD_IMG): FORCE $(SDFS3SYS_BIN) $(SDFS_TOOL_COM) $(SDFS_TOOL_SREC) $(SDFS3_SD_README) tools/mk_sdfs3_image.py tools/fat32_image.py
+	"$(PYTHON)" tools/mk_sdfs3_image.py --system "$(SDFS3SYS_BIN)" --output "$(SDFS3_SD_IMG)" --fat-start $(SDFS3_FAT_START) --tools-dir "$(OUTDIR)" "README.TXT=$(SDFS3_SD_README)" "HELLO.S=$(SDFS_TOOL_HELLO_S)" "HELLO.COM=$(SDFS_TOOL_HELLO_COM)" "ARGS.COM=$(SDFS_TOOL_ARGS_COM)"
+
+# カードの README は CR LF にする(TYPE はそのまま出す)
+$(SDFS3_SD_README): $(SDFS3_SD_README_SRC) | $(OUTDIR)
+	"$(PYTHON)" -c "from pathlib import Path; Path('$@').write_bytes(Path('$<').read_bytes().replace(b'\r\n', b'\n').replace(b'\n', b'\r\n'))"
 
 sdfs-tools: sdfs-tools-srec sdfs-tools-com
 
