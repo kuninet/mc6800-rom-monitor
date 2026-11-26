@@ -239,6 +239,28 @@ SDFS/68 v3（案 B）では、このABIのうち次が変わる。それ以外�
 | プロンプト | `SDFS> ` | `SDFS3> ` |
 | LOAD・RUN | 内蔵コマンド | `/BIN/LOAD.COM`・`RUN.COM` + `XLDR.OVL`（`$6800`）。S-record の書き込み範囲は `$0000-$67FF`。`LOAD` のあとの `RUN addr` は `$0100-$014F`（推測）を上書きするので、`$0100` から始まるプログラムは `RUN file` かモニタの `G` で起動する（決定 6） |
 
+### v3 のファイル API（slot 2〜5、#315）
+
+`.COM` は `BIOS_GET_API`（`$E0EC`、C=0 なら X = SDFS3API ヘッダ）で核を見つけ、ヘッダ `+$0C` のジャンプテーブルの `slot × 2` の番地を呼ぶ。どれも C=1 が失敗で、理由は slot 6 `GET_ERROR` の A で取る。
+
+| Slot | 名前 | 入力 | 出力 |
+| ---: | --- | --- | --- |
+| 2 | `LOAD_PATH` | X → `{path(2), path_len(1), load(2), limit(2), flags(1), argptr(2), arg_len(1)}` | 下を参照 |
+| 3 | `READ_STREAM_OPEN` | X = パス、B = 長さ | C=0 で取っ手が開く |
+| 4 | `READ_STREAM_GETC` | ― | A = 1 バイト（B と X は保つ）。終わりで C=1・`GET_ERROR` = 0 |
+| 5 | `READ_STREAM_CLOSE` | ― | C=0 |
+
+- `LOAD_PATH` はファイルを `load`〜`limit`（`limit` を含む）に読む。ブロックは最初に写すので、読み込み先に重なってもよい
+  - `limit` は `GET_MEMTOP`（`$6FFF`）以下。越えると読み込まずにコード 8（核と窓を潰さないため）
+  - 読み込みを始める前の失敗は C=1 で戻る（見つからない 4、SD 3、空・入らない 8）
+  - **読み込みの途中の失敗は戻らない。** flags によらず、`GET_ERROR` と `SDFS3_PENDING_ERR` に 3 を入れて ROM の WBOOT へ飛ぶ。呼び手のプログラムや CCP が潰れているかもしれないからである。WBOOT は壊れた区画を読み直し、CCP の warm 入口が `?` を 1 回出す
+  - flags bit0 が 1 なら、読み終えたら `BIOS_EXEC`（entry = `load`、X = `argptr`、B = `arg_len`）で起動して戻らない。CCP の `.COM` の起動はこれ（`load` = `$0100`、`limit` = `$6FFF`）
+  - flags bit0 が 0 なら C=0、`GET_ERROR` = 0、X = 読み込んだ末尾の次の番地
+- 取っ手は 1 本。`LOAD_PATH` と `OPEN` は前の取っ手を閉じる。CCP の warm 入口も閉じるので、取っ手は次のプログラムへ持ち越さない
+- `LOAD_PATH` と `OPEN` は、頭で FAT32 を mount し直す。`GETC` は mount しない（読みかけの位置を保つため）
+- `GETC` は、開いていない取っ手ではコード 9、SD の失敗ではコード 3 で C=1
+- エラーコード: 1 未実装、2 コマンド不正、3 SD・FAT、4 見つからない、5 LOAD、6 RUN、7 `.COM` の指定不正、8 大きすぎる・空、9 取っ手が開いていない
+
 ## 関連ドキュメント
 
 - [sdfs68_system_sd.md](../usage/sdfs68_system_sd.md): SDFS/68 の利用方針と現行コマンド。
