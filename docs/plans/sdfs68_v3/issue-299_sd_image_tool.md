@@ -13,7 +13,7 @@
 1. **新しいツール `tools/mk_sdfs3_image.py` にした。** `mk_sdfs_image.py`（v2）は `--stage1`・`--sdfs` が必須で、v3 のカードには要らない。FAT32 の組み立て（`fat32_image.py`）と 8.3 名の変換（`mk_sdfs_image.fat83_*`）は使い回した
 2. **v2 の stage1・`SDFS.BIN` の同居は入れなかった。** 案 B の本文にない。LBA 16〜47 は 0 のまま、FAT にも割り当てない（#300）
 3. **slot A を世代 1 にして和を付け直し、LBA 48 に marker（active=A、marker 世代 1）を書く。slot B は 0 のまま。** 空の slot B は magic 不一致で無効になり、#302 の最初の更新先になる
-4. **marker の組み立てと `SDFS3SYS` の検査は、このツールにも持った。** #302（PR #328）がまだマージされていない。関数名と定数名は #302 の `sdfs3_slot_update.py` とそろえた（`build_marker`、`validate_system`、`MARKER_LBA` など）。#302 のマージ後に片方へ寄せる
+4. **marker の組み立てと `SDFS3SYS` の検査は、このツールにも持った。** 作った時点では #302（PR #328）がまだマージされていなかった。関数名と定数名は #302 の `sdfs3_slot_update.py` とそろえた（`build_marker`、`validate_system`、`MARKER_LBA` など）。#302 は main に入ったので、片方へ寄せるのは残件
 5. **入力の `SDFS3SYS` を ROM の `BOOT3` と同じ厳しさで検査する**（magic、header version 1、API major 2、flags = 1、header size `$20`、大きさ 33〜16384、`$4000 ≦ load`・`load + payload ≦ $8000`、`+$12` の先の `SDFS3API` と major 2、和）。起動できないカードを PC 側で止める
 6. **重なりの検出**: `--fat-start` が 128 未満なら拒否する（MBR・stage1・marker・slot と重なる）。組み立てたあと MBR を読み直して区画の開始を確かめ、marker・slot A・空の slot B・空の stage1 領域が置いたとおりかも確かめる
 7. **ファイルの指定は `カード上のパス=ホストのパス`。** `=` がなければ `mk_sdfs_image.py` と同じく相対パスをそのまま使う。`--tools-dir` は `LOAD.COM`・`RUN.COM`・`XLDR.OVL` を `/BIN` に入れる（1 本でもなければエラー）
@@ -45,6 +45,6 @@ ROM、`SDFS3SYS`、`.COM`、`XLDR.OVL` は変えていない（#316 のビルド
 
 ## 後続への引き継ぎ
 
-- #302 がマージされたら、marker の組み立てと `SDFS3SYS` の検査を `sdfs3_slot_update.py` と共有する
+- #302 は main に入った。marker の組み立てと `SDFS3SYS` の検査を `sdfs3_slot_update.py` と共有するのは残件
 - #304（AUTOEXEC.COM）: `sdfs3-image` にサンプルの `AUTOEXEC.COM` を入れるかは #304 で決める
 - #318（実機確認）: FAT32 が LBA 2048 から始まるカードを実機で読めるか。Windows の書き込み手順（`docs/usage/sdfs68_system_sd.md`）を実際のカードで試す

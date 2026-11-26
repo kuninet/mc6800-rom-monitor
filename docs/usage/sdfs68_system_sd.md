@@ -167,7 +167,7 @@ v3（案 B）の `BOOT3` 用のカードは `tools/mk_sdfs3_image.py` で作る�
 | `16` - `47` | `0`（v2 の stage1 用に予約。FAT には割り当てない） |
 | `48` | active marker。`active_slot` = A、`marker_generation` = 1 |
 | `64` - `95` | system slot A。`SDFS3SYS` の `slot_generation`（`+$1C`）を 1 にして和を付け直したもの |
-| `96` - `127` | `0`（system slot B。PC 側の slot 更新（#302 の `tools/sdfs3_slot_update.py`。PR #328 のマージ後に使える）の最初の書き込み先） |
+| `96` - `127` | `0`（system slot B。PC 側の slot 更新 `tools/sdfs3_slot_update.py`（#302）の最初の書き込み先） |
 | `--fat-start` 以降 | FAT32。既定は LBA `2048`。`/BIN` に `LOAD.COM`・`RUN.COM`・`XLDR.OVL`、ルートにサンプル |
 
 `BOOT3` は marker（48）と slot A だけを読んで起動する。slot A を世代 1 にしておくのは、最初の slot 更新（slot B に世代 2）の途中で marker が壊れても、ROM が世代を比べて新しい slot B を選べるようにするためである（世代 0 のままだと世代を比べず slot A に戻る）。
@@ -233,7 +233,7 @@ SDFS3>
 （`END=` は resident の末尾の番地で、版によって変わる。ファイルの大きさと `SP=` はビルドとプロファイルで変わる。`sbcio_vdg` は `SP=DF7D`）
 
 - エクスプローラーでカードにファイルを足せるかは、まだ実機で確かめていない（#318）。足すときも `/BIN` の 3 本は消さない。フォーマットすると FAT の中身（`/BIN` を含む）が消え、SD Card Formatter などで区画から作り直すと system 領域（marker と slot A）も消えることがある。どちらもイメージを書き直せば戻る
-- `SDFS3SYS` だけを差し替えるときは、イメージを作り直して書き直す。#302（PR #328）のマージ後は、イメージに `tools/sdfs3_slot_update.py` をかけて非 active の slot を更新してから書く方法も使える
+- `SDFS3SYS` だけを差し替えるときは、イメージを作り直して書き直すか、イメージに `tools/sdfs3_slot_update.py`（#302）をかけて非 active の slot を更新してから書く
 - `BOOT3` が `?` とコードを出したときは [monitor_commands.md](monitor_commands.md) の「BOOT3 と DOS のエラーコード」を見る
 
 ## 実SDカードへの書き込み
